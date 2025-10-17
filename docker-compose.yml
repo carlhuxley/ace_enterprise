@@ -1,0 +1,115 @@
+version: '3.9'
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    container_name: ace_postgres
+    environment:
+      POSTGRES_DB: ace_enterprise
+      POSTGRES_USER: ace_user
+      POSTGRES_PASSWORD: ace_password
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ace_user -d ace_enterprise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ace_network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: ace_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ace_network
+
+  # ACE Enterprise API
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ace_api
+    environment:
+      - ENV=development
+      - DATABASE_URL=postgresql+asyncpg://ace_user:ace_password@postgres:5432/ace_enterprise
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+      - "9090:9090"  # Prometheus metrics
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - model_cache:/root/.cache  # Cache for sentence-transformers models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - ace_network
+
+  # Prometheus for metrics collection (optional, for production-like setup)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: ace_prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - ace_network
+    profiles:
+      - monitoring
+
+  # Grafana for visualization (optional, for production-like setup)
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: ace_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - ace_network
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  model_cache:
+
+networks:
+  ace_network:
+    driver: bridge
