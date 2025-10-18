@@ -79,3 +79,10 @@ temp/
 # OS
 .DS_Store
 Thumbs.db
+
+# ACE Runtime Data
+data/playbooks/*.json
+playbook_*.json
+
+# Examples cache
+examples/**/__pycache__/
