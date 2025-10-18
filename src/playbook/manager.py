@@ -2,8 +2,10 @@
 Playbook Manager - Core playbook operations.
 Based on PRD Section 4: Core Features
 """
+import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from src.config.settings import settings
@@ -31,14 +33,21 @@ class PlaybookManager:
     - Token budget management
     """
 
-    def __init__(self) -> None:
+    def __init__(self, storage_path: str | None = None) -> None:
         self.token_budget_per_section = settings.token_budget_per_section
         self.enable_redundancy_checking = settings.enable_redundancy_checking
         self.dedup_threshold = settings.deduplication_similarity_threshold
 
-        # In-memory playbook storage (will be replaced with database)
+        # In-memory playbook storage
         self._playbooks: dict[str, Playbook] = {}
         self._bullet_counter: int = 0
+
+        # File-based persistence
+        self.storage_path = Path(storage_path) if storage_path else Path("data/playbooks")
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+
+        # Load existing playbooks from disk
+        self._load_all_playbooks()
 
     def create_playbook(self, create_data: PlaybookCreate) -> Playbook:
         """
@@ -77,6 +86,9 @@ class PlaybookManager:
         self._playbooks[playbook_id] = playbook
         logger.info(f"Created playbook {playbook_id} for domain '{create_data.domain}'")
 
+        # Auto-save to disk
+        self._save_playbook(playbook_id)
+
         return playbook
 
     def get_playbook(self, playbook_id: str) -> Playbook | None:
@@ -95,6 +107,7 @@ class PlaybookManager:
         self,
         playbook_id: str,
         bullet_data: BulletCreate,
+        auto_save: bool = True,
     ) -> Bullet:
         """
         Add a new bullet to a playbook.
@@ -144,6 +157,10 @@ class PlaybookManager:
 
         logger.info(f"Added bullet {bullet_id} to playbook {playbook_id} section '{bullet_data.section}'")
 
+        # Auto-save to disk (unless disabled for batch operations)
+        if auto_save:
+            self._save_playbook(playbook_id)
+
         return bullet
 
     def apply_delta(
@@ -189,18 +206,22 @@ class PlaybookManager:
                 )
                 continue
 
-            # Add bullet
+            # Add bullet (disable auto-save for batch operation)
             bullet_create = BulletCreate(
                 content=delta.content,
                 section=delta.section,
                 tags=delta.tags,
             )
-            bullet = self.add_bullet(playbook_id, bullet_create)
+            bullet = self.add_bullet(playbook_id, bullet_create, auto_save=False)
             added_bullets.append(bullet)
 
         logger.info(
             f"Applied delta to playbook {playbook_id}: {len(added_bullets)}/{len(delta_bullets)} bullets added"
         )
+
+        # Auto-save to disk if any bullets were added
+        if added_bullets:
+            self._save_playbook(playbook_id)
 
         return added_bullets
 
@@ -245,6 +266,9 @@ class PlaybookManager:
         playbook.updated_at = datetime.utcnow()
 
         logger.debug(f"Updated feedback for bullet {bullet_id}: {feedback}")
+
+        # Auto-save to disk
+        self._save_playbook(playbook_id)
 
     def get_section_bullets(
         self,
@@ -327,6 +351,10 @@ class PlaybookManager:
                     playbook.updated_at = datetime.utcnow()
                     self._increment_version(playbook)
                     logger.info(f"Removed bullet {bullet_id} from playbook {playbook_id}")
+
+                    # Auto-save to disk
+                    self._save_playbook(playbook_id)
+
                     return True
 
         return False
@@ -424,3 +452,170 @@ class PlaybookManager:
             }
 
         return stats
+
+    # ============================================================================
+    # Persistence Methods
+    # ============================================================================
+
+    def _save_playbook(self, playbook_id: str) -> None:
+        """
+        Save a playbook to disk as JSON.
+
+        Args:
+            playbook_id: Playbook ID to save
+        """
+        playbook = self.get_playbook(playbook_id)
+        if not playbook:
+            logger.warning(f"Cannot save playbook {playbook_id}: not found")
+            return
+
+        file_path = self.storage_path / f"{playbook_id}.json"
+
+        # Convert playbook to dict
+        data = {
+            "playbook_id": playbook.playbook_id,
+            "version": playbook.version,
+            "metadata": {
+                "domain": playbook.metadata.domain,
+                "base_model": playbook.metadata.base_model,
+                "total_tokens": playbook.metadata.total_tokens,
+                "total_bullets": playbook.metadata.total_bullets,
+            },
+            "sections": {},
+            "created_at": playbook.created_at.isoformat(),
+            "updated_at": playbook.updated_at.isoformat(),
+        }
+
+        # Convert bullets to dicts
+        for section_name, bullets in playbook.sections.items():
+            data["sections"][section_name] = [
+                {
+                    "id": b.id,
+                    "content": b.content,
+                    "section": b.section,
+                    "tags": b.tags,
+                    "helpful_count": b.helpful_count,
+                    "harmful_count": b.harmful_count,
+                    "created_at": b.created_at.isoformat(),
+                    "last_used": b.last_used.isoformat() if b.last_used else None,
+                    "embedding": b.embedding,
+                }
+                for b in bullets
+            ]
+
+        # Write to file
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        logger.debug(f"Saved playbook {playbook_id} to {file_path}")
+
+    def _load_playbook(self, file_path: Path) -> Playbook | None:
+        """
+        Load a playbook from disk.
+
+        Args:
+            file_path: Path to JSON file
+
+        Returns:
+            Loaded playbook or None if loading failed
+        """
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+
+            # Recreate metadata
+            metadata = PlaybookMetadata(
+                domain=data["metadata"]["domain"],
+                base_model=data["metadata"]["base_model"],
+                total_tokens=data["metadata"]["total_tokens"],
+                total_bullets=data["metadata"]["total_bullets"],
+            )
+
+            # Recreate bullets
+            sections = {}
+            for section_name, bullets_data in data["sections"].items():
+                bullets = []
+                for b_data in bullets_data:
+                    bullet = Bullet(
+                        id=b_data["id"],
+                        content=b_data["content"],
+                        section=b_data["section"],
+                        tags=b_data["tags"],
+                        helpful_count=b_data["helpful_count"],
+                        harmful_count=b_data["harmful_count"],
+                        created_at=datetime.fromisoformat(b_data["created_at"]),
+                        last_used=datetime.fromisoformat(b_data["last_used"]) if b_data["last_used"] else None,
+                        embedding=b_data.get("embedding"),
+                    )
+                    bullets.append(bullet)
+
+                    # Update bullet counter
+                    if bullet.id.startswith("ctx-"):
+                        try:
+                            num = int(bullet.id.split("-")[1])
+                            self._bullet_counter = max(self._bullet_counter, num)
+                        except (IndexError, ValueError):
+                            pass
+
+                sections[section_name] = bullets
+
+            # Recreate playbook
+            playbook = Playbook(
+                playbook_id=data["playbook_id"],
+                version=data["version"],
+                metadata=metadata,
+                sections=sections,
+                created_at=datetime.fromisoformat(data["created_at"]),
+                updated_at=datetime.fromisoformat(data["updated_at"]),
+            )
+
+            logger.debug(f"Loaded playbook {playbook.playbook_id} from {file_path}")
+            return playbook
+
+        except Exception as e:
+            logger.error(f"Failed to load playbook from {file_path}: {e}")
+            return None
+
+    def _load_all_playbooks(self) -> None:
+        """Load all playbooks from storage directory."""
+        if not self.storage_path.exists():
+            logger.debug(f"Storage path {self.storage_path} does not exist, skipping load")
+            return
+
+        json_files = list(self.storage_path.glob("pb_*.json"))
+        logger.info(f"Loading {len(json_files)} playbook(s) from {self.storage_path}")
+
+        for file_path in json_files:
+            playbook = self._load_playbook(file_path)
+            if playbook:
+                self._playbooks[playbook.playbook_id] = playbook
+                logger.info(f"Loaded playbook {playbook.playbook_id} ({playbook.metadata.total_bullets} bullets)")
+
+    def save_all_playbooks(self) -> None:
+        """Save all playbooks to disk."""
+        for playbook_id in self._playbooks:
+            self._save_playbook(playbook_id)
+        logger.info(f"Saved {len(self._playbooks)} playbook(s)")
+
+    def delete_playbook(self, playbook_id: str) -> bool:
+        """
+        Delete a playbook from memory and disk.
+
+        Args:
+            playbook_id: Playbook ID to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        # Remove from memory
+        if playbook_id in self._playbooks:
+            del self._playbooks[playbook_id]
+
+            # Remove file
+            file_path = self.storage_path / f"{playbook_id}.json"
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Deleted playbook {playbook_id}")
+                return True
+
+        return False

@@ -39,7 +39,7 @@ class LLMClient:
         """
         self.provider = provider or settings.default_llm_provider
         self.model = self._get_default_model(model)
-        self.timeout = 60.0  # seconds
+        self.timeout = 300.0  # seconds (5 minutes for large local models)
 
         logger.info(f"Initialized LLM client: {self.provider}/{self.model}")
 
