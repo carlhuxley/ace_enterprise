@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     retrieval_similarity_threshold: float = 0.7
     deduplication_similarity_threshold: float = 0.85
 
+    # Cross-Model Learning
+    retrieval_mode: Literal["model_specific", "cross_model_hybrid"] = "model_specific"
+    cross_model_weight: float = 0.5  # Weight for bullets from other models (0.0 to 1.0)
+
     # ACE Core Configuration - Reflection
     max_refinement_rounds: int = 3
     enable_iterative_reflection: bool = True

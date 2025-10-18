@@ -75,20 +75,50 @@ class Generator:
 
         logger.info(f"Executing task {task.id} with playbook {playbook_id}")
 
-        # Retrieve relevant bullets
-        all_bullets = self.playbook_manager.get_all_bullets(playbook_id)
-        retrieved_bullets = self.retriever.retrieve(
-            query=task.query,
-            bullets=all_bullets,
-            query_embedding=query_embedding,
-        )
+        # Retrieve relevant bullets based on retrieval mode
+        if settings.retrieval_mode == "cross_model_hybrid":
+            # Cross-model retrieval: use primary + domain playbooks
+            primary_bullets = self.playbook_manager.get_all_bullets(playbook_id)
+            secondary_bullets = self.playbook_manager.get_cross_model_bullets(
+                primary_playbook_id=playbook_id,
+                include_primary=False,
+            )
 
-        bullets_used = [bullet.id for bullet, _ in retrieved_bullets]
+            retrieved_with_source = self.retriever.retrieve_cross_model(
+                query=task.query,
+                primary_bullets=primary_bullets,
+                secondary_bullets_by_playbook=secondary_bullets,
+                query_embedding=query_embedding,
+                secondary_weight=settings.cross_model_weight,
+            )
 
-        logger.debug(
-            f"Retrieved {len(retrieved_bullets)} bullets for task {task.id}: "
-            f"{bullets_used}"
-        )
+            # Extract bullets and track sources
+            retrieved_bullets = [(bullet, score) for bullet, score, _ in retrieved_with_source]
+            bullets_used = [bullet.id for bullet, _ in retrieved_bullets]
+
+            # Log source distribution
+            primary_count = sum(1 for _, _, src in retrieved_with_source if src == "primary")
+            secondary_count = len(retrieved_with_source) - primary_count
+            logger.debug(
+                f"Cross-model retrieval for task {task.id}: "
+                f"{len(retrieved_bullets)} bullets ({primary_count} primary, {secondary_count} from other models)"
+            )
+
+        else:
+            # Model-specific retrieval: use only this playbook
+            all_bullets = self.playbook_manager.get_all_bullets(playbook_id)
+            retrieved_bullets = self.retriever.retrieve(
+                query=task.query,
+                bullets=all_bullets,
+                query_embedding=query_embedding,
+            )
+
+            bullets_used = [bullet.id for bullet, _ in retrieved_bullets]
+
+            logger.debug(
+                f"Model-specific retrieval for task {task.id}: "
+                f"{len(retrieved_bullets)} bullets from {playbook_id}"
+            )
 
         # Build prompt with playbook context
         prompt = self._build_prompt(

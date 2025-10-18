@@ -320,6 +320,60 @@ class PlaybookManager:
 
         return all_bullets
 
+    def get_playbooks_by_domain(self, domain: str) -> list[Playbook]:
+        """
+        Get all playbooks for a specific domain.
+
+        Args:
+            domain: Domain name
+
+        Returns:
+            List of playbooks matching the domain
+        """
+        return [
+            playbook
+            for playbook in self._playbooks.values()
+            if playbook.metadata.domain == domain
+        ]
+
+    def get_cross_model_bullets(
+        self,
+        primary_playbook_id: str,
+        include_primary: bool = True,
+    ) -> dict[str, list[Bullet]]:
+        """
+        Get bullets from all playbooks in the same domain as the primary playbook.
+
+        Args:
+            primary_playbook_id: Primary playbook ID
+            include_primary: Whether to include bullets from primary playbook
+
+        Returns:
+            Dictionary mapping playbook_id to list of bullets
+        """
+        primary_playbook = self.get_playbook(primary_playbook_id)
+        if not primary_playbook:
+            raise ValueError(f"Playbook {primary_playbook_id} not found")
+
+        domain = primary_playbook.metadata.domain
+        domain_playbooks = self.get_playbooks_by_domain(domain)
+
+        result = {}
+        for playbook in domain_playbooks:
+            # Skip primary playbook if requested
+            if not include_primary and playbook.playbook_id == primary_playbook_id:
+                continue
+
+            # Get all bullets from this playbook
+            bullets = []
+            for section_bullets in playbook.sections.values():
+                bullets.extend(section_bullets)
+
+            if bullets:
+                result[playbook.playbook_id] = bullets
+
+        return result
+
     def remove_bullet(
         self,
         playbook_id: str,

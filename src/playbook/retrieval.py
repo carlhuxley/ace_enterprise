@@ -115,6 +115,73 @@ class BulletRetriever:
 
         return result
 
+    def retrieve_cross_model(
+        self,
+        query: str,
+        primary_bullets: list[Bullet],
+        secondary_bullets_by_playbook: dict[str, list[Bullet]],
+        query_embedding: Optional[list[float]] = None,
+        secondary_weight: float = 0.5,
+    ) -> list[tuple[Bullet, float, str]]:
+        """
+        Retrieve bullets with cross-model learning support.
+
+        Retrieves from primary playbook + other playbooks in same domain,
+        with weighted scoring for secondary sources.
+
+        Args:
+            query: Query text
+            primary_bullets: Bullets from the primary (model-specific) playbook
+            secondary_bullets_by_playbook: Dict mapping playbook_id to bullets from other models
+            query_embedding: Pre-computed query embedding (optional)
+            secondary_weight: Weight multiplier for secondary playbook bullets (0-1)
+
+        Returns:
+            List of (bullet, score, source_playbook_id) tuples, sorted by relevance
+        """
+        scored_bullets = []
+
+        # Score primary bullets (full weight)
+        primary_source = "primary"
+        for bullet in primary_bullets:
+            score = self._score_bullet(
+                query=query,
+                bullet=bullet,
+                query_embedding=query_embedding,
+            )
+            if score >= self.similarity_threshold:
+                scored_bullets.append((bullet, score, primary_source))
+
+        # Score secondary bullets (weighted)
+        for playbook_id, bullets in secondary_bullets_by_playbook.items():
+            for bullet in bullets:
+                score = self._score_bullet(
+                    query=query,
+                    bullet=bullet,
+                    query_embedding=query_embedding,
+                )
+
+                # Check threshold BEFORE weighting for secondary bullets
+                # This ensures good matches from other models aren't excluded just because of lower weight
+                if score >= self.similarity_threshold:
+                    # Apply secondary weight for ranking
+                    weighted_score = score * secondary_weight
+                    scored_bullets.append((bullet, weighted_score, playbook_id))
+
+        # Sort by score (descending)
+        scored_bullets.sort(key=lambda x: x[1], reverse=True)
+
+        # Return top-k
+        result = scored_bullets[:self.top_k]
+
+        logger.debug(
+            f"Cross-model retrieval: {len(result)} bullets "
+            f"({sum(1 for _, _, src in result if src == primary_source)} primary, "
+            f"{sum(1 for _, _, src in result if src != primary_source)} secondary)"
+        )
+
+        return result
+
     def retrieve_by_ids(
         self,
         bullet_ids: list[str],
