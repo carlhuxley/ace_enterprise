@@ -359,6 +359,38 @@ def demo_ace_learning_loop() -> None:
     print("  applied that knowledge to solve a similar problem on the")
     print("  second attempt. This is the power of ACE!")
 
+    # Export playbook for inspection
+    import json
+    output_file = f"playbook_{playbook.playbook_id}.json"
+
+    data = {
+        "playbook_id": playbook.playbook_id,
+        "version": playbook.version,
+        "metadata": {
+            "domain": playbook.metadata.domain,
+            "base_model": playbook.metadata.base_model,
+            "total_bullets": playbook.metadata.total_bullets,
+        },
+        "sections": {},
+    }
+
+    for section_name, bullets in playbook.sections.items():
+        data["sections"][section_name] = [
+            {
+                "id": b.id,
+                "content": b.content,
+                "tags": b.tags,
+                "helpful_count": b.helpful_count,
+                "harmful_count": b.harmful_count,
+            }
+            for b in bullets
+        ]
+
+    with open(output_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    print(f"\n📄 Playbook saved to: {output_file}")
+
 
 if __name__ == "__main__":
     try:
