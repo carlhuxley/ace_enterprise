@@ -59,11 +59,11 @@ def main():
     print_subsection("Configuration")
 
     # Use 3 different local models for diversity
-    # Note: In production you might use 5 models, but 3 is enough for MVP
+    # Note: Using smallest models (0.5b) for compatibility with limited GPU
     models = [
-        ("ollama", "qwen2.5-coder:1.5b"),  # Fast, lightweight code model
-        ("ollama", "deepseek-coder:6.7b"),  # Medium, code-focused
-        ("ollama", "qwen3:1.7b"),           # Fast general model (adds diversity)
+        ("ollama", "qwen2.5-coder:0.5b"),  # Smallest code model
+        ("ollama", "qwen2.5:0.5b"),        # Smallest general model
+        ("ollama", "qwen2.5-coder:0.5b"),  # Duplicate for ensemble diversity test
     ]
 
     print(f"Models in ensemble:")
@@ -117,12 +117,13 @@ def main():
     print(f"\nTask: {task1.query}")
     print(f"Result: {feedback1.result}")
     print("\nExecuting ensemble learning cycle...")
-    print("(This runs Generator → Reflector → Curator for each model in parallel)")
+    print("(This runs Generator → Reflector → Curator for each model sequentially)")
+    print("Note: Sequential execution avoids Ollama timeout issues")
 
     result1 = ensemble.learn_from_task(
         task=task1,
         environment_feedback=feedback1,
-        parallel=True,
+        parallel=False,  # Sequential execution to avoid Ollama timeouts
     )
 
     # Display results
@@ -172,10 +173,10 @@ def main():
 
     # Count bullets by section
     section_counts = {
-        "strategies_and_hard_rules": len(playbook.sections.strategies_and_hard_rules),
-        "code_snippets": len(playbook.sections.code_snippets),
-        "troubleshooting_tips": len(playbook.sections.troubleshooting),
-        "domain_knowledge": len(playbook.sections.domain_knowledge),
+        "strategies_and_hard_rules": len(playbook.sections.get("strategies_and_hard_rules", [])),
+        "code_snippets": len(playbook.sections.get("code_snippets", [])),
+        "troubleshooting_tips": len(playbook.sections.get("troubleshooting", [])),
+        "domain_knowledge": len(playbook.sections.get("domain_knowledge", [])),
     }
 
     for section, count in section_counts.items():
@@ -205,7 +206,7 @@ def main():
     result2 = ensemble.learn_from_task(
         task=task2,
         environment_feedback=feedback2,
-        parallel=True,
+        parallel=False,  # Sequential execution
     )
 
     print(f"\n{result2.summary()}")
@@ -224,10 +225,10 @@ def main():
 
     # Count bullets by section
     final_section_counts = {
-        "Strategies": len(playbook.sections.strategies_and_hard_rules),
-        "Code snippets": len(playbook.sections.code_snippets),
-        "Troubleshooting": len(playbook.sections.troubleshooting),
-        "Domain knowledge": len(playbook.sections.domain_knowledge),
+        "Strategies": len(playbook.sections.get("strategies_and_hard_rules", [])),
+        "Code snippets": len(playbook.sections.get("code_snippets", [])),
+        "Troubleshooting": len(playbook.sections.get("troubleshooting", [])),
+        "Domain knowledge": len(playbook.sections.get("domain_knowledge", [])),
     }
 
     print(f"\nKnowledge breakdown:")
@@ -236,10 +237,10 @@ def main():
 
     print_section("KEY INSIGHTS")
 
-    print("\n1. SPEED: Multiple models execute in parallel")
+    print("\n1. EXECUTION: Models run sequentially (one at a time)")
     print(f"   Task 1 duration: {result1.duration_seconds:.1f}s")
     print(f"   Task 2 duration: {result2.duration_seconds:.1f}s")
-    print(f"   (Would be 3x slower with sequential execution)")
+    print(f"   Note: Parallel execution possible with multiple Ollama instances")
 
     print("\n2. QUALITY: Consensus filters bad proposals")
     total_proposed = result1.vote_results.total_bullets + result2.vote_results.total_bullets

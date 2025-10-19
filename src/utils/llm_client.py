@@ -39,7 +39,7 @@ class LLMClient:
         """
         self.provider = provider or settings.default_llm_provider
         self.model = self._get_default_model(model)
-        self.timeout = 300.0  # seconds (5 minutes for large local models)
+        self.timeout = 600.0  # seconds (10 minutes for large local models)
 
         logger.info(f"Initialized LLM client: {self.provider}/{self.model}")
 
@@ -112,7 +112,9 @@ class LLMClient:
             payload["system"] = system_prompt
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            # Use explicit timeout with connect and read timeouts
+            timeout = httpx.Timeout(timeout=self.timeout, connect=60.0)
+            with httpx.Client(timeout=timeout) as client:
                 response = client.post(url, json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -122,6 +124,9 @@ class LLMClient:
                 "tokens_used": data.get("eval_count", 0) + data.get("prompt_eval_count", 0),
             }
 
+        except httpx.TimeoutException as e:
+            logger.error(f"Ollama API timeout after {self.timeout}s: {e}")
+            raise RuntimeError(f"Ollama timeout - model may be too slow on this hardware: {e}")
         except httpx.HTTPError as e:
             logger.error(f"Ollama API error: {e}")
             raise RuntimeError(f"Failed to generate with Ollama: {e}")
