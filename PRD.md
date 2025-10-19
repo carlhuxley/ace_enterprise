@@ -1061,6 +1061,7 @@ Response:
 
 ### 15.2 Product Decisions Needed
 
+
 1. **Pricing Model:** How to charge customers?
    - Per task? Per token? Subscription?
    - Free tier strategy?
