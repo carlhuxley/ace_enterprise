@@ -292,7 +292,7 @@ class EnsembleLearner:
         # Convert curator bullets to ConsensusBullets
         consensus_bullets = []
 
-        for bullet in curator_output.new_bullets:
+        for bullet in curator_output.delta_bullets:
             # Map section names to BulletSection enum
             section_map = {
                 "strategies_and_hard_rules": BulletSection.STRATEGIES,
