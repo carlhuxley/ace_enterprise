@@ -17,6 +17,7 @@ from src.storage.schemas import (
     PlaybookCreate,
     PlaybookMetadata,
 )
+from src.utils.embedding import get_embedding_service
 from src.utils.id_generator import generate_bullet_id, generate_playbook_id
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,15 @@ class PlaybookManager:
         self._bullet_counter += 1
         bullet_id = generate_bullet_id(self._bullet_counter)
 
+        # Generate embedding for bullet content
+        embedding = None
+        try:
+            embedding_service = get_embedding_service()
+            embedding = embedding_service.embed_text(bullet_data.content)
+            logger.debug(f"Generated embedding for bullet {bullet_id}")
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding for bullet {bullet_id}: {e}")
+
         # Create bullet
         now = datetime.utcnow()
         bullet = Bullet(
@@ -144,7 +154,7 @@ class PlaybookManager:
             harmful_count=0,
             created_at=now,
             last_used=None,
-            embedding=None,  # Will be generated later
+            embedding=embedding,
         )
 
         # Add to playbook
