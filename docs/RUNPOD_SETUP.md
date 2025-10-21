@@ -27,15 +27,46 @@ This guide will help you deploy 3 vLLM models on RunPod for ACE Ensemble Learnin
 
 Once pod starts, open **Terminal** and run:
 
-```bash
-# Update pip
-pip install --upgrade pip
+**IMPORTANT:** RunPod's container disk (overlay fs) is typically only 5-10GB. To avoid "No space left on device" errors, we'll install vLLM in `/workspace` which has much more space.
 
-# Install vLLM
-pip install vllm
+```bash
+# Navigate to /workspace (has plenty of space)
+cd /workspace
+
+# Set environment variables to use /workspace for cache/temp
+export TMPDIR=/workspace/tmp
+export PIP_CACHE_DIR=/workspace/pip_cache
+export HF_HOME=/workspace/huggingface
+
+# Create directories
+mkdir -p $TMPDIR $PIP_CACHE_DIR $HF_HOME
+
+# Create Python virtual environment in /workspace
+python3 -m venv vllm_env
+
+# Activate the virtual environment
+source /workspace/vllm_env/bin/activate
+
+# Install vLLM (this may take 5-10 minutes)
+# Option 1: Using pip (traditional, slower)
+pip install --upgrade pip
+pip install --no-cache-dir vllm
+
+# Option 2: Using uv (much faster - 10-100x speedup)
+# First install uv if not already installed:
+# curl -LsSf https://astral.sh/uv/install.sh | sh
+# source $HOME/.cargo/env
+# uv pip install vllm
 
 # Verify installation
 vllm --version
+```
+
+**Note:** You'll see warnings about `TRANSFORMERS_CACHE` and `UnspecifiedPlatform` - these are normal and harmless.
+
+**Important:** Every time you start a new terminal session, activate the venv:
+```bash
+source /workspace/vllm_env/bin/activate
 ```
 
 ### 3. Upload Scripts
@@ -57,11 +88,11 @@ cd ace_enterprise
 ### 4. Start Models
 
 ```bash
-# Navigate to workspace
-cd /workspace
+# IMPORTANT: Activate the venv first
+source /workspace/vllm_env/bin/activate
 
-# If using git clone:
-cd ace_enterprise/scripts
+# Navigate to scripts directory
+cd /workspace/ace_enterprise/scripts
 
 # Make scripts executable (if not already)
 chmod +x start_vllm_multi.sh auto_shutdown.sh
@@ -109,16 +140,38 @@ Press `Ctrl+C` to exit log viewing (monitor keeps running).
 
 ### 6. Test Models
 
-Get your pod's **Public IP** from RunPod dashboard, then test:
+**Important:** RunPod uses **port mapping**. Your pod exposes different external ports than the internal ports.
 
+Check your pod's port mapping in the RunPod dashboard (typically shows something like):
+- Internal 8001 → External 33186
+- Internal 8002 → External 33187
+- Internal 8003 → External 33188
+
+Get your pod's **Public IP** and **external ports** from RunPod dashboard.
+
+**Test locally on RunPod first:**
 ```bash
-# Replace <POD_IP> with your actual pod IP
-curl http://<POD_IP>:8001/health
-curl http://<POD_IP>:8002/health
-curl http://<POD_IP>:8003/health
+curl http://localhost:8001/health
+curl http://localhost:8002/health
+curl http://localhost:8003/health
 ```
 
-All should return: `{"status":"ok"}`
+All should return: `{"status":"ok"}` or similar success message.
+
+**Test from your local machine:**
+```bash
+# Replace <POD_IP> and <EXTERNAL_PORT> with your actual values
+curl http://<POD_IP>:<EXTERNAL_PORT_8001>/health
+curl http://<POD_IP>:<EXTERNAL_PORT_8002>/health
+curl http://<POD_IP>:<EXTERNAL_PORT_8003>/health
+```
+
+Example (with actual port mapping):
+```bash
+curl http://103.196.86.55:33186/health
+curl http://103.196.86.55:33187/health
+curl http://103.196.86.55:33188/health
+```
 
 ### 7. Test Inference
 
@@ -139,19 +192,27 @@ You should get a JSON response with generated code.
 
 ### Update Local Configuration
 
-In your local ACE Enterprise project, update the vLLM endpoints:
+In your local ACE Enterprise project, update the vLLM endpoints with **external ports**:
 
 ```python
-# In demo_ensemble_learning.py or config
-RUNPOD_IP = "123.45.67.89"  # Replace with your pod IP
+# In demo_ensemble_learning.py
+# Replace with your actual pod IP and external port mappings
+RUNPOD_IP = "103.196.86.55"
 
-# Update models to use vLLM via HTTP
+# Port mapping (internal:external) - check your RunPod dashboard
+# 8001 -> 33186
+# 8002 -> 33187
+# 8003 -> 33188
+
+# Update models to use vLLM via HTTP (use EXTERNAL ports)
 models = [
-    ("vllm", f"http://{RUNPOD_IP}:8001", "qwen2.5-coder:1.5b"),
-    ("vllm", f"http://{RUNPOD_IP}:8002", "qwen2.5:1.5b"),
-    ("vllm", f"http://{RUNPOD_IP}:8003", "qwen2.5-coder:0.5b"),
+    ("vllm", "Qwen/Qwen2.5-Coder-1.5B-Instruct", f"http://{RUNPOD_IP}:33186"),
+    ("vllm", "Qwen/Qwen2.5-1.5B-Instruct", f"http://{RUNPOD_IP}:33187"),
+    ("vllm", "Qwen/Qwen2.5-Coder-0.5B-Instruct", f"http://{RUNPOD_IP}:33188"),
 ]
 ```
+
+The configuration is already set up in `demo_ensemble_learning.py` - just update the IP and port numbers to match your pod.
 
 ### Update LLM Client
 
@@ -257,15 +318,49 @@ cd /workspace/ace_enterprise/scripts
 
 ## Troubleshooting
 
+### "No space left on device" Error
+This happens because RunPod's container disk (overlay fs) is only 5-10GB.
+
+**Solution:** Install vLLM in `/workspace` using a virtual environment (see Step 2 above).
+
+```bash
+# Clean up and reinstall
+cd /workspace
+rm -rf vllm_env pip_cache tmp
+
+# Set environment variables
+export TMPDIR=/workspace/tmp
+export PIP_CACHE_DIR=/workspace/pip_cache
+export HF_HOME=/workspace/huggingface
+mkdir -p $TMPDIR $PIP_CACHE_DIR $HF_HOME
+
+# Create venv and install
+python3 -m venv vllm_env
+source /workspace/vllm_env/bin/activate
+pip install --no-cache-dir vllm
+```
+
+### "vllm: command not found"
+You need to activate the virtual environment first:
+
+```bash
+source /workspace/vllm_env/bin/activate
+vllm --version  # Should work now
+```
+
 ### Models Won't Start
 ```bash
-# Check logs
+# Check if vLLM processes are running
+ps aux | grep vllm | grep -v grep
+
+# Check logs for errors
 tail -f /workspace/logs/*.log
 
 # Common issues:
-# 1. Not enough VRAM: Reduce GPU_MEMORY_PER_MODEL in script
-# 2. Port already in use: pkill -f vllm, then restart
-# 3. Model not downloaded: vLLM will auto-download (takes time)
+# 1. venv not activated: source /workspace/vllm_env/bin/activate
+# 2. Not enough VRAM: Reduce GPU_MEMORY_PER_MODEL in script
+# 3. Port already in use: pkill -f vllm, then restart
+# 4. Model not downloaded: vLLM will auto-download (takes time)
 ```
 
 ### Port Already in Use
@@ -278,10 +373,32 @@ pkill -f vllm
 ```
 
 ### Can't Connect from Local Machine
-1. Check pod is running (RunPod dashboard)
-2. Verify ports are exposed (8001, 8002, 8003)
-3. Check firewall rules
-4. Try pod's internal IP first: `curl http://localhost:8001/health`
+1. **Check pod is running** (RunPod dashboard - should be green)
+2. **Verify ports are exposed** (8001, 8002, 8003 in pod settings)
+3. **Use external ports**, not internal ones:
+   - Check RunPod dashboard for port mapping (e.g., 8001→33186)
+   - Update your local config with external ports
+4. **Test locally first on RunPod**: `curl http://localhost:8001/health`
+5. **Check if vLLM is running**: `ps aux | grep vllm`
+6. **Check logs**: `tail -f /workspace/logs/*.log`
+
+### Getting 502 Bad Gateway
+This means the port is exposed but vLLM isn't running:
+
+```bash
+# Activate venv
+source /workspace/vllm_env/bin/activate
+
+# Check if vLLM is running
+ps aux | grep vllm | grep -v grep
+
+# If not running, start models
+cd /workspace/ace_enterprise/scripts
+./start_vllm_multi.sh
+
+# Wait 2-3 minutes, then test
+curl http://localhost:8001/health
+```
 
 ### Models Running Slow
 - Check GPU usage: `nvidia-smi`

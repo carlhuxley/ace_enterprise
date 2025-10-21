@@ -15,6 +15,7 @@ Expected Benefits:
 - Higher quality (only consensus bullets survive)
 - Still FREE (all local models via Ollama)
 """
+import logging
 import sys
 
 sys.path.insert(0, "/home/ch_dev/ace_enterprise")
@@ -28,6 +29,13 @@ from src.storage.schemas import (
     EnvironmentFeedback,
     PlaybookCreate,
     TaskInput,
+)
+
+# Configure logging for verbose output
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
 )
 
 
@@ -48,27 +56,37 @@ def print_subsection(title: str):
 def main():
     print_section("ENSEMBLE LEARNING SYSTEM DEMO")
 
-    print("\nConcept: Multiple local LLMs learn together through consensus")
+    print("\nConcept: Multiple LLMs learn together through consensus")
     print("Benefits:")
-    print("  - Faster learning (parallel execution)")
+    print("  - Faster learning (parallel execution on GPU)")
     print("  - Better quality (voting filters bad ideas)")
     print("  - Error cancellation (diversity catches mistakes)")
-    print("  - Still FREE (Ollama local models)")
+    print("  - Cloud GPU acceleration (RunPod vLLM)")
 
     # Configuration
     print_subsection("Configuration")
 
-    # Use 3 different local models for diversity
-    # Note: Using smallest models (0.5b) for compatibility with limited GPU
+    # RunPod vLLM Configuration
+    # RunPod uses port mapping: internal ports are mapped to external ports
+    RUNPOD_IP = "103.196.86.55"
+
+    # Port mapping (internal:external):
+    # 8001 -> 33186
+    # 8002 -> 33187
+    # 8003 -> 33188
+
+    # Use 3 different vLLM models via RunPod for diversity
+    # Format: (provider, model_name, base_url)
     models = [
-        ("ollama", "qwen2.5-coder:0.5b"),  # Smallest code model
-        ("ollama", "qwen2.5:0.5b"),        # Smallest general model
-        ("ollama", "qwen2.5-coder:0.5b"),  # Duplicate for ensemble diversity test
+        ("vllm", "Qwen/Qwen2.5-Coder-1.5B-Instruct", f"http://{RUNPOD_IP}:33186"),
+        ("vllm", "Qwen/Qwen2.5-1.5B-Instruct", f"http://{RUNPOD_IP}:33187"),
+        ("vllm", "Qwen/Qwen2.5-Coder-0.5B-Instruct", f"http://{RUNPOD_IP}:33188"),
     ]
 
-    print(f"Models in ensemble:")
-    for i, (provider, model) in enumerate(models, 1):
+    print(f"Models in ensemble (RunPod vLLM):")
+    for i, (provider, model, url) in enumerate(models, 1):
         print(f"  {i}. {provider}/{model}")
+        print(f"      Endpoint: {url}")
 
     # Create or get playbook
     pm = PlaybookManager()
@@ -117,13 +135,13 @@ def main():
     print(f"\nTask: {task1.query}")
     print(f"Result: {feedback1.result}")
     print("\nExecuting ensemble learning cycle...")
-    print("(This runs Generator → Reflector → Curator for each model sequentially)")
-    print("Note: Sequential execution avoids Ollama timeout issues")
+    print("(This runs Generator → Reflector → Curator for each model)")
+    print("Note: vLLM on RunPod allows parallel execution with good performance")
 
     result1 = ensemble.learn_from_task(
         task=task1,
         environment_feedback=feedback1,
-        parallel=False,  # Sequential execution to avoid Ollama timeouts
+        parallel=True,  # Parallel execution with vLLM on GPU
     )
 
     # Display results
@@ -206,7 +224,7 @@ def main():
     result2 = ensemble.learn_from_task(
         task=task2,
         environment_feedback=feedback2,
-        parallel=False,  # Sequential execution
+        parallel=True,  # Parallel execution with vLLM
     )
 
     print(f"\n{result2.summary()}")
@@ -237,10 +255,10 @@ def main():
 
     print_section("KEY INSIGHTS")
 
-    print("\n1. EXECUTION: Models run sequentially (one at a time)")
+    print("\n1. EXECUTION: Models run in parallel on GPU")
     print(f"   Task 1 duration: {result1.duration_seconds:.1f}s")
     print(f"   Task 2 duration: {result2.duration_seconds:.1f}s")
-    print(f"   Note: Parallel execution possible with multiple Ollama instances")
+    print(f"   Note: vLLM on RunPod GPU provides excellent parallel performance")
 
     print("\n2. QUALITY: Consensus filters bad proposals")
     total_proposed = result1.vote_results.total_bullets + result2.vote_results.total_bullets
@@ -259,7 +277,7 @@ def main():
     print(f"   Task 2 consensus strength: {result2.consensus_strength:.2f}")
     print(f"   (1.0 = perfect agreement, 0.0 = no agreement)")
 
-    print("\n5. COST: Still FREE! (All models are local via Ollama)")
+    print("\n5. COST: RunPod GPU (~$0.29/hour for RTX 4090)")
 
     print_section("NEXT STEPS")
 

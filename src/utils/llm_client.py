@@ -29,6 +29,7 @@ class LLMClient:
         self,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        base_url: Optional[str] = None,
     ) -> None:
         """
         Initialize LLM client.
@@ -36,9 +37,11 @@ class LLMClient:
         Args:
             provider: LLM provider (default from settings)
             model: Model name (default from settings)
+            base_url: Custom base URL for vLLM endpoints (optional)
         """
         self.provider = provider or settings.default_llm_provider
         self.model = self._get_default_model(model)
+        self.base_url = base_url  # For vLLM custom endpoints
         self.timeout = 600.0  # seconds (10 minutes for large local models)
 
         logger.info(f"Initialized LLM client: {self.provider}/{self.model}")
@@ -70,6 +73,8 @@ class LLMClient:
 
         if self.provider == "ollama":
             result = self._generate_ollama(prompt, system_prompt, temperature)
+        elif self.provider == "vllm":
+            result = self._generate_vllm(prompt, system_prompt, max_tokens, temperature)
         elif self.provider == "openai":
             result = self._generate_openai(prompt, system_prompt, max_tokens, temperature)
         elif self.provider == "anthropic":
@@ -89,6 +94,50 @@ class LLMClient:
         )
 
         return result
+
+    def _generate_vllm(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        max_tokens: Optional[int],
+        temperature: float,
+    ) -> dict[str, Any]:
+        """Generate using vLLM API (OpenAI-compatible)."""
+        if not self.base_url:
+            raise ValueError("vLLM provider requires base_url to be specified")
+
+        url = f"{self.base_url}/v1/completions"
+
+        # Combine system prompt with user prompt if provided
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = f"{system_prompt}\n\n{prompt}"
+
+        payload = {
+            "model": self.model,
+            "prompt": full_prompt,
+            "max_tokens": max_tokens or 1024,
+            "temperature": temperature,
+        }
+
+        try:
+            timeout = httpx.Timeout(timeout=self.timeout, connect=60.0)
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+            return {
+                "content": data["choices"][0]["text"],
+                "tokens_used": data["usage"]["total_tokens"],
+            }
+
+        except httpx.TimeoutException as e:
+            logger.error(f"vLLM API timeout after {self.timeout}s: {e}")
+            raise RuntimeError(f"vLLM timeout: {e}")
+        except httpx.HTTPError as e:
+            logger.error(f"vLLM API error: {e}")
+            raise RuntimeError(f"Failed to generate with vLLM: {e}")
 
     def _generate_ollama(
         self,

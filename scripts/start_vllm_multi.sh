@@ -8,6 +8,22 @@ set -e
 
 echo "Starting ACE Ensemble Learning vLLM setup..."
 
+# Auto-activate venv if it exists
+if [ -f "/workspace/vllm_env/bin/activate" ]; then
+    echo "Activating vLLM virtual environment..."
+    source /workspace/vllm_env/bin/activate
+else
+    echo "WARNING: vLLM venv not found at /workspace/vllm_env/"
+    echo "Please install vLLM first - see RUNPOD_SETUP.md"
+fi
+
+# Verify vLLM is available
+if ! command -v vllm &> /dev/null; then
+    echo "ERROR: vLLM not found. Please install vLLM first."
+    echo "Run: source /workspace/vllm_env/bin/activate"
+    exit 1
+fi
+
 # Configuration
 export CUDA_VISIBLE_DEVICES=0
 GPU_MEMORY_PER_MODEL=0.30  # 30% each = 90% total for 3 models

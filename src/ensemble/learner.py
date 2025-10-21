@@ -51,7 +51,7 @@ class EnsembleLearner:
 
     def __init__(
         self,
-        models: list[tuple[str, str]],  # [(provider, model_name), ...]
+        models: list[tuple[str, str] | tuple[str, str, str]],  # [(provider, model_name[, base_url]), ...]
         playbook_id: str,
         voting_strategy: Optional[VotingStrategy] = None,
         similarity_threshold: float = 0.85,
@@ -60,7 +60,7 @@ class EnsembleLearner:
         Initialize ensemble learner.
 
         Args:
-            models: List of (provider, model_name) tuples
+            models: List of (provider, model_name) or (provider, model_name, base_url) tuples
             playbook_id: Shared playbook for all models
             voting_strategy: Voting strategy (default: majority)
             similarity_threshold: Threshold for clustering similar bullets
@@ -73,13 +73,14 @@ class EnsembleLearner:
 
         # Track model performance
         self.model_performance: dict[str, ModelPerformance] = {}
-        for provider, model in models:
+        for model_tuple in models:
+            provider, model = model_tuple[0], model_tuple[1]
             model_id = f"{provider}/{model}"
             self.model_performance[model_id] = ModelPerformance(model_id=model_id)
 
         logger.info(
             f"Initialized ensemble with {len(models)} models: "
-            f"{', '.join(f'{p}/{m}' for p, m in models)}"
+            f"{', '.join(f'{m[0]}/{m[1]}' for m in models)}"
         )
 
     def learn_from_task(
@@ -113,23 +114,29 @@ class EnsembleLearner:
         all_proposals = []
         for model_id, proposals in model_proposals.items():
             all_proposals.extend(proposals)
+            logger.info(f"  {model_id}: {len(proposals)} proposals")
 
-        logger.info(f"Collected {len(all_proposals)} total bullet proposals")
+        logger.info(f"📊 Collected {len(all_proposals)} total bullet proposals")
 
         # Step 3: Cluster similar bullets
+        logger.info("🔍 Clustering similar bullets...")
         consensus_bullets = self.consensus_builder.build_consensus(all_proposals)
 
         logger.info(
-            f"After deduplication: {len(consensus_bullets)} unique bullets"
+            f"✓ After deduplication: {len(consensus_bullets)} unique bullets"
         )
 
         # Step 4: Cross-voting
+        logger.info("🗳️  Conducting cross-voting...")
         self._conduct_cross_voting(consensus_bullets, model_proposals)
+        logger.info("✓ Cross-voting complete")
 
         # Step 5: Apply voting strategy to decide which bullets to keep
+        logger.info("⚖️  Applying voting strategy...")
         approved, rejected = self.voting_system.vote_on_bullets(
             consensus_bullets, self.model_performance
         )
+        logger.info(f"✓ Voting complete: {len(approved)} approved, {len(rejected)} rejected")
 
         # Step 6: Calculate metrics
         vote_results = self._calculate_vote_results(consensus_bullets)
@@ -145,7 +152,7 @@ class EnsembleLearner:
 
         result = EnsembleResult(
             task_description=task.query,
-            models_used=[f"{p}/{m}" for p, m in self.models],
+            models_used=[f"{m[0]}/{m[1]}" for m in self.models],
             voting_strategy=self.voting_system.strategy.name(),
             bullets=consensus_bullets,
             vote_results=vote_results,
@@ -197,12 +204,16 @@ class EnsembleLearner:
             max_workers=len(self.models)
         ) as executor:
             # Submit all tasks
-            future_to_model = {
-                executor.submit(
-                    self._execute_single_model, provider, model, task, environment_feedback
-                ): f"{provider}/{model}"
-                for provider, model in self.models
-            }
+            future_to_model = {}
+            for model_tuple in self.models:
+                provider, model = model_tuple[0], model_tuple[1]
+                base_url = model_tuple[2] if len(model_tuple) > 2 else None
+                model_id = f"{provider}/{model}"
+
+                future = executor.submit(
+                    self._execute_single_model, provider, model, task, environment_feedback, base_url
+                )
+                future_to_model[future] = model_id
 
             # Collect results
             for future in concurrent.futures.as_completed(future_to_model):
@@ -227,16 +238,19 @@ class EnsembleLearner:
         """Execute models sequentially (for debugging)."""
         proposals = {}
 
-        for provider, model in self.models:
+        for i, model_tuple in enumerate(self.models, 1):
+            provider, model = model_tuple[0], model_tuple[1]
+            base_url = model_tuple[2] if len(model_tuple) > 2 else None
             model_id = f"{provider}/{model}"
+            logger.info(f"[{i}/{len(self.models)}] Starting model: {model_id}")
             try:
                 model_proposals = self._execute_single_model(
-                    provider, model, task, environment_feedback
+                    provider, model, task, environment_feedback, base_url
                 )
                 proposals[model_id] = model_proposals
-                logger.debug(f"Model {model_id} proposed {len(model_proposals)} bullets")
+                logger.info(f"[{i}/{len(self.models)}] ✓ {model_id} proposed {len(model_proposals)} bullets")
             except Exception as e:
-                logger.error(f"Model {model_id} failed: {e}")
+                logger.error(f"[{i}/{len(self.models)}] ✗ {model_id} failed: {e}")
                 proposals[model_id] = []
 
         return proposals
@@ -247,6 +261,7 @@ class EnsembleLearner:
         model: str,
         task: TaskInput,
         environment_feedback: EnvironmentFeedback,
+        base_url: Optional[str] = None,
     ) -> list[ConsensusBullet]:
         """
         Execute Generator -> Reflector -> Curator for a single model.
@@ -256,6 +271,7 @@ class EnsembleLearner:
             model: Model name
             task: Task to execute
             environment_feedback: Execution feedback
+            base_url: Custom base URL for vLLM endpoints
 
         Returns:
             List of proposed bullets
@@ -263,7 +279,7 @@ class EnsembleLearner:
         model_id = f"{provider}/{model}"
 
         # Create model-specific LLM client
-        llm_client = LLMClient(provider=provider, model=model)
+        llm_client = LLMClient(provider=provider, model=model, base_url=base_url)
 
         # Initialize ACE modules
         generator = Generator(
@@ -277,17 +293,23 @@ class EnsembleLearner:
         )
 
         # Run Generator
+        logger.info(f"  → Running Generator for {model_id}...")
         generator_output = generator.execute(task, self.playbook_id)
+        logger.info(f"  → Generator complete for {model_id}")
 
         # Run Reflector
+        logger.info(f"  → Running Reflector for {model_id}...")
         reflector_output = reflector.reflect(task, generator_output, environment_feedback)
+        logger.info(f"  → Reflector complete for {model_id}")
 
         # Run Curator
+        logger.info(f"  → Running Curator for {model_id}...")
         curator_output = curator.curate(
             reflector_output=reflector_output,
             playbook_id=self.playbook_id,
             task_context=task.context if hasattr(task, 'context') else None,
         )
+        logger.info(f"  → Curator complete for {model_id} ({len(curator_output.delta_bullets)} bullets)")
 
         # Convert curator bullets to ConsensusBullets
         consensus_bullets = []
@@ -343,7 +365,15 @@ class EnsembleLearner:
             for model_id in model_proposals.keys():
                 # Create LLM client for this model
                 provider, model = model_id.split("/")
-                llm_client = LLMClient(provider=provider, model=model)
+
+                # Find base_url if this is a vLLM model
+                base_url = None
+                for model_tuple in self.models:
+                    if f"{model_tuple[0]}/{model_tuple[1]}" == model_id:
+                        base_url = model_tuple[2] if len(model_tuple) > 2 else None
+                        break
+
+                llm_client = LLMClient(provider=provider, model=model, base_url=base_url)
 
                 # Get vote from model
                 vote = self._get_model_vote(bullet, model_id, llm_client)
