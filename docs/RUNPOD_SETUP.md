@@ -14,18 +14,39 @@ This guide will help you deploy 3 vLLM models on RunPod for ACE Ensemble Learnin
 
 1. **Go to RunPod.io** and sign in
 2. **Click "Deploy"** → "GPU Pods"
-3. **Select GPU**: Choose **RTX 4090** (recommended for cost/performance)
+3. **Select GPU**:
+   - **⚠️ CRITICAL:** Choose **at least 1 GPU** - this is REQUIRED!
+   - Recommended: **RTX 4090** (24GB VRAM, good cost/performance)
+   - **❌ DO NOT select "0 GPU"** - this creates a transfer-only pod with only ~500MB RAM
+   - With 0 GPU, you'll get "fork: Cannot allocate memory" errors
 4. **Choose Pod Type**: Select **Spot** (60-80% cheaper)
-5. **Select Template**: Choose **RunPod PyTorch** or **vLLM** template
+5. **Select Template**:
+   - Recommended: **vLLM** template (vLLM pre-installed)
+   - Alternative: **RunPod PyTorch** (requires manual vLLM installation)
 6. **Configure**:
    - Container Disk: 50GB minimum
    - Volume: Optional (for persistent storage)
    - Expose Ports: 8001, 8002, 8003
 7. **Deploy** the pod
 
-### 2. Install vLLM
+**⚠️ Common Mistake - 0 GPU Mode:**
+If you accidentally create a pod with 0 GPU:
+- Symptoms: ~488MB RAM, `nvidia-smi` shows no GPUs, "Cannot allocate memory" errors
+- This is "transfer mode" - designed only for accessing files, not compute
+- Solution: Stop the pod and create a new one with **at least 1 GPU** selected
 
-Once pod starts, open **Terminal** and run:
+### 2. Verify/Install vLLM
+
+Once pod starts, open **Terminal** and verify vLLM is available:
+
+```bash
+# Check if vLLM is already installed (should be if using vllm_latest template)
+vllm --version
+```
+
+**If vLLM is already installed:** Skip to Step 3.
+
+**If vLLM is NOT installed** (you'll get "command not found"), install it manually:
 
 **IMPORTANT:** RunPod's container disk (overlay fs) is typically only 5-10GB. To avoid "No space left on device" errors, we'll install vLLM in `/workspace` which has much more space.
 
@@ -48,26 +69,19 @@ python3 -m venv vllm_env
 source /workspace/vllm_env/bin/activate
 
 # Install vLLM (this may take 5-10 minutes)
-# Option 1: Using pip (traditional, slower)
 pip install --upgrade pip
 pip install --no-cache-dir vllm
-
-# Option 2: Using uv (much faster - 10-100x speedup)
-# First install uv if not already installed:
-# curl -LsSf https://astral.sh/uv/install.sh | sh
-# source $HOME/.cargo/env
-# uv pip install vllm
 
 # Verify installation
 vllm --version
 ```
 
-**Note:** You'll see warnings about `TRANSFORMERS_CACHE` and `UnspecifiedPlatform` - these are normal and harmless.
-
-**Important:** Every time you start a new terminal session, activate the venv:
-```bash
-source /workspace/vllm_env/bin/activate
-```
+**Note:**
+- You'll see warnings about `TRANSFORMERS_CACHE` and `UnspecifiedPlatform` - these are normal and harmless.
+- If you manually installed vLLM in a venv, activate it every time you start a new terminal:
+  ```bash
+  source /workspace/vllm_env/bin/activate
+  ```
 
 ### 3. Upload Scripts
 
@@ -88,8 +102,8 @@ cd ace_enterprise
 ### 4. Start Models
 
 ```bash
-# IMPORTANT: Activate the venv first
-source /workspace/vllm_env/bin/activate
+# If you manually installed vLLM in venv, activate it first:
+# source /workspace/vllm_env/bin/activate
 
 # Navigate to scripts directory
 cd /workspace/ace_enterprise/scripts
@@ -100,6 +114,8 @@ chmod +x start_vllm_multi.sh auto_shutdown.sh
 # Start all 3 models
 ./start_vllm_multi.sh
 ```
+
+**Note:** If using the vllm_latest template, vLLM should already be in your PATH and you don't need to activate a venv.
 
 **Expected output:**
 ```
@@ -341,11 +357,40 @@ pip install --no-cache-dir vllm
 ```
 
 ### "vllm: command not found"
-You need to activate the virtual environment first:
+**Solution 1:** Make sure you selected the **vllm_latest** template when creating the pod.
 
+**Solution 2:** If you used a different template, activate the virtual environment:
 ```bash
 source /workspace/vllm_env/bin/activate
 vllm --version  # Should work now
+```
+
+### "fork: Cannot allocate memory"
+This error means the pod doesn't have enough system RAM.
+
+**Root Cause #1 (Most Common):** Pod created with **0 GPU** selected
+- 0-GPU pods are "transfer mode" with only ~488MB RAM
+- Check with: `nvidia-smi` (should show at least 1 GPU)
+- Check RAM: `free -h` (should show 30GB+, not 488MB)
+- **Solution:** Stop pod and create new one with **at least 1 GPU**
+
+**Root Cause #2 (Rare):** Pod has GPU but insufficient RAM for 3 models
+- Happens if pod has <16GB system RAM
+- **Solutions:**
+  1. Use a larger GPU instance (more VRAM usually = more system RAM)
+  2. Start models sequentially instead of simultaneously
+  3. Use fewer models (2 instead of 3)
+
+**Quick Check:**
+```bash
+# Verify you have a GPU
+nvidia-smi
+
+# Check system RAM
+free -h
+# Should show ~30GB total, not 488MB
+
+# If you see 488MB and no GPU: You're in 0-GPU transfer mode!
 ```
 
 ### Models Won't Start

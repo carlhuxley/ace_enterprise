@@ -26,8 +26,8 @@ fi
 
 # Configuration
 export CUDA_VISIBLE_DEVICES=0
-GPU_MEMORY_PER_MODEL=0.30  # 30% each = 90% total for 3 models
-MAX_MODEL_LEN=4096  # Good for most ACE tasks
+GPU_MEMORY_PER_MODEL=0.28  # 30% each = 90% total for 3 models
+MAX_MODEL_LEN=2048  # Good for most ACE tasks
 MAX_TOKENS=1024  # Limit response length
 TENSOR_PARALLEL=1  # No tensor parallelism for small models
 
