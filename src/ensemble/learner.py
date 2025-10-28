@@ -399,7 +399,7 @@ class EnsembleLearner:
         llm_client: LLMClient,
     ) -> Vote:
         """
-        Get a single model's vote on a bullet.
+        Get a single model's vote on a bullet using LLM-based evaluation.
 
         Args:
             bullet: Bullet to vote on
@@ -407,11 +407,151 @@ class EnsembleLearner:
             llm_client: LLM client for this model
 
         Returns:
-            Vote object
+            Vote object with LLM reasoning
         """
-        # For MVP, use simple heuristic voting
-        # In Phase 2, we'll add LLM-based reasoning
+        # Create voting prompt
+        voting_prompt = self._create_voting_prompt(bullet, model_id)
 
+        try:
+            # Ask LLM to evaluate the bullet
+            response = llm_client.generate(
+                prompt=voting_prompt,
+                system_prompt=(
+                    "You are a code quality expert evaluating proposed knowledge bullets. "
+                    "Analyze the bullet critically and provide honest assessment."
+                ),
+                max_tokens=300,
+                temperature=0.3,  # Lower temperature for more consistent voting
+            )
+
+            # Parse LLM response
+            vote_result = self._parse_vote_response(response["content"], model_id)
+
+            logger.debug(
+                f"Model {model_id} voted {vote_result.vote.value} on bullet "
+                f"(confidence: {vote_result.confidence:.2f})"
+            )
+
+            return vote_result
+
+        except Exception as e:
+            # Fallback to heuristic voting on error
+            logger.warning(
+                f"LLM voting failed for model {model_id}, using fallback: {e}"
+            )
+            return self._fallback_heuristic_vote(bullet, model_id)
+
+    def _create_voting_prompt(self, bullet: ConsensusBullet, voter_id: str) -> str:
+        """
+        Create a structured prompt for LLM-based voting.
+
+        Args:
+            bullet: Bullet to evaluate
+            voter_id: ID of the voting model
+
+        Returns:
+            Formatted voting prompt
+        """
+        is_own_proposal = bullet.proposed_by == voter_id
+
+        prompt = f"""# Evaluate This Knowledge Bullet
+
+**Task Context**: We are building a shared knowledge base (playbook) to help solve coding tasks.
+
+**Proposed Bullet**:
+Section: {bullet.section.value}
+Content: {bullet.content}
+Proposed by: {"You (this model)" if is_own_proposal else f"Another model ({bullet.proposed_by})"}
+Reasoning: {bullet.proposal_reasoning}
+
+**Your Task**: Evaluate whether this bullet should be added to the shared playbook.
+
+**Evaluation Criteria**:
+1. **Accuracy**: Is the information correct and technically sound?
+2. **Usefulness**: Will this help solve future tasks in this domain?
+3. **Clarity**: Is it clear, specific, and actionable?
+4. **Relevance**: Does it belong in the "{bullet.section.value}" section?
+5. **Non-Redundancy**: Does it add unique value (not generic advice)?
+
+**Response Format**:
+VOTE: [APPROVE/REJECT/ABSTAIN]
+CONFIDENCE: [0.0-1.0]
+REASONING: [1-2 sentences explaining your vote]
+
+**Example**:
+VOTE: APPROVE
+CONFIDENCE: 0.85
+REASONING: This bullet provides specific, actionable guidance for email validation that will help prevent common bugs. The regex pattern is correct and the explanation is clear.
+
+Now evaluate the bullet above:"""
+
+        return prompt
+
+    def _parse_vote_response(self, response: str, model_id: str) -> Vote:
+        """
+        Parse LLM voting response into Vote object.
+
+        Args:
+            response: LLM response text
+            model_id: Voting model ID
+
+        Returns:
+            Parsed Vote object
+        """
+        import re
+
+        # Extract vote type
+        vote_match = re.search(r'VOTE:\s*(APPROVE|REJECT|ABSTAIN)', response, re.IGNORECASE)
+        if vote_match:
+            vote_str = vote_match.group(1).upper()
+            vote_type = VoteType[vote_str]
+        else:
+            # Default to APPROVE if parsing fails
+            logger.warning(f"Could not parse vote type from response, defaulting to APPROVE")
+            vote_type = VoteType.APPROVE
+
+        # Extract confidence
+        conf_match = re.search(r'CONFIDENCE:\s*(0?\.\d+|1\.0|[01])', response, re.IGNORECASE)
+        if conf_match:
+            confidence = float(conf_match.group(1))
+            confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
+        else:
+            # Default confidence based on vote type
+            confidence = 0.7 if vote_type == VoteType.APPROVE else 0.6
+            logger.warning(f"Could not parse confidence, using default: {confidence}")
+
+        # Extract reasoning
+        reasoning_match = re.search(r'REASONING:\s*(.+?)(?:\n\n|\Z)', response, re.IGNORECASE | re.DOTALL)
+        if reasoning_match:
+            reasoning = reasoning_match.group(1).strip()
+        else:
+            # Use full response as reasoning if format not followed
+            reasoning = response.strip()[:200]  # Truncate if too long
+
+        return Vote(
+            model_id=model_id,
+            vote=vote_type,
+            reasoning=reasoning,
+            confidence=confidence,
+        )
+
+    def _fallback_heuristic_vote(
+        self,
+        bullet: ConsensusBullet,
+        model_id: str,
+    ) -> Vote:
+        """
+        Fallback heuristic voting when LLM voting fails.
+
+        This is the original MVP voting logic, kept as a safety net.
+
+        Args:
+            bullet: Bullet to vote on
+            model_id: Voting model ID
+
+        Returns:
+            Vote object with heuristic reasoning
+        """
         # If this model proposed the bullet, approve with high confidence
         if bullet.proposed_by == model_id or bullet.proposed_by.startswith("consensus"):
             return Vote(
@@ -422,11 +562,10 @@ class EnsembleLearner:
             )
 
         # Otherwise, approve with medium confidence (consensus by default)
-        # In Phase 2, we'll actually ask the LLM to evaluate
         return Vote(
             model_id=model_id,
             vote=VoteType.APPROVE,
-            reasoning="Looks reasonable based on task context",
+            reasoning="Looks reasonable based on task context (fallback heuristic)",
             confidence=0.7,
         )
 

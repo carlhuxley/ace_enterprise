@@ -334,27 +334,64 @@ cd /workspace/ace_enterprise/scripts
 
 ## Troubleshooting
 
-### "No space left on device" Error
-This happens because RunPod's container disk (overlay fs) is only 5-10GB.
+### "No space left on device" or "Disk quota exceeded"
+This happens when you run out of disk space. Common causes:
+- HuggingFace model cache fills up (models are 1-3GB each)
+- RunPod's container disk (overlay fs) is only 5-10GB
+- Log files accumulating
+- Multiple failed model downloads
 
-**Solution:** Install vLLM in `/workspace` using a virtual environment (see Step 2 above).
-
+**Diagnosis - Check disk usage:**
 ```bash
-# Clean up and reinstall
-cd /workspace
-rm -rf vllm_env pip_cache tmp
+# Check overall disk usage
+df -h
 
-# Set environment variables
-export TMPDIR=/workspace/tmp
-export PIP_CACHE_DIR=/workspace/pip_cache
-export HF_HOME=/workspace/huggingface
-mkdir -p $TMPDIR $PIP_CACHE_DIR $HF_HOME
+# Check what's using space in workspace
+du -sh /workspace/* | sort -h
 
-# Create venv and install
-python3 -m venv vllm_env
-source /workspace/vllm_env/bin/activate
-pip install --no-cache-dir vllm
+# Check HuggingFace cache (this is usually the culprit)
+du -sh ~/.cache/huggingface 2>/dev/null
+du -sh /root/.cache/huggingface 2>/dev/null
 ```
+
+**Solution 1: Clear HuggingFace model cache**
+```bash
+# Remove ALL cached models (they'll re-download when needed)
+rm -rf ~/.cache/huggingface/*
+rm -rf /root/.cache/huggingface/*
+
+# Or clear specific models
+ls -lh ~/.cache/huggingface/hub/
+rm -rf ~/.cache/huggingface/hub/models--<model-name>
+```
+
+**Solution 2: Clear other caches**
+```bash
+# Clear pip cache
+pip cache purge
+
+# Clear temporary files
+rm -rf /tmp/*
+rm -rf /workspace/tmp/*
+
+# Clear old logs
+rm -f /workspace/logs/*.log
+```
+
+**Solution 3: Move cache to /workspace (has more space)**
+```bash
+# Set HuggingFace cache to workspace
+export HF_HOME=/workspace/huggingface
+mkdir -p $HF_HOME
+
+# Add to ~/.bashrc to make it permanent
+echo 'export HF_HOME=/workspace/huggingface' >> ~/.bashrc
+```
+
+**Prevention:**
+- Always set `HF_HOME=/workspace/huggingface` before installing vLLM
+- Regularly clean up unused model caches
+- Use larger container disk when creating pod (50GB minimum recommended)
 
 ### "vllm: command not found"
 **Solution 1:** Make sure you selected the **vllm_latest** template when creating the pod.
@@ -401,12 +438,23 @@ ps aux | grep vllm | grep -v grep
 # Check logs for errors
 tail -f /workspace/logs/*.log
 
+# If logs are EMPTY, check disk space!
+df -h
+# Empty logs = can't write to disk = disk full
+
 # Common issues:
-# 1. venv not activated: source /workspace/vllm_env/bin/activate
-# 2. Not enough VRAM: Reduce GPU_MEMORY_PER_MODEL in script
-# 3. Port already in use: pkill -f vllm, then restart
-# 4. Model not downloaded: vLLM will auto-download (takes time)
+# 1. Disk full: See "Disk quota exceeded" section above
+# 2. venv not activated: source /workspace/vllm_env/bin/activate
+# 3. Not enough VRAM: Reduce GPU_MEMORY_PER_MODEL in script
+# 4. Port already in use: pkill -f vllm, then restart
+# 5. Model not downloaded: vLLM will auto-download (takes time)
+# 6. 0-GPU mode: See "Cannot allocate memory" section above
 ```
+
+**Empty log files specifically means:**
+- Disk is full (most common)
+- Log directory doesn't exist: `mkdir -p /workspace/logs`
+- Permission issues: `chmod 755 /workspace/logs`
 
 ### Port Already in Use
 ```bash
