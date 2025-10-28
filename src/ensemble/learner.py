@@ -55,6 +55,10 @@ class EnsembleLearner:
         playbook_id: str,
         voting_strategy: Optional[VotingStrategy] = None,
         similarity_threshold: float = 0.85,
+        enable_deliberation: bool = True,
+        deliberation_threshold_low: float = 0.4,
+        deliberation_threshold_high: float = 0.6,
+        max_deliberation_rounds: int = 2,
     ):
         """
         Initialize ensemble learner.
@@ -64,12 +68,22 @@ class EnsembleLearner:
             playbook_id: Shared playbook for all models
             voting_strategy: Voting strategy (default: majority)
             similarity_threshold: Threshold for clustering similar bullets
+            enable_deliberation: Enable deliberative discussion for contested bullets
+            deliberation_threshold_low: Lower approval rate for contested bullets (default: 40%)
+            deliberation_threshold_high: Upper approval rate for contested bullets (default: 60%)
+            max_deliberation_rounds: Maximum discussion rounds per bullet (default: 2)
         """
         self.models = models
         self.playbook_id = playbook_id
         self.playbook_manager = PlaybookManager()
         self.voting_system = VotingSystem(voting_strategy)
         self.consensus_builder = ConsensusBuilder(similarity_threshold)
+
+        # Deliberation settings
+        self.enable_deliberation = enable_deliberation
+        self.deliberation_threshold_low = deliberation_threshold_low
+        self.deliberation_threshold_high = deliberation_threshold_high
+        self.max_deliberation_rounds = max_deliberation_rounds
 
         # Track model performance
         self.model_performance: dict[str, ModelPerformance] = {}
@@ -130,6 +144,15 @@ class EnsembleLearner:
         logger.info("🗳️  Conducting cross-voting...")
         self._conduct_cross_voting(consensus_bullets, model_proposals)
         logger.info("✓ Cross-voting complete")
+
+        # Step 4.5: Deliberative discussion for contested bullets
+        if self.enable_deliberation:
+            logger.info("💬 Checking for contested bullets requiring deliberation...")
+            contested_count = self._conduct_deliberation(consensus_bullets, model_proposals)
+            if contested_count > 0:
+                logger.info(f"✓ Deliberation complete: {contested_count} bullets discussed")
+            else:
+                logger.info("✓ No contested bullets found")
 
         # Step 5: Apply voting strategy to decide which bullets to keep
         logger.info("⚖️  Applying voting strategy...")
@@ -392,6 +415,107 @@ class EnsembleLearner:
             f"= {len(bullets) * len(model_proposals)} total votes"
         )
 
+    def _conduct_deliberation(
+        self,
+        bullets: list[ConsensusBullet],
+        model_proposals: dict[str, list[ConsensusBullet]],
+    ) -> int:
+        """
+        Conduct deliberative discussion for contested bullets.
+
+        Identifies bullets with close votes (e.g., 40-60% approval) and has
+        models discuss them, potentially revising their votes.
+
+        Args:
+            bullets: All consensus bullets to check
+            model_proposals: Original proposals by each model
+
+        Returns:
+            Number of bullets that underwent deliberation
+        """
+        # Find contested bullets
+        contested = [
+            bullet for bullet in bullets
+            if bullet.is_contested(
+                self.deliberation_threshold_low,
+                self.deliberation_threshold_high
+            )
+        ]
+
+        if not contested:
+            return 0
+
+        logger.info(
+            f"Found {len(contested)} contested bullets "
+            f"(approval rate {self.deliberation_threshold_low:.0%}-{self.deliberation_threshold_high:.0%})"
+        )
+
+        # Conduct discussion rounds for each contested bullet
+        for bullet in contested:
+            logger.debug(
+                f"Starting deliberation on bullet: {bullet.content[:50]}... "
+                f"(current approval: {bullet.approval_rate:.0%})"
+            )
+
+            for round_num in range(1, self.max_deliberation_rounds + 1):
+                logger.debug(f"  Deliberation round {round_num}/{self.max_deliberation_rounds}")
+
+                # Have each model reconsider their vote
+                votes_changed = 0
+                for model_id in model_proposals.keys():
+                    # Get model's current vote
+                    current_vote = bullet.get_vote(model_id)
+                    if not current_vote:
+                        continue  # Skip if model hasn't voted
+
+                    # Create LLM client for this model
+                    provider, model = model_id.split("/")
+                    base_url = None
+                    for model_tuple in self.models:
+                        if f"{model_tuple[0]}/{model_tuple[1]}" == model_id:
+                            base_url = model_tuple[2] if len(model_tuple) > 2 else None
+                            break
+
+                    llm_client = LLMClient(provider=provider, model=model, base_url=base_url)
+
+                    # Get updated vote after seeing others' reasoning
+                    new_vote = self._get_deliberation_vote(
+                        bullet, model_id, current_vote, llm_client
+                    )
+
+                    # Check if vote changed
+                    if new_vote.vote != current_vote.vote:
+                        votes_changed += 1
+                        logger.debug(
+                            f"    {model_id}: {current_vote.vote.value} → {new_vote.vote.value}"
+                        )
+
+                    # Update the vote
+                    bullet.add_vote(new_vote, allow_update=True)
+
+                # Update deliberation count
+                bullet.deliberation_rounds += 1
+
+                # Check if still contested after this round
+                if not bullet.is_contested(
+                    self.deliberation_threshold_low,
+                    self.deliberation_threshold_high
+                ):
+                    logger.debug(
+                        f"  Consensus reached after round {round_num} "
+                        f"(final approval: {bullet.approval_rate:.0%})"
+                    )
+                    break
+
+                # If no votes changed, stop deliberating
+                if votes_changed == 0:
+                    logger.debug(
+                        f"  No votes changed in round {round_num}, ending deliberation"
+                    )
+                    break
+
+        return len(contested)
+
     def _get_model_vote(
         self,
         bullet: ConsensusBullet,
@@ -484,6 +608,121 @@ CONFIDENCE: 0.85
 REASONING: This bullet provides specific, actionable guidance for email validation that will help prevent common bugs. The regex pattern is correct and the explanation is clear.
 
 Now evaluate the bullet above:"""
+
+        return prompt
+
+    def _get_deliberation_vote(
+        self,
+        bullet: ConsensusBullet,
+        model_id: str,
+        current_vote: Vote,
+        llm_client: LLMClient,
+    ) -> Vote:
+        """
+        Get updated vote after model sees other models' reasoning.
+
+        Args:
+            bullet: Bullet being discussed
+            model_id: Voting model ID
+            current_vote: Model's current vote
+            llm_client: LLM client for this model
+
+        Returns:
+            Updated Vote object (may be same as current or different)
+        """
+        # Create deliberation prompt showing all votes
+        deliberation_prompt = self._create_deliberation_prompt(
+            bullet, model_id, current_vote
+        )
+
+        try:
+            # Ask LLM to reconsider vote
+            response = llm_client.generate(
+                prompt=deliberation_prompt,
+                system_prompt=(
+                    "You are a code quality expert participating in peer review. "
+                    "You can change your vote based on others' arguments, but only if they're convincing."
+                ),
+                max_tokens=300,
+                temperature=0.3,
+            )
+
+            # Parse updated vote
+            new_vote = self._parse_vote_response(response["content"], model_id)
+            return new_vote
+
+        except Exception as e:
+            logger.warning(
+                f"Deliberation failed for {model_id}, keeping current vote: {e}"
+            )
+            # Return current vote unchanged on error
+            return current_vote
+
+    def _create_deliberation_prompt(
+        self,
+        bullet: ConsensusBullet,
+        voter_id: str,
+        current_vote: Vote,
+    ) -> str:
+        """
+        Create deliberation prompt showing other models' votes and reasoning.
+
+        Args:
+            bullet: Bullet under discussion
+            voter_id: ID of the voting model
+            current_vote: Model's current vote
+
+        Returns:
+            Formatted deliberation prompt
+        """
+        # Build summary of all votes
+        vote_summary = []
+        for vote in bullet.votes:
+            if vote.model_id == voter_id:
+                continue  # Skip own vote
+
+            vote_emoji = {"approve": "✅", "reject": "❌", "abstain": "⏸️"}.get(
+                vote.vote.value, "?"
+            )
+            vote_summary.append(
+                f"- **{vote.model_id}**: {vote_emoji} {vote.vote.value.upper()} "
+                f"(confidence: {vote.confidence:.2f})\n"
+                f"  Reasoning: {vote.reasoning}"
+            )
+
+        votes_text = "\n".join(vote_summary)
+
+        current_vote_emoji = {"approve": "✅", "reject": "❌", "abstain": "⏸️"}.get(
+            current_vote.vote.value, "?"
+        )
+
+        prompt = f"""# Deliberative Discussion: Reconsider Your Vote
+
+**Contested Bullet** (close vote, {bullet.approval_rate:.0%} approval):
+Section: {bullet.section.value}
+Content: {bullet.content}
+Proposed by: {bullet.proposed_by}
+
+**Your Current Vote**:
+{current_vote_emoji} {current_vote.vote.value.upper()} (confidence: {current_vote.confidence:.2f})
+Your reasoning: {current_vote.reasoning}
+
+**Other Models' Votes and Reasoning**:
+{votes_text}
+
+**Task**: After reading the other models' arguments, reconsider your vote.
+
+**Guidelines**:
+- If others raised valid points you didn't consider, you MAY change your vote
+- If you still stand by your original assessment, keep your vote
+- Don't change just to agree - only change if convinced by the arguments
+
+**Response Format**:
+VOTE: [APPROVE/REJECT/ABSTAIN]
+CONFIDENCE: [0.0-1.0]
+REASONING: [1-2 sentences explaining your decision, mention if you were convinced by others' arguments or why you're keeping your vote]
+
+Your reconsidered vote:"""
 
         return prompt
 

@@ -99,14 +99,53 @@ class ConsensusBullet:
             return 0.0
         return sum(v.confidence for v in self.votes) / len(self.votes)
 
-    def add_vote(self, vote: Vote) -> None:
-        """Add a vote from a model."""
-        # Check if this model already voted
-        existing = [v for v in self.votes if v.model_id == vote.model_id]
-        if existing:
-            raise ValueError(f"Model {vote.model_id} already voted on this bullet")
+    def add_vote(self, vote: Vote, allow_update: bool = False) -> None:
+        """
+        Add a vote from a model.
 
-        self.votes.append(vote)
+        Args:
+            vote: Vote to add
+            allow_update: If True, allows updating an existing vote (for deliberation)
+        """
+        # Check if this model already voted
+        existing_idx = None
+        for i, v in enumerate(self.votes):
+            if v.model_id == vote.model_id:
+                existing_idx = i
+                break
+
+        if existing_idx is not None:
+            if allow_update:
+                # Replace existing vote (deliberation round)
+                self.votes[existing_idx] = vote
+            else:
+                raise ValueError(f"Model {vote.model_id} already voted on this bullet")
+        else:
+            self.votes.append(vote)
+
+    def get_vote(self, model_id: str) -> Optional[Vote]:
+        """Get a specific model's vote on this bullet."""
+        for vote in self.votes:
+            if vote.model_id == model_id:
+                return vote
+        return None
+
+    def is_contested(self, threshold_low: float = 0.4, threshold_high: float = 0.6) -> bool:
+        """
+        Check if this bullet is contested (approval rate in middle range).
+
+        Args:
+            threshold_low: Lower bound for contested range (default 40%)
+            threshold_high: Upper bound for contested range (default 60%)
+
+        Returns:
+            True if approval rate is between thresholds
+        """
+        if len(self.votes) < 2:
+            return False  # Need at least 2 votes to be contested
+
+        approval = self.approval_rate
+        return threshold_low <= approval <= threshold_high
 
 
 @dataclass
