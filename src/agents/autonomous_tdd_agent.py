@@ -278,7 +278,8 @@ test_add_returns_sum | Test that add() returns sum of two numbers | tests/test_c
 """
 
         # Get proposal from primary model
-        response = self.llm_client.chat(prompt)
+        response_dict = self.llm_client.generate(prompt)
+        response = response_dict["content"]
 
         # Parse response
         increments = []
@@ -424,7 +425,8 @@ def test_calculator_can_be_created():
 **Output**: ONLY the new test function code (no explanations).
 """
 
-        response = self.llm_client.chat(prompt)
+        response_dict = self.llm_client.generate(prompt)
+        response = response_dict["content"]
 
         # Extract code from response
         test_function = self._extract_code(response)
@@ -494,7 +496,8 @@ def test_calculator_can_be_created():
 **Output**: Complete implementation file content (update existing code if present).
 """
 
-        response = self.llm_client.chat(prompt)
+        response_dict = self.llm_client.generate(prompt)
+        response = response_dict["content"]
 
         # Extract code
         impl_code = self._extract_code(response)
