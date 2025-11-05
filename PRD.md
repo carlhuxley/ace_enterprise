@@ -1132,11 +1132,241 @@ Response:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-10-16 | Product Team | Initial draft |
+| 1.1 | 2025-10-28 | Engineering | Add ensemble learning, test review, deliberative discussion |
 
 ---
 
-**Document Status:** Draft for Review  
-**Next Steps:** 
+## 18. Advanced Features (Implemented)
+
+### 18.1 Ensemble Learning System
+
+**Status:** ✅ COMPLETE (2025-10-28)
+
+**Description:** Multi-model consensus building where multiple LLMs collaborate to create higher-quality playbook bullets through cross-voting and deliberation.
+
+**Components:**
+- **Ensemble Learner** (`src/ensemble/learner.py`)
+  - Coordinates multiple models to propose and vote on bullets
+  - Cross-voting: Each model votes on all proposals (not just its own)
+  - Clustering: Groups similar proposals to avoid redundancy
+  - Voting strategies: Majority, supermajority, weighted, unanimous
+
+- **Deliberative Discussion** (`src/ensemble/learner.py:418-727`)
+  - Multi-round debate for contested bullets (40-60% approval)
+  - Models see peers' reasoning and can revise votes
+  - Auto-stops when consensus reached or votes stabilize
+  - Configurable thresholds and max rounds
+
+- **Data Models** (`src/ensemble/models.py`)
+  - ConsensusBullet: Bullet with voting metadata
+  - Vote: Model vote with reasoning and confidence
+  - VoteResults: Aggregated voting statistics
+  - EnsembleResult: Complete session results
+
+**Key Features:**
+- LLM-based voting with natural language reasoning
+- Contested bullet detection (approval rate in middle range)
+- Vote revision during deliberation rounds
+- Comprehensive metrics (approval rates, deliberation rounds, model performance)
+
+**Configuration:**
+```python
+learner = EnsembleLearner(
+    models=[
+        ("ollama", "qwen2.5-coder:1.5b"),
+        ("ollama", "deepseek-coder:1.3b"),
+        ("anthropic", "claude-3-5-sonnet-20241022"),
+    ],
+    playbook_id="pb_001",
+    voting_strategy=MajorityVoting(),
+    enable_deliberation=True,
+    deliberation_threshold_low=0.4,   # 40%
+    deliberation_threshold_high=0.6,  # 60%
+    max_deliberation_rounds=2,
+)
+```
+
+**Benefits:**
+- Higher quality bullets through peer review
+- Diverse perspectives from multiple models
+- Reduced bias from single model
+- Democratic consensus building
+- Nuanced decision-making through debate
+
+**Documentation:**
+- `docs/DELIBERATIVE_DISCUSSION.md` - Complete technical documentation
+- `test_deliberation.py` - Demonstration and testing
+
+**Performance:**
+- Deliberation adds ~40% latency for contested bullets (20% of total)
+- Token overhead: ~500 tokens per deliberation vote
+- Still cheaper than adding additional models
+
+---
+
+### 18.2 Test Review Agent (Quality Validation)
+
+**Status:** ✅ COMPLETE (2025-10-28)
+
+**Description:** Automated test quality validation system that ensures ACE learns from high-quality tests while respecting developer style preferences (substance over style).
+
+**Purpose:** Answers the critical question: "How do I know if I'm writing good tests?"
+
+**Key Features:**
+
+**Substance-Focused Checks (ENFORCED):**
+1. **Missing Assertions (CRITICAL)**
+   - Tests must verify behavior with assertions
+   - Blocks TDD cycle if no assertions found
+
+2. **Edge Case Coverage (SUGGESTION)**
+   - Identifies missing edge cases: empty, null, negative, boundary, invalid
+   - Suggests additions but doesn't block
+
+3. **Test Isolation (WARNING)**
+   - Flags tests that verify multiple unrelated behaviors
+   - Suggests splitting into separate tests
+
+4. **Test Naming (WARNING)**
+   - Identifies vague names (test_basic, test_1)
+   - Suggests descriptive names
+
+**Style-Agnostic (IGNORED):**
+1. AAA comments - Not required, developer's choice
+2. Assertion messages - Nice but not mandatory
+3. Formatting preferences - Irrelevant to quality
+
+**Quality Scoring:**
+```python
+reviewer = TestReviewAgent()
+result = reviewer.review_test_file(Path("test_email.py"))
+
+# Score: 0.0-1.0
+# ≥ 0.7: Good quality, proceed with TDD
+# < 0.7: Needs improvement, address issues first
+
+if result.is_good_quality(threshold=0.7):
+    tdd_agent.make_test_pass(test_path, impl_path)
+else:
+    print(result.format_report())  # Show issues
+```
+
+**Architecture:**
+- **Automated Checks:** Structure, naming, assertions, edge cases
+- **LLM Deep Analysis (Optional):** Nuanced feedback on test effectiveness
+- **Quality Gate:** Prevents ACE from learning bad patterns
+
+**Example Output:**
+```
+Score: 95%
+Strengths:
+   - Found 4 test functions with assertions
+   - Tests cover 3 edge cases
+Issues:
+   🔵 Consider testing: null/None
+✅ Test quality is GOOD - safe to proceed with TDD
+```
+
+**Philosophy:**
+- Check what matters for ACE learning (assertions, coverage)
+- Ignore what's debatable among developers (style)
+- Respect both clean code and AAA approaches
+- Focus on test EFFECTIVENESS not FORMATTING
+
+**Documentation:**
+- `docs/TEST_REVIEW_PRAGMATIC.md` - Philosophy and examples
+- `demo_test_review.py` - Shows clean code vs AAA styles (both 100%)
+- `demo_tdd_with_review.py` - Complete TDD workflow with quality gate
+
+**Integration:**
+```python
+# 1. Human writes test
+# 2. Review test quality
+reviewer = TestReviewAgent()
+result = reviewer.review_test_file(test_path)
+
+# 3. Quality gate
+if not result.is_good_quality():
+    print("⚠️  Fix issues first:", result.format_report())
+    exit(1)
+
+# 4. TDD agent makes test pass
+tdd = TDDAgent()
+tdd.make_test_pass(test_path, impl_path)
+
+# 5. Patterns saved to playbook
+```
+
+**Benefits:**
+- Ensures ACE learns from high-quality tests
+- Provides immediate feedback on test quality
+- Prevents learning from bad patterns
+- Educates developers on test best practices
+- Respects developer autonomy on style
+
+---
+
+### 18.3 Playbook Q&A System
+
+**Status:** ✅ COMPLETE (2025-10-28)
+
+**Description:** Query interface for asking coding questions and getting answers backed by playbook knowledge.
+
+**Purpose:** Enable developers to leverage learned playbook patterns through natural language queries.
+
+**Features:**
+- **Single-Model Q&A:** Ask questions, get playbook-informed answers
+- **Ensemble Consensus:** Multiple models answer, best response selected
+- **Source Attribution:** Shows which bullets were used
+- **Confidence Scoring:** Based on playbook coverage and bullet quality
+- **Semantic Retrieval:** Hybrid search (embeddings + keywords)
+
+**Usage:**
+```python
+from src.playbook.qa import PlaybookQA
+
+qa = PlaybookQA(playbook_manager)
+
+# Ask question
+result = qa.ask(
+    question="How should I validate email addresses?",
+    domain="python_development",
+    top_k=5
+)
+
+print(f"Answer: {result.answer}")
+print(f"Confidence: {result.confidence:.0%}")
+print(f"Sources: {len(result.sources)} bullets")
+```
+
+**Ensemble Mode:**
+```python
+result = qa.ask_ensemble(
+    question="Best practices for error handling?",
+    models=[
+        ("ollama", "qwen2.5-coder:1.5b"),
+        ("ollama", "deepseek-coder:1.3b"),
+    ]
+)
+
+print(f"Selected: {result.consensus['selected']}")
+print(f"Agreement: {result.consensus['agreement']:.0%}")
+```
+
+**Documentation:**
+- `demo_playbook_qa.py` - Interactive Q&A demonstration
+
+**Benefits:**
+- Leverage playbook knowledge through natural language
+- No need to browse bullets manually
+- See which bullets informed the answer
+- Confidence scoring guides trust
+- Ensemble mode for critical questions
+
+---
+
+**Document Status:** Updated with New Features
+**Next Steps:**
 1. Technical review by engineering team
 2. Security review by InfoSec
 3. Cost analysis by finance
