@@ -258,23 +258,19 @@ class AutonomousTDDAgent:
 2. Build complexity gradually (validation, edge cases, integration)
 3. Each test should be SMALL and focused (one concept)
 4. Order by dependency (can't test API before model exists)
-5. Aim for 5-10 increments total
+5. Aim for 3-5 increments total
 
-**Example**:
-Requirement: "Calculator that adds two numbers"
-Increments:
-1. test_calculator_can_be_created
-2. test_add_returns_sum_of_two_positive_numbers
-3. test_add_handles_zero
-4. test_add_handles_negative_numbers
-5. test_add_handles_floats
-
-**Output Format** (one per line):
+**CRITICAL**: You MUST output in this EXACT format (pipe-separated, one per line):
 test_name | description | test_file_path | impl_file_path
 
-Example:
+**Example for "Calculator that adds two numbers"**:
 test_calculator_can_be_created | Test that Calculator instance can be created | tests/test_calculator.py | src/calculator.py
-test_add_returns_sum | Test that add() returns sum of two numbers | tests/test_calculator.py | src/calculator.py
+test_add_returns_sum_of_two_numbers | Test that add() returns sum of two positive numbers | tests/test_calculator.py | src/calculator.py
+test_add_handles_zero | Test that add() handles zero correctly | tests/test_calculator.py | src/calculator.py
+
+**YOUR TASK**: Generate test increments for: "{requirement}"
+
+Output ONLY the pipe-separated lines (no explanations, no markdown, no extra text):
 """
 
         # Get proposal from primary model
@@ -303,6 +299,14 @@ test_add_returns_sum | Test that add() returns sum of two numbers | tests/test_c
                 test_file=test_path,
                 implementation_file=impl_path
             ))
+
+        if not increments:
+            logger.warning("No increments parsed from LLM response")
+            logger.warning(f"Response was:\n{response}")
+            raise ValueError(
+                "Failed to parse test increments from LLM response. "
+                "Expected pipe-separated format: test_name | description | test_file | impl_file"
+            )
 
         return increments
 
@@ -394,27 +398,30 @@ test_add_returns_sum | Test that add() returns sum of two numbers | tests/test_c
 
         prompt = f"""You are writing a test following TDD (Test-Driven Development).
 
+**Project Structure**:
+- Tests in: {self.test_dir.name}/
+- Implementation in: {self.src_dir.name}/
+- Imports use: `from src.{increment.implementation_file.stem} import *`
+
 **Test to write**: {increment.test_name}
 **Description**: {increment.description}
-**Test file**: {increment.test_file.name}
-**Implementation file**: {increment.implementation_file.name}
 
-**Existing test code**:
+**Existing test code** in {increment.test_file.name}:
 ```python
-{existing_code if existing_code else "# Empty file"}
+{existing_code if existing_code else "# File will be created with imports"}
 ```
 
-**Task**: Write the test function `{increment.test_name}`.
+**Task**: Write ONLY the test function `{increment.test_name}`.
 
 **Guidelines**:
-1. Write ONLY the test function (don't duplicate existing code)
-2. Test should be focused on ONE concept
-3. Use clear assertions (assert with meaningful checks)
-4. Test should FAIL initially (implementation doesn't exist yet)
-5. Use pytest style (simple assert statements)
-6. Import what you need from implementation module
+1. Write ONLY the test function (imports are added automatically)
+2. Do NOT add import statements inside the function
+3. Test should be focused on ONE concept
+4. Use clear assertions (assert with meaningful checks)
+5. Test should FAIL initially (implementation doesn't exist yet)
+6. Use pytest style (simple assert statements)
 
-**Example**:
+**Example** (function only, no imports):
 ```python
 def test_calculator_can_be_created():
     \"\"\"Test that Calculator instance can be created.\"\"\"
@@ -422,7 +429,7 @@ def test_calculator_can_be_created():
     assert calc is not None
 ```
 
-**Output**: ONLY the new test function code (no explanations).
+**Output**: ONLY the test function code (no imports, no explanations).
 """
 
         response_dict = self.llm_client.generate(prompt)
@@ -437,7 +444,12 @@ def test_calculator_can_be_created():
         else:
             # New file, add imports and function
             module_name = increment.implementation_file.stem
-            full_code = f"""import pytest\nfrom src.{module_name} import *\n\n{test_function}"""
+            full_code = f"""# Test file for {module_name}
+import pytest
+from src.{module_name} import *
+
+
+{test_function}"""
 
         increment.test_file.write_text(full_code)
 
@@ -464,6 +476,10 @@ def test_calculator_can_be_created():
 
         prompt = f"""You are following TDD discipline: write MINIMAL code to pass the test.
 
+**Project Structure**:
+- Implementation file: {increment.implementation_file.name}
+- Location: {self.src_dir.name}/{increment.implementation_file.name}
+
 **Current failing test**:
 ```python
 {test_code}
@@ -474,9 +490,9 @@ def test_calculator_can_be_created():
 {test_result.error or test_result.output}
 ```
 
-**Existing implementation**:
+**Existing implementation** in {increment.implementation_file.name}:
 ```python
-{existing_code if existing_code else "# Empty file"}
+{existing_code if existing_code else "# Empty file - create what's needed"}
 ```
 
 **Task**: Write the MINIMAL code needed to make THIS test pass.
@@ -484,16 +500,18 @@ def test_calculator_can_be_created():
 **TDD Constraints**:
 1. ✅ Write simplest thing that works
 2. ✅ Only implement what current test requires
-3. ❌ Don't add features for future tests
-4. ❌ Don't add "nice to have" features
-5. ❌ Don't over-engineer
+3. ✅ If test expects a class, create that class
+4. ✅ If test expects a function, create that function
+5. ❌ Don't add features for future tests
+6. ❌ Don't add "nice to have" features
+7. ❌ Don't over-engineer
 
 **Example of minimal thinking**:
-- Test: `assert add(2, 3) == 5`
-- ❌ Bad (over-engineered): Support lists, floats, validation, logging
-- ✅ Good (minimal): `def add(a, b): return a + b`
+- Test creates instance: `calc = Calculator()` → Create empty class
+- Test calls method: `calc.add(2, 3)` → Add that method
+- Test expects return: `assert result == 5` → Return the value
 
-**Output**: Complete implementation file content (update existing code if present).
+**Output**: Complete implementation file content. Include ALL existing code plus new code.
 """
 
         response_dict = self.llm_client.generate(prompt)
@@ -574,11 +592,17 @@ def test_calculator_can_be_created():
             TestResult with pass/fail status
         """
         try:
+            # Set PYTHONPATH to include project root so imports work
+            import os
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(self.project_root)
+
             result = subprocess.run(
                 ["python", "-m", "pytest", str(self.test_dir), "-v", "--tb=short"],
                 capture_output=True,
                 text=True,
                 cwd=self.project_root,
+                env=env,
                 timeout=30
             )
 
