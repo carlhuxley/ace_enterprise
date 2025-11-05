@@ -138,6 +138,13 @@ class AutonomousTDDAgent:
         base_url = ensemble_learner.models[0][2] if len(ensemble_learner.models[0]) > 2 else None
         self.llm_client = LLMClient(provider=provider, model=model, base_url=base_url)
 
+        # Playbook retrieval for injecting learned patterns
+        from src.playbook.retrieval import BulletRetriever
+        from src.playbook.manager import PlaybookManager
+        self.bullet_retriever = BulletRetriever()
+        self.playbook_manager = PlaybookManager()
+        self.playbook_id = ensemble_learner.playbook_id
+
         # Ensure directories exist
         self.test_dir.mkdir(parents=True, exist_ok=True)
         self.src_dir.mkdir(parents=True, exist_ok=True)
@@ -283,7 +290,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             if "|" not in line or line.strip().startswith("#"):
                 continue
 
-            parts = [p.strip() for p in line.split("|")]
+            parts = [p.strip() for p in line.split("|") if p.strip()]
             if len(parts) != 4:
                 continue
 
@@ -396,7 +403,15 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         if increment.test_file.exists():
             existing_code = increment.test_file.read_text()
 
+        # Get learned patterns from playbook
+        playbook_guidance = self._get_playbook_guidance(
+            query=f"TDD test writing {increment.test_name} {increment.description}",
+            top_k=3
+        )
+
         prompt = f"""You are writing a test following TDD (Test-Driven Development).
+
+{playbook_guidance}
 
 **Project Structure**:
 - Tests in: {self.test_dir.name}/
@@ -406,30 +421,41 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 **Test to write**: {increment.test_name}
 **Description**: {increment.description}
 
-**Existing test code** in {increment.test_file.name}:
-```python
-{existing_code if existing_code else "# File will be created with imports"}
-```
+**CRITICAL - Existing test patterns to follow**:
+{existing_code if existing_code else "# File will be created - this is the first test"}
+
+**IMPORTANT**:
+- If existing tests create object instances (e.g., `calc = Calculator()`), your test MUST use the same pattern
+- If existing tests use class methods (e.g., `calc.add()`), your test MUST use methods, NOT standalone functions
+- Match the coding style and patterns from existing tests
+- Do NOT mix patterns (don't use standalone `add()` if existing tests use `calc.add()`)
 
 **Task**: Write ONLY the test function `{increment.test_name}`.
 
 **Guidelines**:
 1. Write ONLY the test function (imports are added automatically)
 2. Do NOT add import statements inside the function
-3. Test should be focused on ONE concept
-4. Use clear assertions (assert with meaningful checks)
-5. Test should FAIL initially (implementation doesn't exist yet)
-6. Use pytest style (simple assert statements)
+3. FOLLOW the existing pattern from tests above (instance-based vs function-based)
+4. Test should be focused on ONE concept
+5. Use clear assertions (assert with meaningful checks)
+6. Test should FAIL initially (implementation doesn't exist yet or is incomplete)
+7. Use pytest style (simple assert statements)
 
-**Example** (function only, no imports):
+**Example showing pattern consistency**:
 ```python
+# If first test does this:
 def test_calculator_can_be_created():
-    \"\"\"Test that Calculator instance can be created.\"\"\"
     calc = Calculator()
     assert calc is not None
+
+# Then subsequent tests MUST follow the same pattern:
+def test_add_returns_sum():
+    calc = Calculator()
+    result = calc.add(2, 3)  # Use calc.add(), NOT add()
+    assert result == 5
 ```
 
-**Output**: ONLY the test function code (no imports, no explanations).
+**Output**: ONLY the test function code (no imports, no explanations, no markdown).
 """
 
         response_dict = self.llm_client.generate(prompt)
@@ -474,11 +500,21 @@ from src.{module_name} import *
         # Read test code
         test_code = increment.test_file.read_text()
 
+        # Get learned patterns from playbook
+        playbook_guidance = self._get_playbook_guidance(
+            query=f"TDD implementation minimal code {increment.test_name}",
+            top_k=3
+        )
+
         prompt = f"""You are following TDD discipline: write MINIMAL code to pass the test.
 
-**Project Structure**:
-- Implementation file: {increment.implementation_file.name}
-- Location: {self.src_dir.name}/{increment.implementation_file.name}
+{playbook_guidance}
+
+**CRITICAL**: You are writing an IMPLEMENTATION file, NOT a test file.
+- This is: {self.src_dir.name}/{increment.implementation_file.name}
+- Output ONLY production code (classes, functions, logic)
+- Do NOT include test code, test imports, or pytest code
+- Do NOT include comments like "# Test file for..."
 
 **Current failing test**:
 ```python
@@ -495,23 +531,34 @@ from src.{module_name} import *
 {existing_code if existing_code else "# Empty file - create what's needed"}
 ```
 
-**Task**: Write the MINIMAL code needed to make THIS test pass.
+**Task**: Write the MINIMAL implementation code to make THIS test pass.
 
 **TDD Constraints**:
 1. ✅ Write simplest thing that works
 2. ✅ Only implement what current test requires
-3. ✅ If test expects a class, create that class
-4. ✅ If test expects a function, create that function
-5. ❌ Don't add features for future tests
-6. ❌ Don't add "nice to have" features
-7. ❌ Don't over-engineer
+3. ✅ If test expects a class, create/extend that class
+4. ✅ If test expects a function, create/add that function
+5. ✅ Keep ALL existing implementation code (add to it, don't replace)
+6. ❌ Don't add features for future tests
+7. ❌ Don't add "nice to have" features
+8. ❌ Don't over-engineer
+9. ❌ NEVER include test code in implementation file
 
-**Example of minimal thinking**:
-- Test creates instance: `calc = Calculator()` → Create empty class
-- Test calls method: `calc.add(2, 3)` → Add that method
-- Test expects return: `assert result == 5` → Return the value
+**Example - Test expects**:
+```python
+calc = Calculator()
+result = calc.add(2, 3)
+assert result == 5
+```
 
-**Output**: Complete implementation file content. Include ALL existing code plus new code.
+**Minimal implementation**:
+```python
+class Calculator:
+    def add(self, a, b):
+        return a + b
+```
+
+**Output**: Complete implementation file content (production code only, no test code).
 """
 
         response_dict = self.llm_client.generate(prompt)
@@ -580,9 +627,99 @@ from src.{module_name} import *
             logger.warning(f"  ⚠️  Test quality low ({test_review.overall_score:.0%}), skipping learning")
             return []
 
-        # TODO: Implement ensemble pattern extraction and voting
-        # For MVP, return empty (Phase 1 focuses on TDD loop)
-        return []
+        # Use standard ACE learning flow
+        from src.storage.schemas import TaskInput, EnvironmentFeedback
+        import uuid
+
+        task = TaskInput(
+            id=str(uuid.uuid4()),
+            prompt=f"""Analyze this successful TDD cycle and extract reusable patterns.
+
+**Test increment**: {increment.test_name}
+**Description**: {increment.description}
+
+**Test code**:
+```python
+{test_code}
+```
+
+**Implementation code**:
+```python
+{impl_code}
+```
+
+**Task**: Extract 1-3 specific, actionable patterns that worked well.
+
+**Good patterns** (specific and actionable):
+- "When testing class instantiation, create instance and assert it's not None"
+- "For methods on a class, instantiate the class first, then call the method"
+- "Start with simplest test (object creation) before testing behavior"
+
+**Bad patterns** (too vague):
+- "Write good tests"
+- "Follow TDD"
+
+Output 1-3 bullet points, one per line.""",
+            context={
+                "test_name": increment.test_name,
+                "test_file": str(increment.test_file),
+                "impl_file": str(increment.implementation_file),
+            }
+        )
+
+        feedback = EnvironmentFeedback(
+            success=True,
+            output="Tests passed",
+            metrics={"test_quality": test_review.overall_score}
+        )
+
+        # Run ensemble learning (single model auto-approves)
+        result = self.ensemble_learner.learn_from_task(task, feedback, parallel=False)
+
+        # Return approved bullets
+        return result.consensus_bullets
+
+    def _get_playbook_guidance(self, query: str, top_k: int = 5) -> str:
+        """
+        Retrieve relevant playbook bullets and format for prompt injection.
+
+        Args:
+            query: Query to find relevant patterns
+            top_k: Number of bullets to retrieve
+
+        Returns:
+            Formatted string to inject into prompts
+        """
+        playbook = self.playbook_manager.get_playbook(self.playbook_id)
+        if not playbook:
+            return ""
+
+        # Get all bullets from playbook
+        all_bullets = []
+        for section_bullets in playbook.sections.values():
+            all_bullets.extend(section_bullets)
+
+        if not all_bullets:
+            return ""
+
+        # Retrieve most relevant
+        relevant_scored = self.bullet_retriever.retrieve(
+            query=query,
+            bullets=all_bullets,
+        )
+
+        if not relevant_scored:
+            return ""
+
+        # Format for prompt
+        bullets_text = "\n".join([
+            f"- {bullet.content}"
+            for bullet, score in relevant_scored[:top_k]
+        ])
+
+        return f"""**Learned TDD Patterns** (from previous cycles):
+{bullets_text}
+"""
 
     def _run_tests(self) -> TestResult:
         """
