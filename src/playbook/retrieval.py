@@ -120,6 +120,7 @@ class BulletRetriever:
         query: str,
         primary_bullets: list[Bullet],
         secondary_bullets_by_playbook: dict[str, list[Bullet]],
+        primary_playbook_id: str,
         query_embedding: Optional[list[float]] = None,
         secondary_weight: float = 0.5,
     ) -> list[tuple[Bullet, float, str]]:
@@ -133,6 +134,7 @@ class BulletRetriever:
             query: Query text
             primary_bullets: Bullets from the primary (model-specific) playbook
             secondary_bullets_by_playbook: Dict mapping playbook_id to bullets from other models
+            primary_playbook_id: ID of the primary playbook (for source tracking)
             query_embedding: Pre-computed query embedding (optional)
             secondary_weight: Weight multiplier for secondary playbook bullets (0-1)
 
@@ -142,7 +144,6 @@ class BulletRetriever:
         scored_bullets = []
 
         # Score primary bullets (full weight)
-        primary_source = "primary"
         for bullet in primary_bullets:
             score = self._score_bullet(
                 query=query,
@@ -150,7 +151,7 @@ class BulletRetriever:
                 query_embedding=query_embedding,
             )
             if score >= self.similarity_threshold:
-                scored_bullets.append((bullet, score, primary_source))
+                scored_bullets.append((bullet, score, primary_playbook_id))
 
         # Score secondary bullets (weighted)
         for playbook_id, bullets in secondary_bullets_by_playbook.items():
@@ -176,8 +177,8 @@ class BulletRetriever:
 
         logger.debug(
             f"Cross-model retrieval: {len(result)} bullets "
-            f"({sum(1 for _, _, src in result if src == primary_source)} primary, "
-            f"{sum(1 for _, _, src in result if src != primary_source)} secondary)"
+            f"({sum(1 for _, _, src in result if src == primary_playbook_id)} primary, "
+            f"{sum(1 for _, _, src in result if src != primary_playbook_id)} secondary)"
         )
 
         return result

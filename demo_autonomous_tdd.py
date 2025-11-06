@@ -70,9 +70,9 @@ def main():
         )
     )
 
-    # Ensemble learner (using local models)
+    # Ensemble learner (using OpenAI for speed)
     models = [
-        ("ollama", "qwen2.5-coder:1.5b"),
+        ("openai", "gpt-4-turbo-preview"),
     ]
 
     ensemble = EnsembleLearner(

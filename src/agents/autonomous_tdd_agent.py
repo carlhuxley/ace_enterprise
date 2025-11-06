@@ -140,9 +140,9 @@ class AutonomousTDDAgent:
 
         # Playbook retrieval for injecting learned patterns
         from src.playbook.retrieval import BulletRetriever
-        from src.playbook.manager import PlaybookManager
         self.bullet_retriever = BulletRetriever()
-        self.playbook_manager = PlaybookManager()
+        # Use ensemble's playbook manager to see newly learned bullets
+        self.playbook_manager = ensemble_learner.playbook_manager
         self.playbook_id = ensemble_learner.playbook_id
 
         # Ensure directories exist
@@ -633,7 +633,7 @@ class Calculator:
 
         task = TaskInput(
             id=str(uuid.uuid4()),
-            prompt=f"""Analyze this successful TDD cycle and extract reusable patterns.
+            query=f"""Analyze this successful TDD cycle and extract reusable patterns.
 
 **Test increment**: {increment.test_name}
 **Description**: {increment.description}
@@ -668,20 +668,25 @@ Output 1-3 bullet points, one per line.""",
         )
 
         feedback = EnvironmentFeedback(
-            success=True,
-            output="Tests passed",
-            metrics={"test_quality": test_review.overall_score}
+            result="SUCCESS",
+            actual="Tests passed",
+            test_report={"test_quality": test_review.overall_score}
         )
 
         # Run ensemble learning (single model auto-approves)
-        result = self.ensemble_learner.learn_from_task(task, feedback, parallel=False)
+        result = self.ensemble.learn_from_task(task, feedback, parallel=False)
 
-        # Return approved bullets
-        return result.consensus_bullets
+        # Save approved bullets to playbook
+        self.ensemble.add_approved_bullets_to_playbook(result)
+
+        # Return approved bullets only
+        return result.approved_bullets
 
     def _get_playbook_guidance(self, query: str, top_k: int = 5) -> str:
         """
-        Retrieve relevant playbook bullets and format for prompt injection.
+        Retrieve relevant playbook bullets using T-shaped retrieval:
+        - Primary: Agent's own playbook (deep domain expertise)
+        - Secondary: All other playbooks (broad cross-domain knowledge)
 
         Args:
             query: Query to find relevant patterns
@@ -690,34 +695,61 @@ Output 1-3 bullet points, one per line.""",
         Returns:
             Formatted string to inject into prompts
         """
-        playbook = self.playbook_manager.get_playbook(self.playbook_id)
-        if not playbook:
+        # Get primary playbook (agent's own domain expertise)
+        primary_playbook = self.playbook_manager.get_playbook(self.playbook_id)
+        if not primary_playbook:
             return ""
 
-        # Get all bullets from playbook
-        all_bullets = []
-        for section_bullets in playbook.sections.values():
-            all_bullets.extend(section_bullets)
+        primary_bullets = []
+        for section_name, section_bullets in primary_playbook.sections.items():
+            primary_bullets.extend(section_bullets)
 
-        if not all_bullets:
-            return ""
+        logger.info(f"🔍 DEBUG: Primary playbook {self.playbook_id} has {len(primary_bullets)} bullets in memory")
 
-        # Retrieve most relevant
-        relevant_scored = self.bullet_retriever.retrieve(
+        # Get all other playbooks for cross-domain knowledge
+        secondary_bullets_by_playbook = {}
+
+        for playbook_id, pb in self.playbook_manager._playbooks.items():
+            # Skip agent's own playbook (already in primary)
+            if pb.playbook_id == self.playbook_id:
+                continue
+
+            # Get bullets from this playbook
+            playbook_bullets = []
+            for section_bullets in pb.sections.values():
+                playbook_bullets.extend(section_bullets)
+
+            if playbook_bullets:
+                secondary_bullets_by_playbook[pb.playbook_id] = playbook_bullets
+
+        # Cross-playbook retrieval (T-shaped: deep + broad)
+        relevant_scored = self.bullet_retriever.retrieve_cross_model(
             query=query,
-            bullets=all_bullets,
+            primary_bullets=primary_bullets,
+            secondary_bullets_by_playbook=secondary_bullets_by_playbook,
+            primary_playbook_id=self.playbook_id,
+            secondary_weight=0.5,  # Secondary bullets get 50% weight
         )
 
         if not relevant_scored:
             return ""
 
-        # Format for prompt
+        # Count sources for logging
+        primary_count = sum(1 for _, _, src in relevant_scored if src == self.playbook_id)
+        secondary_count = len(relevant_scored) - primary_count
+
+        logger.info(
+            f"Retrieved {len(relevant_scored)} bullets for query "
+            f"({primary_count} from own playbook, {secondary_count} from others)"
+        )
+
+        # Format for prompt (take top_k)
         bullets_text = "\n".join([
             f"- {bullet.content}"
-            for bullet, score in relevant_scored[:top_k]
+            for bullet, score, source in relevant_scored[:top_k]
         ])
 
-        return f"""**Learned TDD Patterns** (from previous cycles):
+        return f"""**Learned Patterns** (from previous experience):
 {bullets_text}
 """
 
