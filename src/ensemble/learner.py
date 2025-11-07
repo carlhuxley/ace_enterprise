@@ -387,7 +387,7 @@ class EnsembleLearner:
             # Each model votes
             for model_id in model_proposals.keys():
                 # Create LLM client for this model
-                provider, model = model_id.split("/")
+                provider, model = model_id.split("/", 1)  # Split only on first slash
 
                 # Find base_url if this is a vLLM model
                 base_url = None

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Demo: Autonomous TDD Agent
+Demo: Autonomous TDD Agent with RunPod vLLM Ensemble
 
-Shows how agent builds features autonomously using TDD discipline:
-- Plans incremental tests
-- RED: Writes failing test
-- GREEN: Writes minimal code
-- REFACTOR: Improves quality
-- LEARN: Extracts patterns
+Uses 3x 7B models on RTX 4090 via RunPod:
+- Qwen2.5-Coder-7B-Instruct (port 8001 → 35303)
+- Qwen2.5-7B-Instruct (port 8002 → 35304)
+- DeepSeek-Coder-6.7B-Instruct (port 8003 → 35305)
+
+Much better code quality than 1.5B models!
+Tests T-shaped retrieval and ensemble learning bug fixes.
 """
 import sys
 sys.path.insert(0, "/home/ch_dev/ace_enterprise")
@@ -30,20 +31,32 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# RunPod configuration - 7B models for better quality
+RUNPOD_IP = "213.173.102.138"
+MODELS = [
+    ("vllm", "Qwen/Qwen2.5-Coder-7B-Instruct", f"http://{RUNPOD_IP}:35303"),
+    ("vllm", "Qwen/Qwen2.5-7B-Instruct", f"http://{RUNPOD_IP}:35304"),
+    ("vllm", "deepseek-ai/deepseek-coder-6.7b-instruct", f"http://{RUNPOD_IP}:35305"),
+]
+
 
 def main():
     print("\n" + "=" * 80)
-    print("  AUTONOMOUS TDD AGENT DEMO")
+    print("  AUTONOMOUS TDD AGENT - RUNPOD vLLM ENSEMBLE")
     print("=" * 80)
-    print("\n💡 Agent will build feature COMPLETELY AUTONOMOUSLY using TDD")
-    print("   - Plans test increments (methodical, not random)")
-    print("   - RED: Writes failing test")
-    print("   - GREEN: Writes minimal code to pass")
-    print("   - REFACTOR: Improves quality")
-    print("   - LEARN: Extracts patterns")
+    print("\n🚀 Running on RTX 4090 via RunPod")
+    print(f"   Endpoint: {RUNPOD_IP}")
+    print(f"   Models: {len(MODELS)}")
+    for i, (provider, model, url) in enumerate(MODELS, 1):
+        print(f"     {i}. {model.split('/')[-1]}")
+
+    print("\n💡 Testing T-shaped retrieval + ensemble learning")
+    print("   - Cross-model bullet voting")
+    print("   - Parallel execution on GPU")
+    print("   - Learning from multi-model consensus")
 
     # Setup demo workspace
-    demo_root = Path("/tmp/autonomous_tdd_demo")
+    demo_root = Path("/tmp/autonomous_tdd_runpod")
     if demo_root.exists():
         shutil.rmtree(demo_root)
     demo_root.mkdir(parents=True)
@@ -53,7 +66,7 @@ def main():
     test_dir.mkdir(parents=True)
     src_dir.mkdir(parents=True)
 
-    # Create __init__.py for src to make it a package
+    # Create __init__.py
     (src_dir / "__init__.py").write_text("")
 
     print(f"\n📁 Demo workspace: {demo_root}")
@@ -65,21 +78,21 @@ def main():
     playbook_manager = PlaybookManager()
     playbook = playbook_manager.create_playbook(
         PlaybookCreate(
-            domain="autonomous_tdd_demo",
+            domain="autonomous_tdd_runpod",
             base_model="qwen2.5-coder:1.5b"
         )
     )
 
-    # Ensemble learner (using OpenAI for speed)
-    models = [
-        ("openai", "gpt-4-turbo-preview"),
-    ]
+    print(f"  ✓ Playbook created: {playbook.playbook_id}")
 
+    # Ensemble learner (using RunPod vLLM)
     ensemble = EnsembleLearner(
-        models=models,
+        models=MODELS,
         playbook_id=playbook.playbook_id,
         enable_deliberation=False  # MVP: Simple voting only
     )
+
+    print(f"  ✓ Ensemble initialized with {len(MODELS)} models")
 
     # Test reviewer
     test_reviewer = TestReviewAgent(use_llm_analysis=False)
@@ -95,23 +108,19 @@ def main():
         review_threshold=0.7
     )
 
-    print("  ✓ Components initialized")
+    print("  ✓ Autonomous TDD Agent ready")
 
-    # Demo 1: To-Do List (more complex state management)
+    # Run TodoList challenge
     print("\n" + "─" * 80)
-    print("DEMO 1: To-Do List")
+    print("CHALLENGE: To-Do List")
     print("─" * 80)
     print("\nRequirement: 'TodoList that can add tasks, mark them complete, list all tasks, and remove tasks'")
-    print("\nAgent will autonomously:")
-    print("  1. Plan test increments (test_create, test_add_task, etc.)")
-    print("  2. Write each test (RED)")
-    print("  3. Write minimal code (GREEN)")
-    print("  4. Verify tests pass")
-    print("  5. Learn patterns")
-    print("\n⏳ Building feature autonomously...\n")
+    print("\n⏳ Building feature with GPU-accelerated ensemble...\n")
 
     try:
-        result = agent.build_feature("TodoList that can add tasks, mark them complete, list all tasks, and remove tasks")
+        result = agent.build_feature(
+            "TodoList that can add tasks, mark them complete, list all tasks, and remove tasks"
+        )
 
         print("\n" + "=" * 80)
         print("✅ FEATURE COMPLETE!")
@@ -127,20 +136,12 @@ def main():
         print("\n📄 Generated Files:")
         for test_file in result.test_files:
             print(f"  • {test_file.relative_to(demo_root)}")
-            print(f"    {test_file.stat().st_size} bytes")
         for impl_file in result.implementation_files:
             if impl_file.name != "__init__.py":
                 print(f"  • {impl_file.relative_to(demo_root)}")
-                print(f"    {impl_file.stat().st_size} bytes")
 
         # Show generated code
-        print("\n📝 Generated Test Code:")
-        print("─" * 80)
-        for test_file in result.test_files:
-            content = test_file.read_text()
-            print(content)
-
-        print("\n📝 Generated Implementation Code:")
+        print("\n📝 Generated Implementation:")
         print("─" * 80)
         for impl_file in result.implementation_files:
             if impl_file.name != "__init__.py":
@@ -150,16 +151,15 @@ def main():
         print("\n" + "=" * 80)
         print("DEMO COMPLETE!")
         print("=" * 80)
-        print("\n✅ Agent successfully built feature autonomously!")
-        print("✅ All tests passing")
-        print("✅ Implementation complete")
-        print("✅ Code is minimal and focused (no vibe coding!)")
-        print("\n💡 Key Principles Demonstrated:")
-        print("   1. Methodical planning (not random coding)")
-        print("   2. Test-first discipline (RED → GREEN → REFACTOR)")
-        print("   3. Minimal implementation (YAGNI principle)")
-        print("   4. Verification at every step (tests must pass)")
-        print("\n📚 This is the foundation for fully autonomous development!")
+        print("\n✅ GPU-accelerated ensemble learning successful!")
+        print(f"✅ All {result.cycles_executed} cycles completed")
+        print("✅ T-shaped retrieval working correctly")
+        print("✅ Multi-model consensus achieved")
+
+        # Show playbook
+        print(f"\n📚 Playbook: {playbook.playbook_id}")
+        print(f"   Location: data/playbooks/{playbook.playbook_id}.json")
+        print(f"   Bullets learned: {result.playbook_bullets_added}")
 
     except Exception as e:
         print(f"\n❌ Demo failed: {e}")

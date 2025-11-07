@@ -88,6 +88,7 @@ class Generator:
                 query=task.query,
                 primary_bullets=primary_bullets,
                 secondary_bullets_by_playbook=secondary_bullets,
+                primary_playbook_id=playbook_id,
                 query_embedding=query_embedding,
                 secondary_weight=settings.cross_model_weight,
             )
@@ -97,7 +98,7 @@ class Generator:
             bullets_used = [bullet.id for bullet, _ in retrieved_bullets]
 
             # Log source distribution
-            primary_count = sum(1 for _, _, src in retrieved_with_source if src == "primary")
+            primary_count = sum(1 for _, _, src in retrieved_with_source if src == playbook_id)
             secondary_count = len(retrieved_with_source) - primary_count
             logger.debug(
                 f"Cross-model retrieval for task {task.id}: "
