@@ -26,25 +26,26 @@ fi
 
 # Configuration
 export CUDA_VISIBLE_DEVICES=0
-GPU_MEMORY_PER_MODEL=0.28  # 30% each = 90% total for 3 models
-MAX_MODEL_LEN=2048  # Good for most ACE tasks
-MAX_TOKENS=1024  # Limit response length
-TENSOR_PARALLEL=1  # No tensor parallelism for small models
+GPU_MEMORY_PER_MODEL=0.3  # 30% each = 90% total for 3 models (RTX 4090 has 24GB)
+MAX_MODEL_LEN=4096  # Increased for 7B models
+MAX_TOKENS=2048  # Increased response length for better quality
+TENSOR_PARALLEL=1  # No tensor parallelism for 7B models on single GPU
 
-# Model paths - Optimized for ensemble learning with small, fast models
-MODEL1="Qwen/Qwen2.5-Coder-1.5B-Instruct"  # Fast coding model
-MODEL2="Qwen/Qwen2.5-1.5B-Instruct"        # General reasoning model
-MODEL3="Qwen/Qwen2.5-Coder-0.5B-Instruct"  # Ultra-fast backup model
+# Model paths - 7B models for better code quality
+# RTX 4090 (24GB) can easily fit 3x 7B models (~12GB total)
+MODEL1="Qwen/Qwen2.5-Coder-7B-Instruct"              # Best coding model (~4GB)
+MODEL2="Qwen/Qwen2.5-7B-Instruct"                    # General reasoning (~4GB)
+MODEL3="deepseek-ai/deepseek-coder-6.7b-instruct"    # Alternative coder (~4GB)
 
 # Ports for each model
-PORT1=8001  # qwen2.5-coder-1.5b
-PORT2=8002  # qwen2.5-1.5b
-PORT3=8003  # qwen2.5-coder-0.5b
+PORT1=8001  # qwen2.5-coder-7b
+PORT2=8002  # qwen2.5-7b
+PORT3=8003  # deepseek-coder-6.7b
 
 # Create log directory
 mkdir -p /workspace/logs
 
-echo "Starting Model 1: Qwen2.5-Coder-1.5B on port $PORT1..."
+echo "Starting Model 1: Qwen2.5-Coder-7B on port $PORT1..."
 vllm serve "$MODEL1" \
   --host 0.0.0.0 \
   --port $PORT1 \
