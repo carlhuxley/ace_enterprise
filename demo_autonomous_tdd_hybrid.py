@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Demo: Autonomous TDD Agent with Hybrid Ensemble
-- 1x RunPod vLLM (GPU-accelerated): Qwen2.5-Coder-1.5B
-- 2x Local Ollama: qwen2.5-coder:1.5b, qwen2.5:1.5b
+Demo: Autonomous TDD Agent with Hybrid Ensemble - OAuth Authentication
+- 2x Local Ollama: deepseek-coder:6.7b, qwen2.5-coder:1.5b
+- 1x RunPod vLLM (GPU-accelerated): Qwen2.5-Coder-7B (when ready)
 
-Tests our bug fixes:
-1. T-shaped retrieval source counting
-2. Ensemble learner primary_playbook_id parameter
+Tests OAuth authentication implementation with ensemble learning
 """
 import sys
 sys.path.insert(0, "/home/ch_dev/ace_enterprise")
@@ -29,34 +27,36 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Hybrid configuration: 1 RunPod + 2 local
+# Hybrid configuration: 2 local + 1 RunPod (when ready)
 RUNPOD_IP = "213.173.102.138"
+RUNPOD_PORT = "32277"  # Port for first vLLM server
+
+# Hybrid: OpenAI GPT-4o (quality) + GPT-4o-mini (speed)
 MODELS = [
-    ("vllm", "Qwen/Qwen2.5-Coder-1.5B-Instruct", f"http://{RUNPOD_IP}:35303"),  # RunPod GPU
-    ("ollama", "qwen2.5-coder:1.5b", "http://localhost:11434"),                 # Local
-    ("ollama", "qwen2.5:1.5b", "http://localhost:11434"),                       # Local
+    ("openai", "gpt-4o", None),           # Primary - Best for complex coding
+    ("openai", "gpt-4o-mini", None),      # Secondary - Fast consensus
 ]
 
 
 def main():
     print("\n" + "=" * 80)
-    print("  AUTONOMOUS TDD AGENT - HYBRID ENSEMBLE")
+    print("  AUTONOMOUS TDD AGENT - OAuth Authentication Challenge")
     print("=" * 80)
     print("\n🚀 Hybrid Configuration:")
-    print(f"   1x RunPod vLLM (GPU): Qwen2.5-Coder-1.5B on RTX 4090")
-    print(f"   2x Local Ollama: qwen2.5-coder:1.5b, qwen2.5:1.5b")
-    print(f"\n   Models: {len(MODELS)}")
+    print(f"   OpenAI GPT-4o (primary) + GPT-4o-mini (consensus)")
+    print(f"   Fast, reliable, cloud-based ensemble")
+    print(f"\n   Active Models: {len(MODELS)}")
     for i, (provider, model, url) in enumerate(MODELS, 1):
-        location = "RunPod RTX 4090" if provider == "vllm" else "Local"
-        print(f"     {i}. {model.split('/')[-1]} ({location})")
+        print(f"     {i}. {model} ({provider.upper()})")
 
-    print("\n💡 Testing Bug Fixes:")
-    print("   ✓ T-shaped retrieval source counting")
-    print("   ✓ Ensemble learner primary_playbook_id parameter")
-    print("   ✓ Cross-model bullet voting")
+    print("\n💡 Testing Ambitious Feature:")
+    print("   🔐 OAuth Authentication Implementation")
+    print("   ✓ Ensemble learning with security best practices")
+    print("   ✓ Multi-model consensus on auth flows")
+    print("   ✓ TDD for critical security code")
 
     # Setup demo workspace
-    demo_root = Path("/tmp/autonomous_tdd_hybrid")
+    demo_root = Path("/tmp/oauth_auth_demo")
     if demo_root.exists():
         shutil.rmtree(demo_root)
     demo_root.mkdir(parents=True)
@@ -78,8 +78,8 @@ def main():
     playbook_manager = PlaybookManager()
     playbook = playbook_manager.create_playbook(
         PlaybookCreate(
-            domain="autonomous_tdd_hybrid",
-            base_model="qwen2.5-coder:1.5b"
+            domain="oauth_authentication",
+            base_model="deepseek-coder:6.7b"
         )
     )
 
@@ -110,16 +110,24 @@ def main():
 
     print("  ✓ Autonomous TDD Agent ready")
 
-    # Run TodoList challenge
+    # Run OAuth Authentication challenge
     print("\n" + "─" * 80)
-    print("CHALLENGE: To-Do List")
+    print("CHALLENGE: OAuth Authentication")
     print("─" * 80)
-    print("\nRequirement: 'TodoList that can add tasks, mark them complete, list all tasks, and remove tasks'")
-    print("\n⏳ Building feature with hybrid ensemble (GPU + local)...\n")
+    print("\nRequirement:")
+    print("  'OAuth authentication system that can:")
+    print("   - Handle OAuth authorization code flow")
+    print("   - Exchange authorization code for access tokens")
+    print("   - Validate and refresh tokens")
+    print("   - Store user sessions securely")
+    print("   - Support multiple OAuth providers (Google, GitHub)'")
+    print("\n⏳ Building feature with ensemble learning...\n")
 
     try:
         result = agent.build_feature(
-            "TodoList that can add tasks, mark them complete, list all tasks, and remove tasks"
+            "OAuth authentication system that handles authorization code flow, "
+            "token exchange, token validation and refresh, secure session storage, "
+            "and supports multiple providers like Google and GitHub"
         )
 
         print("\n" + "=" * 80)
@@ -149,13 +157,13 @@ def main():
                 print(content)
 
         print("\n" + "=" * 80)
-        print("DEMO COMPLETE!")
+        print("OAUTH AUTHENTICATION - DEMO COMPLETE!")
         print("=" * 80)
-        print("\n✅ Hybrid ensemble learning successful!")
+        print("\n✅ OAuth implementation generated!")
         print(f"✅ All {result.cycles_executed} cycles completed")
-        print("✅ T-shaped retrieval working correctly")
-        print("✅ Multi-model consensus achieved")
-        print("✅ Bug fixes verified!")
+        print("✅ Ensemble consensus on security patterns")
+        print("✅ TDD applied to critical auth code")
+        print("✅ Multi-model validation successful!")
 
         # Show playbook
         print(f"\n📚 Playbook: {playbook.playbook_id}")

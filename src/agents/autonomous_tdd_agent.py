@@ -149,6 +149,9 @@ class AutonomousTDDAgent:
         self.test_dir.mkdir(parents=True, exist_ok=True)
         self.src_dir.mkdir(parents=True, exist_ok=True)
 
+        # Track test functions per file for cycle isolation
+        self.test_functions = {}  # {test_file_path: [{'cycle': int, 'name': str, 'code': str}]}
+
         logger.info(f"AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
         logger.info(f"  Test dir: {test_dir}")
@@ -330,7 +333,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         """
         # RED: Write failing test
         logger.info("  🔴 RED: Writing failing test...")
-        test_code = self._write_test(increment)
+        test_code = self._write_test(increment, cycle_number)
         logger.info(f"      Created: {increment.test_file.relative_to(self.project_root)}")
 
         red_result = self._run_tests()
@@ -341,18 +344,30 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             )
         logger.info(f"  ⚙️  Running tests... FAILED (expected)")
 
-        # GREEN: Write minimal code
+        # GREEN: Write minimal code (with retry logic)
         logger.info("  🟢 GREEN: Writing minimal code...")
-        impl_code = self._write_minimal_code(increment, red_result)
-        logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
+        MAX_GREEN_RETRIES = 3
+        green_result = None
 
-        green_result = self._run_tests()
+        for attempt in range(1, MAX_GREEN_RETRIES + 1):
+            if attempt > 1:
+                logger.info(f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)...")
+
+            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result)
+            logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
+
+            green_result = self._run_tests()
+            if green_result.all_passed:
+                logger.info(f"  ⚙️  Running tests... PASSED ✓")
+                break
+            else:
+                logger.warning(f"  ⚠️  Tests still failing after attempt {attempt}: {green_result.error[:100]}...")
+
         if not green_result.all_passed:
             raise RuntimeError(
                 f"Tests must pass after implementation (GREEN phase). "
-                f"Still failing: {green_result.error}"
+                f"Still failing after {MAX_GREEN_RETRIES} attempts: {green_result.error}"
             )
-        logger.info(f"  ⚙️  Running tests... PASSED ✓")
 
         # REFACTOR: Improve quality (optional)
         refactored = False
@@ -388,20 +403,24 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             cycle_number=cycle_number
         )
 
-    def _write_test(self, increment: TestIncrement) -> str:
+    def _write_test(self, increment: TestIncrement, cycle_number: int) -> str:
         """
         Write failing test for increment.
 
+        Uses array-based storage for cycle isolation.
+
         Args:
             increment: Test specification
+            cycle_number: Current cycle number
 
         Returns:
             Generated test code
         """
-        # Check if test file exists
-        existing_code = ""
-        if increment.test_file.exists():
-            existing_code = increment.test_file.read_text()
+        test_file_key = str(increment.test_file)
+
+        # Get existing test functions for context (but don't modify file directly)
+        existing_functions = self.test_functions.get(test_file_key, [])
+        existing_code = "\n\n".join([f['code'] for f in existing_functions]) if existing_functions else ""
 
         # Get learned patterns from playbook
         playbook_guidance = self._get_playbook_guidance(
@@ -431,6 +450,11 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 - Do NOT mix patterns (don't use standalone `add()` if existing tests use `calc.add()`)
 
 **Task**: Write ONLY the test function `{increment.test_name}`.
+
+**CRITICAL CONSTRAINT**:
+- Output EXACTLY ONE function: {increment.test_name}
+- If you output multiple functions, the system will FAIL
+- Do NOT write future tests, ONLY this one test
 
 **Guidelines**:
 1. Write ONLY the test function (imports are added automatically)
@@ -464,30 +488,41 @@ def test_add_returns_sum():
         # Extract code from response
         test_function = self._extract_code(response)
 
-        # Append to existing file or create new
-        if existing_code:
-            full_code = existing_code + "\n\n" + test_function
-        else:
-            # New file, add imports and function
-            module_name = increment.implementation_file.stem
-            full_code = f"""# Test file for {module_name}
-import pytest
-from src.{module_name} import *
+        # Validate: ensure only ONE function was generated
+        function_count = self._count_functions(test_function)
+        if function_count == 0:
+            raise ValueError(f"LLM generated no test functions for {increment.test_name}")
+        elif function_count > 1:
+            logger.warning(
+                f"⚠️  LLM generated {function_count} functions instead of 1, "
+                f"extracting only '{increment.test_name}'"
+            )
+            # Extract only the requested function
+            test_function = self._extract_single_function(test_function, increment.test_name)
 
+        # Store in array for cycle isolation
+        if test_file_key not in self.test_functions:
+            self.test_functions[test_file_key] = []
 
-{test_function}"""
+        self.test_functions[test_file_key].append({
+            'cycle': cycle_number,
+            'name': increment.test_name,
+            'code': test_function
+        })
 
-        increment.test_file.write_text(full_code)
+        # Assemble complete file from all stored functions
+        self._assemble_test_file(increment.test_file, increment.implementation_file)
 
         return test_function
 
-    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult) -> str:
+    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None) -> str:
         """
         Write minimal code to make test pass (GREEN phase).
 
         Args:
             increment: Test specification
             test_result: Result of failed test (RED phase)
+            previous_failure: Previous GREEN phase failure (for retry feedback)
 
         Returns:
             Generated implementation code
@@ -530,7 +565,15 @@ from src.{module_name} import *
 ```python
 {existing_code if existing_code else "# Empty file - create what's needed"}
 ```
-
+{"" if not previous_failure else f'''
+**⚠️ RETRY FEEDBACK**: Your previous implementation didn't pass the test.
+**Previous implementation error**:
+```
+{previous_failure.error or previous_failure.output}
+```
+**What went wrong**: The implementation you provided didn't satisfy the test assertion.
+**Action needed**: Fix the implementation to make the test pass. Return a value that satisfies the test.
+'''}
 **Task**: Write the MINIMAL implementation code to make THIS test pass.
 
 **TDD Constraints**:
@@ -819,6 +862,45 @@ Output 1-3 bullet points, one per line.""",
                 error=f"Test execution failed: {e}"
             )
 
+    def _count_functions(self, code: str) -> int:
+        """
+        Count function definitions in code using AST parsing.
+
+        Args:
+            code: Python code to analyze
+
+        Returns:
+            Number of function definitions found
+        """
+        try:
+            tree = ast.parse(code)
+            return sum(1 for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
+        except SyntaxError:
+            logger.warning("Failed to parse code for function counting")
+            return 0
+
+    def _extract_single_function(self, code: str, function_name: str) -> str:
+        """
+        Extract only the named function from code using AST.
+
+        Args:
+            code: Python code containing multiple functions
+            function_name: Name of function to extract
+
+        Returns:
+            Code for just the requested function, or original code if extraction fails
+        """
+        try:
+            tree = ast.parse(code)
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    return ast.unparse(node)
+            logger.warning(f"Function '{function_name}' not found in generated code")
+            return code
+        except Exception as e:
+            logger.warning(f"Failed to extract function '{function_name}': {e}")
+            return code
+
     def _extract_code(self, llm_response: str) -> str:
         """
         Extract Python code from LLM response.
@@ -848,6 +930,42 @@ Output 1-3 bullet points, one per line.""",
 
         # Assume entire response is code
         return llm_response.strip()
+
+    def _assemble_test_file(self, test_file: Path, implementation_file: Path):
+        """
+        Assemble complete test file from stored test functions.
+
+        Provides cycle isolation by building file from individual tracked functions.
+
+        Args:
+            test_file: Path to test file to assemble
+            implementation_file: Path to implementation (for import statement)
+        """
+        test_file_key = str(test_file)
+
+        # Get functions for this test file
+        functions = self.test_functions.get(test_file_key, [])
+
+        if not functions:
+            # No functions yet, file will be created on first test write
+            return
+
+        # Build file header
+        module_name = implementation_file.stem
+        header = f"""# Test file for {module_name}
+import pytest
+from src.{module_name} import *
+
+"""
+
+        # Combine all test functions in cycle order
+        test_bodies = "\n\n".join([f['code'] for f in functions])
+
+        # Write complete file
+        full_content = header + test_bodies
+        test_file.write_text(full_content)
+
+        logger.debug(f"Assembled {len(functions)} test function(s) into {test_file.name}")
 
     def _collect_test_files(self) -> list[Path]:
         """Collect all test files created."""
