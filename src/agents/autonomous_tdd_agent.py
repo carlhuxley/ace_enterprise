@@ -351,28 +351,63 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         return increments
 
     def _get_existing_test_summaries(self) -> str:
-        """Generate summary of existing tests to help avoid redundancy.
+        """Generate summary of existing tests and implementation to help avoid redundancy.
 
         Returns:
-            String listing what each existing test checks
+            String listing what each existing test checks and what implementation exists
         """
-        if not self.test_functions:
-            return "No tests written yet."
-
         summaries = []
-        for test_file_key, functions in self.test_functions.items():
-            test_file_name = Path(test_file_key).name
-            summaries.append(f"\n**{test_file_name}:**")
-            for func in functions:
-                # Extract what the test checks from the code
-                code = func['code']
-                # Look for assert statements to understand what's being tested
-                assert_lines = [line.strip() for line in code.split('\n') if 'assert' in line]
-                if assert_lines:
-                    checks = ' | '.join(assert_lines[:2])  # First 2 assertions
-                    summaries.append(f"  - {func['name']}: {checks}")
-                else:
-                    summaries.append(f"  - {func['name']}")
+
+        # Part 1: Existing tests and their assertions
+        if self.test_functions:
+            summaries.append("**Tests already written:**")
+            for test_file_key, functions in self.test_functions.items():
+                test_file_name = Path(test_file_key).name
+                summaries.append(f"\n{test_file_name}:")
+                for func in functions:
+                    # Extract what the test checks from the code
+                    code = func['code']
+                    # Look for assert statements to understand what's being tested
+                    assert_lines = [line.strip() for line in code.split('\n') if 'assert' in line]
+                    if assert_lines:
+                        checks = ' | '.join(assert_lines[:2])  # First 2 assertions
+                        summaries.append(f"  - {func['name']}: {checks}")
+                    else:
+                        summaries.append(f"  - {func['name']}")
+        else:
+            summaries.append("**Tests already written:** None yet")
+
+        # Part 2: Existing implementation details
+        impl_files = self._collect_implementation_files()
+        if impl_files:
+            summaries.append("\n**Implementation already contains:**")
+            for impl_file in impl_files:
+                if impl_file.name != "__init__.py" and impl_file.name != "__pycache__":
+                    content = impl_file.read_text()
+                    # Extract class definitions and attributes
+                    import re
+
+                    # Find class definitions
+                    classes = re.findall(r'class\s+(\w+)', content)
+
+                    # Find instance attributes (self.xxx =)
+                    attributes = re.findall(r'self\.(\w+)\s*=', content)
+
+                    # Find method definitions
+                    methods = re.findall(r'def\s+(\w+)\s*\(', content)
+
+                    summaries.append(f"\n{impl_file.name}:")
+                    if classes:
+                        summaries.append(f"  - Classes: {', '.join(set(classes))}")
+                    if attributes:
+                        summaries.append(f"  - Attributes: {', '.join(f'self.{a}' for a in set(attributes))}")
+                    if methods:
+                        # Filter out __init__ and private methods for brevity
+                        public_methods = [m for m in set(methods) if not m.startswith('_')]
+                        if public_methods:
+                            summaries.append(f"  - Methods: {', '.join(public_methods)}")
+        else:
+            summaries.append("\n**Implementation already contains:** Nothing yet")
 
         return "\n".join(summaries)
 
@@ -434,13 +469,23 @@ The unit tests should work toward making these scenarios pass.
 {impl_context if impl_context else "No implementation yet."}
 {gherkin_section}
 
-**Tests already written (AVOID REDUNDANCY):**
 {test_summaries}
 
-⚠️  **CRITICAL**: The next test you choose MUST:
-1. Test NEW behavior not already covered by tests above
+⚠️  **CRITICAL - AVOID REDUNDANT TESTS**: The next test you choose MUST:
+1. Test NEW behavior not already covered by tests OR implementation above
 2. FAIL with the current implementation (for RED phase)
-3. NOT duplicate or overlap with existing test assertions
+3. NOT test attributes/methods that already exist in the implementation
+4. NOT duplicate or overlap with existing test assertions
+
+**Examples of REDUNDANT tests to AVOID:**
+- If implementation has `self.client_id` → DON'T test: `assert oauth.client_id == value`
+- If implementation has `def get_token()` → DON'T test creation of `get_token()` method
+- If test already checks `is not None` → DON'T add another `is not None` test
+
+**Examples of GOOD next tests:**
+- If implementation has basic constructor → Test a NEW method that doesn't exist yet
+- If implementation has method A → Test a NEW method B
+- If implementation returns hardcoded value → Test that it derives value correctly
 
 **Task**: Determine the NEXT SINGLE test to write.
 

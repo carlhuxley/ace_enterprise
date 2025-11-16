@@ -1,0 +1,1 @@
+- can the agent check against existin tests to make sure there is no redundency before running the red phase?
