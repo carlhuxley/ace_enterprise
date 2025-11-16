@@ -174,4 +174,130 @@ assemble_file(test_functions)  # Controlled, deterministic
 
 ---
 
-*Last updated: 2025-11-15*
+## 2025-11-16 - Session: Redundancy Detection Enhancement
+
+### 1. Bug Discovery: Over-Implementation in GREEN Phase
+**Timestamp:** 2025-11-16 15:00 UTC
+
+**Context:** Demo v2 and v3 failed at Cycle 2 with "Test passed unexpectedly" error despite initial redundancy checking implementation.
+
+**Insight:** "can the agent check against existing tests to make sure there is no redundency before running th red phase/"
+
+**Root Cause Analysis:**
+User identified that the problem wasn't test redundancy per se, but **over-implementation**:
+- Cycle 1 test: Only checked `assert oauth is not None`
+- Cycle 1 implementation: Stored `self.client_id` AND `self.redirect_uri` (more than needed)
+- Cycle 2 test: Tried to verify those attributes
+- Result: Test passed immediately because attributes already existed
+
+**Key Insight:**
+- Original redundancy checking only showed test assertions
+- Didn't reveal what the **implementation** already contained
+- LLM couldn't see that testing `self.client_id` would be redundant with existing implementation state
+
+**Strategic Value:**
+- Distinguished between test redundancy (assertion overlap) vs. implementation redundancy (testing what exists)
+- Identified gap in redundancy detection: needed to show implementation state, not just test state
+- Understood that GREEN phase correctly following best practices (storing constructor params) created the conflict
+
+**Impact:** Led to enhanced redundancy checking that analyzes both tests AND implementation (classes, attributes, methods).
+
+---
+
+### 2. Validation Request: Proof of Fix
+**Timestamp:** 2025-11-16 15:15 UTC
+
+**Insight:** "yes please" (in response to running full demo with enhancement)
+
+**Strategic Value:**
+- Insisted on empirical validation rather than accepting theoretical fix
+- Wanted to see actual demo run demonstrating the fix working
+- End-to-end testing mindset: "Show me it works in practice"
+
+**Result:** Demo v4 successfully avoided Cycle 2 redundancy failure:
+- Cycle 1: `test_create_oauth_client` ✓
+- Cycle 2: `test_generate_authorization_url` ✓ (NEW method, not redundant attribute test!)
+- Cycle 3: `test_exchange_auth_code_for_token` ✓
+- Cycle 4+: Continuing successfully
+
+**Impact:** Validated that enhanced redundancy checking (showing implementation state) successfully prevents over-implementation redundancy issues.
+
+---
+
+---
+
+### 3. Architectural Insight: Playbook-Based Semantic Learning
+**Timestamp:** 2025-11-16 15:45 UTC
+
+**Insight:** "Massive improvement though. Next thought is should some of the prompt engineering for this be in the playbook bullets?"
+
+**Follow-up Recognition:** "isn't this implementing the semantic learning you mentioned?"
+
+**Strategic Insight:**
+User identified a fundamental architectural shift from **syntactic rules** to **semantic learning**:
+
+**Current Approach (Syntactic):**
+- Hardcoded rules in prompts: "If implementation has `self.client_id`, don't test it"
+- Static, doesn't improve over time
+- Brittle to new patterns
+
+**Proposed Approach (Semantic):**
+- Store redundancy patterns as playbook bullets learned from failures
+- Agent understands WHY patterns are redundant, not just WHAT to avoid
+- Self-improving through experience
+- Generalizes to new situations
+
+**Conceptual Breakthrough:**
+User connected this to **semantic learning** in the ACE framework:
+- **Aspiration**: Write non-redundant tests
+- **Cognition**: Understand patterns of redundancy (semantic knowledge stored in playbook)
+- **Execution**: Apply learned patterns contextually
+
+**Example Semantic Pattern:**
+Instead of: "Don't test `client_id` attribute"
+Learn: "Constructor parameter storage is implicitly tested by successful instantiation. When `__init__(x, y)` stores `self.x, self.y`, testing attribute access is redundant because creation validates storage."
+
+**Architectural Value:**
+- **Playbook becomes semantic memory**: Stores concepts, relationships, and patterns
+- **Contextual retrieval**: Only relevant patterns shown when needed
+- **Ensemble validation**: Patterns upvoted/downvoted based on usefulness
+- **Self-improving system**: Gets smarter with each failure
+- **Project-specific learning**: OAuth patterns vs. Database patterns vs. UI patterns
+
+**Learning Loop:**
+```
+Failure → Analyze pattern → Store semantic bullet → Retrieve contextually → Apply understanding → Success
+```
+
+**Impact:** Identified that playbook-based learning transforms the system from rule-following to pattern-understanding, implementing true semantic learning as envisioned in the ACE framework.
+
+**Implementation Plan:**
+1. On redundancy failures: Create semantic pattern bullets during LEARN phase
+2. During planning: Query playbook for "test redundancy anti-patterns"
+3. Store WHY patterns are redundant, not just WHAT failed
+4. Enable ensemble voting on pattern usefulness
+
+---
+
+## Session Metrics (2025-11-16)
+
+**Total Contributions:** 3
+- Bug discoveries: 1
+- Quality assurance: 1
+- Architectural insights: 1
+
+**Value Categories:**
+- Debugging: ✓
+- Quality assurance: ✓
+- Empirical validation: ✓
+- Systems architecture: ✓
+- Learning theory: ✓
+
+**Key Patterns:**
+- Strong **root cause analysis** and **validation-driven development** mindset
+- **Meta-cognitive thinking**: Recognizes when implementation aligns with theoretical frameworks
+- **Architectural vision**: Sees connections between tactical changes and strategic paradigms
+
+---
+
+*Last updated: 2025-11-16*

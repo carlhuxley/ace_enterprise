@@ -432,6 +432,12 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         # Get test summaries for redundancy checking
         test_summaries = self._get_existing_test_summaries()
 
+        # Retrieve learned redundancy patterns from playbook
+        redundancy_patterns = self._get_playbook_guidance(
+            query="test redundancy anti-patterns avoid",
+            top_k=3
+        )
+
         # Build context about what exists
         test_context = ""
         if existing_tests:
@@ -470,6 +476,9 @@ The unit tests should work toward making these scenarios pass.
 {gherkin_section}
 
 {test_summaries}
+
+**🧠 LEARNED REDUNDANCY PATTERNS (from past failures):**
+{redundancy_patterns if redundancy_patterns.strip() else "No redundancy patterns learned yet."}
 
 ⚠️  **CRITICAL - AVOID REDUNDANT TESTS**: The next test you choose MUST:
 1. Test NEW behavior not already covered by tests OR implementation above
@@ -568,6 +577,21 @@ Output EITHER:
 
         red_result = self._run_tests()
         if not red_result.failed:
+            # LEARN from redundancy failure before exiting
+            logger.info("  🧠 LEARN: Analyzing redundancy pattern...")
+            redundancy_bullet = self._analyze_redundancy_pattern(increment, test_code)
+
+            # Store bullet in playbook for future learning
+            from src.storage.schemas import BulletCreate
+            bullet_data = BulletCreate(
+                content=redundancy_bullet,
+                context=f"Redundancy anti-pattern learned from {increment.test_name}",
+                tags=["test_redundancy", "anti_pattern", "tdd"],
+                is_anti_pattern=True
+            )
+            self.playbook_manager.add_bullet(self.primary_playbook_id, bullet_data)
+            logger.info(f"      Stored redundancy pattern: {redundancy_bullet.split('**')[1]}")
+
             raise RuntimeError(
                 f"Test must fail initially (RED phase). "
                 f"Test passed unexpectedly: {increment.test_name}"
@@ -1271,6 +1295,104 @@ from src.{module_name} import *
         test_file.write_text(full_content)
 
         logger.debug(f"Assembled {len(functions)} test function(s) into {test_file.name}")
+
+    def _analyze_redundancy_pattern(self, increment: TestIncrement, test_code: str) -> str:
+        """Analyze why a test is redundant and create semantic learning bullet.
+
+        Args:
+            increment: The test increment that passed unexpectedly
+            test_code: The test code that was written
+
+        Returns:
+            Semantic pattern bullet describing the redundancy
+        """
+        # Get current implementation state
+        impl_summary = self._get_existing_test_summaries()
+
+        # Get existing implementation code
+        impl_code = ""
+        if increment.implementation_file.exists():
+            impl_code = increment.implementation_file.read_text()
+
+        # Analyze the redundancy pattern
+        prompt = f"""You are analyzing a TDD redundancy failure to extract a semantic learning pattern.
+
+**What Happened:**
+A test was written but passed immediately (RED phase violation), indicating the behavior already exists.
+
+**Test that passed unexpectedly:**
+```python
+{test_code}
+```
+
+**Current implementation state:**
+{impl_summary}
+
+**Implementation code:**
+```python
+{impl_code if impl_code else "# No implementation yet"}
+```
+
+**Task:** Analyze WHY this test is redundant and create a semantic anti-pattern that can help avoid similar redundancies in the future.
+
+**Output a JSON object with these fields:**
+- "pattern_name": Short name for this redundancy pattern (e.g., "Constructor Parameter Storage")
+- "context": When does this pattern apply? (e.g., "When __init__ accepts parameters x, y")
+- "redundancy_type": What makes it redundant? (e.g., "Testing attribute storage that constructor implicitly handles")
+- "underlying_concept": The deeper concept (e.g., "Successful instantiation validates parameter storage")
+- "how_to_avoid": Specific guidance (e.g., "Don't test self.x == value after __init__(x). Test BEHAVIOR that uses x instead.")
+- "example_bad": Example of redundant test name
+- "example_good": Example of better test that tests new behavior
+
+Output ONLY the JSON, no other text."""
+
+        response_dict = self.llm_client.generate(prompt)
+        response = response_dict["content"].strip()
+
+        # Parse JSON response
+        import json
+        import re
+
+        # Extract JSON if wrapped in markdown
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        if json_match:
+            response = json_match.group(1)
+
+        try:
+            pattern = json.loads(response)
+
+            # Create semantic bullet
+            bullet = f"""**REDUNDANCY ANTI-PATTERN: {pattern['pattern_name']}**
+
+**Context:** {pattern['context']}
+
+**Why Redundant:** {pattern['redundancy_type']}
+
+**Underlying Concept:** {pattern['underlying_concept']}
+
+**How to Avoid:** {pattern['how_to_avoid']}
+
+**Examples:**
+- ❌ Bad: {pattern['example_bad']}
+- ✅ Good: {pattern['example_good']}
+
+**Category:** Test Redundancy Detection
+**Learned From:** {increment.test_name} (passed unexpectedly in RED phase)
+"""
+            return bullet
+
+        except json.JSONDecodeError:
+            # Fallback: create simple bullet
+            return f"""**REDUNDANCY ANTI-PATTERN: Test Passed Unexpectedly**
+
+**Test:** {increment.test_name}
+
+**Why Redundant:** This test passed immediately, indicating the behavior already exists in the implementation.
+
+**How to Avoid:** Before writing a test, check if the behavior is already implemented. Test NEW behavior, not existing functionality.
+
+**Category:** Test Redundancy Detection
+"""
 
     def _collect_test_files(self) -> list[Path]:
         """Collect all test files created."""
