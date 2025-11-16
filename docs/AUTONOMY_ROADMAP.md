@@ -434,15 +434,22 @@ python -m src.playbook.dashboard pb_20251107_936 --open
 
 Based on Phase 1 results, we might pursue:
 
-### Phase 2: Usage Analytics (3-4 weeks)
+### Phase 2: Usage Analytics & Episodic Memory (4-5 weeks)
 - Track which bullets help most
 - A/B testing for bullet effectiveness
 - Automatic bullet deprecation (mark as outdated, not delete)
+- **Episodic Memory System** (new):
+  - Store full execution traces (test code, implementation, errors, fixes)
+  - Link episodes to extracted patterns (which failure created which bullet)
+  - Enable re-analysis of past failures with new insights
+  - Support debugging: "Why did we create this pattern?"
+  - Foundation for future training data extraction
 
 ### Phase 3: Multi-Task Learning (4-5 weeks)
 - Cross-task pattern recognition
 - Meta-patterns ("For X type of task, use Y approach")
 - Playbook forking/merging for different domains
+- Pattern evolution tracking (how bullets change over time using episodic history)
 
 ### Phase 4: Collaboration Features (3-4 weeks)
 - Share playbooks between developers

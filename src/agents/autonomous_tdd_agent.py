@@ -588,7 +588,7 @@ Output EITHER:
                 section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
                 tags=["test_redundancy", "anti_pattern", "tdd"]
             )
-            self.playbook_manager.add_bullet(self.primary_playbook_id, bullet_data)
+            self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
             logger.info(f"      Stored redundancy pattern: {redundancy_bullet.split('**')[1]}")
 
             raise RuntimeError(
