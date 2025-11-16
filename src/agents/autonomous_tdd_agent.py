@@ -585,9 +585,8 @@ Output EITHER:
             from src.storage.schemas import BulletCreate
             bullet_data = BulletCreate(
                 content=redundancy_bullet,
-                context=f"Redundancy anti-pattern learned from {increment.test_name}",
-                tags=["test_redundancy", "anti_pattern", "tdd"],
-                is_anti_pattern=True
+                section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
+                tags=["test_redundancy", "anti_pattern", "tdd"]
             )
             self.playbook_manager.add_bullet(self.primary_playbook_id, bullet_data)
             logger.info(f"      Stored redundancy pattern: {redundancy_bullet.split('**')[1]}")
