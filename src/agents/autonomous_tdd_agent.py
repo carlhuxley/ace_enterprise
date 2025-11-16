@@ -350,6 +350,32 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         return increments
 
+    def _get_existing_test_summaries(self) -> str:
+        """Generate summary of existing tests to help avoid redundancy.
+
+        Returns:
+            String listing what each existing test checks
+        """
+        if not self.test_functions:
+            return "No tests written yet."
+
+        summaries = []
+        for test_file_key, functions in self.test_functions.items():
+            test_file_name = Path(test_file_key).name
+            summaries.append(f"\n**{test_file_name}:**")
+            for func in functions:
+                # Extract what the test checks from the code
+                code = func['code']
+                # Look for assert statements to understand what's being tested
+                assert_lines = [line.strip() for line in code.split('\n') if 'assert' in line]
+                if assert_lines:
+                    checks = ' | '.join(assert_lines[:2])  # First 2 assertions
+                    summaries.append(f"  - {func['name']}: {checks}")
+                else:
+                    summaries.append(f"  - {func['name']}")
+
+        return "\n".join(summaries)
+
     def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
@@ -367,6 +393,9 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         # Analyze current state
         existing_tests = self._collect_test_files()
         existing_impl = self._collect_implementation_files()
+
+        # Get test summaries for redundancy checking
+        test_summaries = self._get_existing_test_summaries()
 
         # Build context about what exists
         test_context = ""
@@ -405,6 +434,14 @@ The unit tests should work toward making these scenarios pass.
 {impl_context if impl_context else "No implementation yet."}
 {gherkin_section}
 
+**Tests already written (AVOID REDUNDANCY):**
+{test_summaries}
+
+⚠️  **CRITICAL**: The next test you choose MUST:
+1. Test NEW behavior not already covered by tests above
+2. FAIL with the current implementation (for RED phase)
+3. NOT duplicate or overlap with existing test assertions
+
 **Task**: Determine the NEXT SINGLE test to write.
 
 **TDD Principles:**
@@ -414,6 +451,7 @@ The unit tests should work toward making these scenarios pass.
 4. Each test discovers ONE new piece of the API
 5. Build incrementally (don't jump ahead to complex features)
 6. If Gherkin scenarios provided → Work toward making those scenarios pass
+7. **AVOID tests that check behavior already verified by existing tests**
 
 **CRITICAL Decision:**
 - If the requirement is SATISFIED (all core functionality working), output: COMPLETE
