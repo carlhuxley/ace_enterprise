@@ -159,7 +159,7 @@ class AutonomousTDDAgent:
         logger.info(f"  Max iterations: {max_iterations}")
         logger.info(f"  Primary LLM: {provider}/{model}")
 
-    def build_feature(self, requirement: str) -> TDDResult:
+    def build_feature(self, requirement: str, gherkin_dir: Optional[Path] = None) -> TDDResult:
         """
         Build complete feature autonomously using TDD.
 
@@ -171,6 +171,7 @@ class AutonomousTDDAgent:
 
         Args:
             requirement: Natural language feature description
+            gherkin_dir: Optional directory containing .feature file and steps/ for acceptance testing
 
         Returns:
             TDDResult with all generated files and metrics
@@ -181,32 +182,61 @@ class AutonomousTDDAgent:
         logger.info("=" * 80)
         logger.info(f"AUTONOMOUS TDD: {requirement}")
         logger.info("=" * 80)
+        logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
 
-        # Step 1: Plan increments (ensemble-based)
-        logger.info("\n[Planning] Breaking requirement into incremental tests...")
-        test_plan = self._plan_increments(requirement)
-        logger.info(f"  ✓ {len(test_plan)} increments planned")
-        for i, inc in enumerate(test_plan, 1):
-            logger.info(f"  {i}. {inc.test_name}")
+        # Read Gherkin scenarios if provided
+        gherkin_content = None
+        if gherkin_dir:
+            feature_file = list(gherkin_dir.glob("*.feature"))[0] if list(gherkin_dir.glob("*.feature")) else None
+            if feature_file:
+                gherkin_content = self._read_gherkin_scenarios(feature_file)
+                logger.info(f"📋 Using acceptance tests from: {feature_file.name}")
 
-        # Step 2: Execute TDD cycles
+        # Execute TDD cycles with emergent planning
         results = []
-        for i, increment in enumerate(test_plan):
-            if i >= self.max_iterations:
-                logger.warning(f"\n⚠️  Reached max_iterations ({self.max_iterations}), stopping")
-                break
+        cycle_number = 1
 
+        while cycle_number <= self.max_iterations:
+            # Determine next test based on current state (EMERGENT PLANNING)
             logger.info(f"\n{'─' * 80}")
-            logger.info(f"[Cycle {i+1}/{len(test_plan)}] {increment.test_name}")
+            logger.info(f"[Cycle {cycle_number}] Determining next test based on current implementation...")
             logger.info('─' * 80)
 
+            increment = self._determine_next_increment(requirement, cycle_number, gherkin_context=gherkin_content)
+
+            # Check if requirement is satisfied
+            if increment is None:
+                logger.info(f"\n✅ Requirement satisfied after {cycle_number - 1} cycles")
+                break
+
+            logger.info(f"  → Next test: {increment.test_name}")
+            logger.info(f"  → {increment.description}")
+
+            # Execute TDD cycle
             try:
-                cycle_result = self._tdd_cycle(increment, cycle_number=i+1)
+                cycle_result = self._tdd_cycle(increment, cycle_number=cycle_number)
                 results.append(cycle_result)
                 logger.info(f"  ✅ Cycle complete")
             except Exception as e:
                 logger.error(f"  ❌ Cycle failed: {e}")
                 raise
+
+            # Check acceptance tests periodically if Gherkin provided
+            if gherkin_dir and cycle_number % 3 == 0:
+                logger.info(f"\n{'─' * 80}")
+                logger.info("[Acceptance Check] Running Gherkin scenarios...")
+                logger.info('─' * 80)
+                acceptance_result = self._run_acceptance_tests(gherkin_dir)
+                logger.info(f"  📊 {acceptance_result['details']}")
+
+                if acceptance_result['all_passed']:
+                    logger.info(f"\n🎉 All acceptance tests passing! Feature complete after {cycle_number} cycles.")
+                    break
+
+            cycle_number += 1
+
+        if cycle_number > self.max_iterations:
+            logger.warning(f"\n⚠️  Reached max_iterations ({self.max_iterations}), stopping")
 
         # Step 3: Final validation
         logger.info(f"\n{'─' * 80}")
@@ -319,6 +349,123 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             )
 
         return increments
+
+    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None) -> TestIncrement | None:
+        """
+        Determine the next test increment based on current implementation state.
+
+        This implements EMERGENT TDD - each cycle informs what the next test should be.
+
+        Args:
+            requirement: Original feature requirement
+            cycle_number: Current cycle number
+            gherkin_context: Optional Gherkin scenarios for context
+
+        Returns:
+            Next TestIncrement to implement, or None if requirement is satisfied
+        """
+        # Analyze current state
+        existing_tests = self._collect_test_files()
+        existing_impl = self._collect_implementation_files()
+
+        # Build context about what exists
+        test_context = ""
+        if existing_tests:
+            test_context = "\n**Existing tests:**\n"
+            for test_file in existing_tests:
+                if test_file.name != "__pycache__":
+                    content = test_file.read_text()
+                    test_context += f"\n{test_file.name}:\n```python\n{content}\n```\n"
+
+        impl_context = ""
+        if existing_impl:
+            impl_context = "\n**Existing implementation:**\n"
+            for impl_file in existing_impl:
+                if impl_file.name != "__init__.py" and impl_file.name != "__pycache__":
+                    content = impl_file.read_text()
+                    impl_context += f"\n{impl_file.name}:\n```python\n{content}\n```\n"
+
+        # Add Gherkin context if provided
+        gherkin_section = ""
+        if gherkin_context:
+            gherkin_section = f"""
+**Acceptance Tests (Gherkin scenarios):**
+```gherkin
+{gherkin_context}
+```
+
+These are the business requirements your implementation must satisfy.
+The unit tests should work toward making these scenarios pass.
+"""
+
+        prompt = f"""You are following TDD (Test-Driven Development) to build: "{requirement}"
+
+**Current state (Cycle {cycle_number}):**
+{test_context if test_context else "No tests written yet."}
+{impl_context if impl_context else "No implementation yet."}
+{gherkin_section}
+
+**Task**: Determine the NEXT SINGLE test to write.
+
+**TDD Principles:**
+1. If nothing exists yet → Start with simplest test (can we create the main object?)
+2. If we have basic creation → What's the FIRST behavior it should have?
+3. Look at what's implemented → What's the NEXT SMALLEST step?
+4. Each test discovers ONE new piece of the API
+5. Build incrementally (don't jump ahead to complex features)
+6. If Gherkin scenarios provided → Work toward making those scenarios pass
+
+**CRITICAL Decision:**
+- If the requirement is SATISFIED (all core functionality working), output: COMPLETE
+- Otherwise, output the next test in this format:
+
+test_name | description | test_file_path | impl_file_path
+
+**Examples of good progression:**
+Cycle 1: test_calculator_can_be_created | Create Calculator instance | tests/test_calculator.py | src/calculator.py
+Cycle 2: test_calculator_has_add_method | Calculator should have add method | tests/test_calculator.py | src/calculator.py
+Cycle 3: test_add_returns_sum | add(2, 3) should return 5 | tests/test_calculator.py | src/calculator.py
+
+**YOUR TASK**: What is the next test for cycle {cycle_number}?
+
+Output EITHER:
+- "COMPLETE" if requirement is satisfied
+- ONE line in format: test_name | description | test_file_path | impl_file_path
+"""
+
+        # Get next increment from LLM
+        response_dict = self.llm_client.generate(prompt)
+        response = response_dict["content"].strip()
+
+        # Check if complete
+        if "COMPLETE" in response.upper() and "|" not in response:
+            logger.info(f"  ✓ LLM determined requirement is satisfied")
+            return None
+
+        # Parse response
+        lines = [line.strip() for line in response.split("\n") if "|" in line and not line.startswith("#")]
+        if not lines:
+            logger.warning(f"Could not parse next increment from: {response}")
+            return None
+
+        line = lines[0]  # Take first valid line
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) != 4:
+            logger.warning(f"Invalid increment format: {line}")
+            return None
+
+        test_name, description, test_file, impl_file = parts
+
+        # Ensure paths are under test_dir and src_dir
+        test_path = self.test_dir / Path(test_file).name
+        impl_path = self.src_dir / Path(impl_file).name
+
+        return TestIncrement(
+            test_name=test_name,
+            description=description,
+            test_file=test_path,
+            implementation_file=impl_path
+        )
 
     def _tdd_cycle(self, increment: TestIncrement, cycle_number: int) -> CycleResult:
         """
@@ -456,14 +603,31 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 - If you output multiple functions, the system will FAIL
 - Do NOT write future tests, ONLY this one test
 
-**Guidelines**:
-1. Write ONLY the test function (imports are added automatically)
-2. Do NOT add import statements inside the function
-3. FOLLOW the existing pattern from tests above (instance-based vs function-based)
-4. Test should be focused on ONE concept
-5. Use clear assertions (assert with meaningful checks)
-6. Test should FAIL initially (implementation doesn't exist yet or is incomplete)
-7. Use pytest style (simple assert statements)
+**TDD Test Quality Guidelines**:
+1. **Test BEHAVIOR, not structure**:
+   ❌ BAD: `assert hasattr(obj, 'method_name')` (just checking existence)
+   ✅ GOOD: `result = obj.method_name(arg); assert result == expected` (testing behavior)
+
+2. **Use REAL values, not dummy checks**:
+   ❌ BAD: `assert result is not None` (too vague)
+   ✅ GOOD: `assert result == "https://auth.example.com?client_id=123"` (specific expectation)
+
+3. **First test should require initialization**:
+   - If this is cycle 1-2, test should drive out __init__ parameters
+   - Example: `oauth = OAuth('client_123', 'http://callback')`
+   - This forces implementation to store state
+
+4. **Subsequent tests should use that state**:
+   - Test that methods USE the stored instance variables
+   - Example: `url = oauth.get_auth_url()` should include client_id from __init__
+
+5. **Progressive refinement**:
+   - Early tests: basic behavior with simple inputs
+   - Later tests: edge cases, security (like state parameter)
+
+6. Write ONLY the test function (imports added automatically)
+7. FOLLOW existing patterns from tests above
+8. Use pytest style (simple assert statements)
 
 **Example showing pattern consistency**:
 ```python
@@ -576,29 +740,87 @@ def test_add_returns_sum():
 '''}
 **Task**: Write the MINIMAL implementation code to make THIS test pass.
 
-**TDD Constraints**:
-1. ✅ Write simplest thing that works
-2. ✅ Only implement what current test requires
-3. ✅ If test expects a class, create/extend that class
-4. ✅ If test expects a function, create/add that function
-5. ✅ Keep ALL existing implementation code (add to it, don't replace)
-6. ❌ Don't add features for future tests
-7. ❌ Don't add "nice to have" features
-8. ❌ Don't over-engineer
-9. ❌ NEVER include test code in implementation file
+**TRUE TDD Discipline - CRITICAL Rules**:
 
-**Example - Test expects**:
+**STATE and INITIALIZATION**:
+1. ✅ If test creates object with parameters → Store them in __init__
+   - Example: `OAuth('client_123', 'http://callback')` → __init__ must save these
+2. ✅ Methods must USE stored instance variables, not hardcoded values
+   - ❌ BAD: `return "http://example.com/auth"`
+   - ✅ GOOD: `return f"{{self.auth_url}}?client_id={{self.client_id}}"`
+
+**INCREMENTAL Building**:
+3. ✅ If method exists → ENHANCE it for new test, don't rewrite
+   - Add ONE small thing (parameter, check, field) to make new test pass
+4. ✅ If method doesn't exist → Add it with minimal implementation
+5. ✅ Keep ALL existing code (add to it, never delete/replace)
+
+**NO DUMMY VALUES**:
+6. ❌ NEVER return hardcoded/dummy values:
+   - ❌ `return "dummy_token"`
+   - ❌ `return True` (always true)
+   - ❌ `return None`
+7. ✅ Return values built from inputs or instance state:
+   - ✅ `return f"token_{{auth_code}}"`
+   - ✅ `return token in self.valid_tokens`
+   - ✅ `return self._generate_token()`
+
+**SCOPE**:
+8. ❌ Don't add features for future tests
+9. ❌ Don't add "nice to have" features
+10. ❌ Don't over-engineer
+11. ❌ NEVER include test code in implementation file
+
+**Example - TRUE Incremental TDD Progression**:
+
+**Cycle 1 - Test**:
 ```python
-calc = Calculator()
-result = calc.add(2, 3)
-assert result == 5
+def test_oauth_can_be_created_with_config():
+    oauth = OAuth('client_123', 'http://callback.com')
+    assert oauth is not None
+```
+**Cycle 1 - Implementation** (Store state!):
+```python
+class OAuth:
+    def __init__(self, client_id, redirect_uri):
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
 ```
 
-**Minimal implementation**:
+**Cycle 2 - Test**:
 ```python
-class Calculator:
-    def add(self, a, b):
-        return a + b
+def test_get_auth_url_includes_client_id():
+    oauth = OAuth('client_123', 'http://callback.com')
+    url = oauth.get_auth_url()
+    assert 'client_id=client_123' in url
+```
+**Cycle 2 - Implementation** (Use stored state!):
+```python
+class OAuth:
+    def __init__(self, client_id, redirect_uri):
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+
+    def get_auth_url(self):
+        return f"http://auth.example.com?client_id={{self.client_id}}"
+```
+
+**Cycle 3 - Test** (Refine existing method):
+```python
+def test_get_auth_url_includes_redirect_uri():
+    oauth = OAuth('client_123', 'http://callback.com')
+    url = oauth.get_auth_url()
+    assert 'redirect_uri=http://callback.com' in url
+```
+**Cycle 3 - Implementation** (Enhance existing method):
+```python
+class OAuth:
+    def __init__(self, client_id, redirect_uri):
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+
+    def get_auth_url(self):
+        return f"http://auth.example.com?client_id={{self.client_id}}&redirect_uri={{self.redirect_uri}}"
 ```
 
 **Output**: Complete implementation file content (production code only, no test code).
@@ -974,3 +1196,102 @@ from src.{module_name} import *
     def _collect_implementation_files(self) -> list[Path]:
         """Collect all implementation files created."""
         return list(self.src_dir.glob("*.py"))
+
+    def _run_acceptance_tests(self, gherkin_dir: Path) -> dict:
+        """Run Gherkin acceptance tests using behave.
+
+        Args:
+            gherkin_dir: Directory containing .feature files and steps/
+
+        Returns:
+            Dict with test results: passed, failed, total, all_passed
+        """
+        try:
+            result = subprocess.run(
+                ["behave", str(gherkin_dir), "--no-capture"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(self.project_root.parent)
+            )
+
+            # Parse plain text output
+            # Look for summary line like: "3 scenarios passed, 2 failed, 0 skipped"
+            import re
+
+            output = result.stdout + result.stderr
+
+            # Find scenarios summary line
+            scenario_pattern = r'(\d+)\s+scenarios?\s+passed(?:,\s*(\d+)\s+failed)?(?:,\s*(\d+)\s+skipped)?'
+            match = re.search(scenario_pattern, output)
+
+            if match:
+                passed_scenarios = int(match.group(1))
+                failed_scenarios = int(match.group(2) or 0)
+                skipped_scenarios = int(match.group(3) or 0)
+                total_scenarios = passed_scenarios + failed_scenarios + skipped_scenarios
+            else:
+                # Try alternate format: "0 features passed, 1 failed"
+                # Also check for "X scenarios passed, Y failed"
+                passed_match = re.search(r'(\d+)\s+scenarios?\s+passed', output)
+                failed_match = re.search(r'(\d+)\s+scenarios?\s+failed', output)
+                skipped_match = re.search(r'(\d+)\s+scenarios?\s+skipped', output)
+
+                if passed_match or failed_match or skipped_match:
+                    passed_scenarios = int(passed_match.group(1)) if passed_match else 0
+                    failed_scenarios = int(failed_match.group(1)) if failed_match else 0
+                    skipped_scenarios = int(skipped_match.group(1)) if skipped_match else 0
+                    total_scenarios = passed_scenarios + failed_scenarios + skipped_scenarios
+                else:
+                    logger.warning("Could not parse behave output")
+                    logger.debug(f"Behave output: {output[:500]}")
+                    return {
+                        "total": 0,
+                        "passed": 0,
+                        "failed": 0,
+                        "all_passed": False,
+                        "details": "Could not parse behave output"
+                    }
+
+            return {
+                "total": total_scenarios,
+                "passed": passed_scenarios,
+                "failed": failed_scenarios,
+                "all_passed": (failed_scenarios == 0 and total_scenarios > 0),
+                "details": f"{passed_scenarios}/{total_scenarios} scenarios passing"
+            }
+
+        except subprocess.TimeoutExpired:
+            logger.error("Acceptance tests timed out")
+            return {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "all_passed": False,
+                "details": "Timeout"
+            }
+        except Exception as e:
+            logger.error(f"Error running acceptance tests: {e}")
+            return {
+                "total": 0,
+                "passed": 0,
+                "failed": 0,
+                "all_passed": False,
+                "details": str(e)
+            }
+
+    def _read_gherkin_scenarios(self, gherkin_file: Path) -> str:
+        """Read Gherkin file and extract scenarios for context.
+
+        Args:
+            gherkin_file: Path to .feature file
+
+        Returns:
+            String containing scenario text for prompt context
+        """
+        try:
+            content = gherkin_file.read_text()
+            return content
+        except Exception as e:
+            logger.error(f"Error reading Gherkin file: {e}")
+            return ""
