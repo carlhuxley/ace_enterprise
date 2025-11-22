@@ -586,7 +586,10 @@ Output EITHER:
             bullet_data = BulletCreate(
                 content=redundancy_bullet,
                 section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
-                tags=["test_redundancy", "anti_pattern", "tdd"]
+                tags=["test_redundancy", "anti_pattern", "tdd"],
+                created_by_model=self.llm_client.model,
+                model_provider=self.llm_client.provider,
+                license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
             )
             self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
             logger.info(f"      Stored redundancy pattern: {redundancy_bullet.split('**')[1]}")
@@ -1392,6 +1395,48 @@ Output ONLY the JSON, no other text."""
 
 **Category:** Test Redundancy Detection
 """
+
+    def _get_license_type(self, provider: str, model: str) -> str:
+        """
+        Map provider/model to license type for auditability.
+
+        Args:
+            provider: Model provider (openai, anthropic, google, cohere, ollama, vllm, deepseek)
+            model: Model name
+
+        Returns:
+            License type string (e.g., 'apache-2.0', 'mit', 'proprietary')
+        """
+        # Proprietary/closed-source models (cannot use outputs to train competing models per ToS)
+        if provider in ["openai", "anthropic", "google", "cohere"]:
+            return "proprietary"
+
+        # Open-source models with permissive licenses
+        if provider in ["ollama", "vllm"]:
+            # Map common open-source models to their licenses
+            model_lower = model.lower()
+
+            # Apache 2.0 licensed models
+            if any(name in model_lower for name in ["qwen", "deepseek-coder", "mistral"]):
+                return "apache-2.0"
+
+            # MIT licensed models
+            if "deepseek" in model_lower and "coder" not in model_lower:
+                return "mit"
+
+            # Llama models (Llama 3.1 Community License - permissive)
+            if "llama" in model_lower:
+                return "llama-3.1-community"
+
+            # Default for unknown Ollama/vLLM models - assume open source but mark as unknown
+            return "open-source-unknown"
+
+        # DeepSeek API provider
+        if provider == "deepseek":
+            return "mit"  # DeepSeek Coder V2 is MIT licensed
+
+        # Unknown provider
+        return "unknown"
 
     def _collect_test_files(self) -> list[Path]:
         """Collect all test files created."""

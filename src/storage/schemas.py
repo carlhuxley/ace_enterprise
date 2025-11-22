@@ -27,7 +27,10 @@ class BulletBase(BaseModel):
 class BulletCreate(BulletBase):
     """Schema for creating a new bullet"""
 
-    pass
+    # Model provenance (optional, for auditability)
+    created_by_model: str | None = None
+    model_provider: str | None = None
+    license_type: str | None = None
 
 
 class Bullet(BulletBase):
@@ -40,6 +43,17 @@ class Bullet(BulletBase):
     last_used: datetime | None = None
     embedding: list[float] | None = Field(
         None, description="Vector embedding for semantic search"
+    )
+
+    # Model provenance fields (added 2025-11-21 for auditability and licensing)
+    created_by_model: str | None = Field(
+        None, description="Model that created this bullet (e.g., 'gpt-4o', 'qwen2.5-coder:14b')"
+    )
+    model_provider: str | None = Field(
+        None, description="Model provider (e.g., 'openai', 'ollama', 'anthropic')"
+    )
+    license_type: str | None = Field(
+        None, description="Model license (e.g., 'apache-2.0', 'mit', 'proprietary')"
     )
 
     class Config:
