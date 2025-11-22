@@ -82,6 +82,7 @@ Thumbs.db
 
 # ACE Runtime Data
 data/playbooks/*.json
+data/playbooks_untracked/*.json
 playbook_*.json
 
 # Examples cache
