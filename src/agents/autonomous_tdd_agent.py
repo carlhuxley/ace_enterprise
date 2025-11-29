@@ -756,29 +756,12 @@ Output EITHER:
                         else:
                             logger.warning(f"      ⚠️  Test correction failed, continuing with original test")
 
-            impl_code, triangulation_strategy, method_being_tested = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
+            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
             previous_impl_code = impl_code  # Save for learning if this attempt fails
             logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
 
-            # Validate HARDCODE strategy enforcement
-            if triangulation_strategy == "HARDCODE":
-                is_valid, validation_feedback = self._validate_hardcode_implementation(impl_code, method_being_tested)
-                if not is_valid:
-                    logger.warning(f"      ⚠️  HARDCODE violation detected (attempt {attempt}/{MAX_GREEN_RETRIES})")
-                    logger.debug(f"      Validation feedback: {validation_feedback[:200]}...")
-
-                    if attempt < MAX_GREEN_RETRIES:
-                        # Force retry by simulating test failure
-                        green_result = TestResult(
-                            passed=False,
-                            failed=True,
-                            output="",
-                            error=f"HARDCODE VALIDATION FAILED:\n{validation_feedback}"
-                        )
-                        continue
-                    else:
-                        # Last attempt - log warning but proceed
-                        logger.warning(f"      ⚠️  Last attempt still has HARDCODE violations, proceeding anyway")
+            # ATDD: No triangulation enforcement - allow comprehensive implementations
+            # (Triangulation validation removed - conflicts with contract-based testing)
 
             green_result = self._run_tests()
             if green_result.all_passed:
@@ -967,24 +950,13 @@ def test_add_returns_sum():
                 # Extract only the requested function
                 test_function = self._extract_single_function(test_function, increment.test_name)
 
-            # Validate test quality (single-behavior principle)
-            is_valid, quality_feedback = self._validate_test_quality(test_function, increment.test_name)
+            # ATDD: Allow comprehensive tests with multiple assertions
+            # (Validation disabled to support contract-based testing)
+            is_valid = True  # self._validate_test_quality(test_function, increment.test_name)
 
             if is_valid:
-                # Test passes quality check
-                if quality_attempt > 1:
-                    logger.info(f"      ✓ Test quality acceptable (attempt {quality_attempt}/{MAX_QUALITY_RETRIES})")
+                # Test accepted
                 break
-            else:
-                # Test has too many behaviors, needs rewrite
-                logger.warning(f"      ⚠️  Test quality issue (attempt {quality_attempt}/{MAX_QUALITY_RETRIES}): Multiple behaviors detected")
-                quality_validation_feedback = quality_feedback
-
-                if quality_attempt == MAX_QUALITY_RETRIES:
-                    # Last attempt failed - log warning but proceed
-                    # (better to have a working multi-behavior test than to crash)
-                    logger.warning(f"      ⚠️  Test still has quality issues after {MAX_QUALITY_RETRIES} attempts, proceeding anyway")
-                # Continue loop for retry
 
         # Store in array for cycle isolation
         if test_file_key not in self.test_functions:
@@ -1001,7 +973,7 @@ def test_add_returns_sum():
 
         return test_function
 
-    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> tuple[str, str, str]:
+    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> str:
         """
         Write minimal code to make test pass (GREEN phase).
 
@@ -1012,7 +984,7 @@ def test_add_returns_sum():
             attempt: Current attempt number (1-3) for retry awareness
 
         Returns:
-            Tuple of (impl_code, triangulation_strategy, method_being_tested)
+            Generated implementation code
         """
         # Check if implementation exists
         existing_code = ""
@@ -1022,77 +994,22 @@ def test_add_returns_sum():
         # Read test code
         test_code = increment.test_file.read_text()
 
-        # Count existing tests for triangulation (PER-METHOD, not per-file)
-        test_file_key = str(increment.test_file)
-        all_tests = self.test_functions.get(test_file_key, [])
-
-        # Extract method being tested from test name
-        method_being_tested = self._extract_method_from_test_name(increment.test_name)
-
-        # Count tests for THIS SPECIFIC METHOD
-        tests_for_this_method = [
-            t for t in all_tests
-            if self._extract_method_from_test_name(t['name']) == method_being_tested
-        ]
-        test_count = len(tests_for_this_method)
-
-        logger.debug(f"  🔍 Method '{method_being_tested}' has {test_count} existing test(s)")
-
-        # Determine triangulation strategy
-        if test_count == 1:
-            triangulation_strategy = "HARDCODE"
-            triangulation_guidance = """🚨🚨🚨 HARDCODE REQUIREMENT - READ CAREFULLY 🚨🚨🚨
-
-This is your FIRST test. You MUST use HARDCODED literal values.
-
-❌ FORBIDDEN (Do NOT use any of these):
-- String formatting with f"..." or format()
-- Complex logic (if/else, loops, comprehensions)
-- Lambda functions or callbacks
-- URL encoding libraries (urlencode, quote, etc.)
-- Validation logic
-- Error handling (try/except, if checks)
-- Requests or HTTP libraries
-
-✅ REQUIRED (Do EXACTLY this):
-- Return a LITERAL hardcoded string or dict
-- Example: return "https://auth.example.com?client_id=test&redirect_uri=http%3A%2F%2Fcallback&scope=read&state=xyz"
-- Example: return {"access_token": "fake_token_123", "token_type": "Bearer"}
-- Copy the EXACT value the test expects, but as a hardcoded literal
-
-🎯 Why? TRUE TDD uses triangulation: Start with the simplest possible thing (hardcoded),
-then add logic in LATER tests when you need to handle different values.
-
-This is NOT lazy coding - this is DISCIPLINED TDD!"""
-        elif test_count == 2:
-            triangulation_strategy = "MINIMAL_LOGIC"
-            triangulation_guidance = """Add MINIMAL logic to satisfy both tests.
-
-✅ ALLOWED:
-- Simple if/else based on parameters
-- Basic string interpolation: f"{self.client_id}"
-- Minimal parameter usage
-
-❌ STILL FORBIDDEN:
-- Complex validation or error handling
-- Lambda functions
-- Over-engineering"""
-        else:
-            triangulation_strategy = "GENERALIZE"
-            triangulation_guidance = "Now you can generalize with proper logic (you have 3+ tests forcing the behavior)"
-
         # Get learned patterns from playbook
         playbook_guidance = self._get_playbook_guidance(
-            query=f"TDD implementation minimal code {increment.test_name}",
+            query=f"ATDD implementation {increment.test_name}",
             top_k=3
         )
 
-        prompt = f"""You are following TDD discipline: write MINIMAL code to pass the test.
+        prompt = f"""You are following ATDD (Acceptance Test-Driven Development): write code to satisfy the test contract.
 
 {playbook_guidance}
 
-**🎯 TRIANGULATION STRATEGY ({test_count} test{"s" if test_count != 1 else ""} exist):**
-{triangulation_guidance}
+**🎯 ATDD APPROACH - Contract-Based Implementation:**
+Write comprehensive, production-quality code that satisfies the test's contract (behavior specification).
+- Focus on making the test PASS with correct, maintainable code
+- Implement the full behavior needed by the test
+- Use appropriate algorithms, data structures, and libraries
+- Write code you'd be proud to deploy to production
 
 **⚠️ ATTEMPT {attempt}/3** {'- 🚨 THIS IS YOUR FINAL ATTEMPT! 🚨' if attempt == 3 else f'- You have {4-attempt} attempt{"s" if 4-attempt > 1 else ""} remaining if this fails'}
 {'🚨 CRITICAL: The cycle will FAIL if this implementation does not pass the test. There are NO more retries after this.' if attempt == 3 else '⚠️ IMPORTANT: Get this right the FIRST time. While you have retries, each failed attempt wastes time and resources.'}
@@ -1260,7 +1177,7 @@ class OAuth:
         # Write to file
         increment.implementation_file.write_text(impl_code)
 
-        return impl_code, triangulation_strategy, method_being_tested
+        return impl_code
 
     def _needs_refactoring(self, code: str) -> bool:
         """
