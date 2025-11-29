@@ -769,8 +769,7 @@ Output EITHER:
 
                     if attempt < MAX_GREEN_RETRIES:
                         # Force retry by simulating test failure
-                        from src.models.test_result import TestResult as TR
-                        green_result = TR(
+                        green_result = TestResult(
                             all_passed=False,
                             error=f"HARDCODE VALIDATION FAILED:\n{validation_feedback}",
                             output=""
