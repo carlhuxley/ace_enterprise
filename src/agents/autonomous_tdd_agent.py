@@ -756,9 +756,29 @@ Output EITHER:
                         else:
                             logger.warning(f"      ⚠️  Test correction failed, continuing with original test")
 
-            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
+            impl_code, triangulation_strategy, method_being_tested = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
             previous_impl_code = impl_code  # Save for learning if this attempt fails
             logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
+
+            # Validate HARDCODE strategy enforcement
+            if triangulation_strategy == "HARDCODE":
+                is_valid, validation_feedback = self._validate_hardcode_implementation(impl_code, method_being_tested)
+                if not is_valid:
+                    logger.warning(f"      ⚠️  HARDCODE violation detected (attempt {attempt}/{MAX_GREEN_RETRIES})")
+                    logger.debug(f"      Validation feedback: {validation_feedback[:200]}...")
+
+                    if attempt < MAX_GREEN_RETRIES:
+                        # Force retry by simulating test failure
+                        from src.models.test_result import TestResult as TR
+                        green_result = TR(
+                            all_passed=False,
+                            error=f"HARDCODE VALIDATION FAILED:\n{validation_feedback}",
+                            output=""
+                        )
+                        continue
+                    else:
+                        # Last attempt - log warning but proceed
+                        logger.warning(f"      ⚠️  Last attempt still has HARDCODE violations, proceeding anyway")
 
             green_result = self._run_tests()
             if green_result.all_passed:
@@ -981,7 +1001,7 @@ def test_add_returns_sum():
 
         return test_function
 
-    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> str:
+    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> tuple[str, str, str]:
         """
         Write minimal code to make test pass (GREEN phase).
 
@@ -992,7 +1012,7 @@ def test_add_returns_sum():
             attempt: Current attempt number (1-3) for retry awareness
 
         Returns:
-            Generated implementation code
+            Tuple of (impl_code, triangulation_strategy, method_being_tested)
         """
         # Check if implementation exists
         existing_code = ""
@@ -1240,7 +1260,7 @@ class OAuth:
         # Write to file
         increment.implementation_file.write_text(impl_code)
 
-        return impl_code
+        return impl_code, triangulation_strategy, method_being_tested
 
     def _needs_refactoring(self, code: str) -> bool:
         """
@@ -1623,6 +1643,115 @@ def test_url_contains_state():
 
         except Exception as e:
             logger.warning(f"Failed to validate test quality: {e}")
+            return True, ""  # Skip validation on error
+
+    def _validate_hardcode_implementation(self, impl_code: str, method_name: str) -> tuple[bool, str]:
+        """
+        Validate that implementation uses HARDCODED literals (no logic) for first test.
+
+        Args:
+            impl_code: The implementation code to validate
+            method_name: Name of the method being implemented
+
+        Returns:
+            Tuple of (is_valid, feedback_message)
+        """
+        try:
+            tree = ast.parse(impl_code)
+
+            # Find the method being implemented
+            target_func = None
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == method_name:
+                    target_func = node
+                    break
+
+            if not target_func:
+                return True, ""  # Can't find function, skip validation
+
+            # Check for FORBIDDEN patterns
+            violations = []
+
+            for node in ast.walk(target_func):
+                # F-strings (JoinedStr)
+                if isinstance(node, ast.JoinedStr):
+                    violations.append("f-string formatting (f\"...\")")
+
+                # .format() calls
+                elif isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Attribute) and node.func.attr == 'format':
+                        violations.append(".format() method")
+                    # urlencode, quote, etc.
+                    if isinstance(node.func, ast.Name):
+                        if node.func.id in ['urlencode', 'quote', 'quote_plus', 'dumps', 'loads']:
+                            violations.append(f"{node.func.id}() library call")
+                    elif isinstance(node.func, ast.Attribute):
+                        if node.func.attr in ['urlencode', 'quote', 'quote_plus', 'dumps', 'loads', 'encode', 'decode']:
+                            violations.append(f".{node.func.attr}() method")
+
+                # Loops
+                elif isinstance(node, (ast.For, ast.While)):
+                    violations.append("loop (for/while)")
+
+                # Comprehensions
+                elif isinstance(node, (ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp)):
+                    violations.append("comprehension")
+
+                # Lambda functions
+                elif isinstance(node, ast.Lambda):
+                    violations.append("lambda function")
+
+                # If/else (allow simple if for minimal logic, but flag complex ones)
+                elif isinstance(node, ast.If):
+                    # Count nested ifs - complex logic
+                    if any(isinstance(n, ast.If) for n in ast.walk(node)):
+                        violations.append("nested if/else (complex logic)")
+
+            if violations:
+                feedback = f"""
+🚨 **HARDCODE VIOLATION - Logic Detected in First Implementation**
+
+Your implementation uses logic patterns, but this is the FIRST test for this method.
+You MUST return a HARDCODED literal value.
+
+**Violations found:**
+{chr(10).join('- ' + v for v in violations)}
+
+**❌ FORBIDDEN - Remove these:**
+- String formatting: f"..." or .format()
+- Loops: for/while
+- Comprehensions: [x for x in ...]
+- Lambda functions
+- Library calls: urlencode, quote, dumps, etc.
+- Complex logic: nested if/else
+
+**✅ REQUIRED - Do this instead:**
+Return a LITERAL hardcoded string or dict that matches EXACTLY what the test expects.
+
+**Example (CORRECT)**:
+```python
+def {method_name}(self):
+    return "https://auth.example.com?client_id=test&redirect_uri=http%3A%2F%2Fcallback"
+    # ↑ Literal string, no variables or formatting!
+```
+
+**Example (WRONG - what you just did)**:
+```python
+def {method_name}(self):
+    return f"https://...{{self.client_id}}..."  # ← Uses f-string!
+```
+
+🎯 **WHY?** This is TDD triangulation: Start with the simplest thing (hardcoded),
+then add logic in the NEXT test when you need to handle different values.
+
+**REWRITE to use ONLY hardcoded literals.**
+"""
+                return False, feedback
+
+            return True, ""
+
+        except Exception as e:
+            logger.warning(f"Failed to validate hardcode implementation: {e}")
             return True, ""  # Skip validation on error
 
     def _extract_single_function(self, code: str, function_name: str) -> str:
