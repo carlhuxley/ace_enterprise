@@ -67,6 +67,8 @@ class CycleResult:
     refactored: bool
     learned_bullets: list[ConsensusBullet]
     cycle_number: int
+    skipped: bool = False  # True if cycle was skipped due to fundamental redundancy
+    skip_reason: str = ""  # Explanation of why cycle was skipped
 
 
 @dataclass
@@ -184,12 +186,14 @@ class AutonomousTDDAgent:
         logger.info("=" * 80)
         logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
 
-        # Read Gherkin scenarios if provided
+        # Read Gherkin scenarios and step definitions if provided
         gherkin_content = None
+        step_definitions = None
         if gherkin_dir:
             feature_file = list(gherkin_dir.glob("*.feature"))[0] if list(gherkin_dir.glob("*.feature")) else None
             if feature_file:
                 gherkin_content = self._read_gherkin_scenarios(feature_file)
+                step_definitions = self._read_step_definitions(gherkin_dir)
                 logger.info(f"📋 Using acceptance tests from: {feature_file.name}")
 
         # Execute TDD cycles with emergent planning
@@ -202,7 +206,7 @@ class AutonomousTDDAgent:
             logger.info(f"[Cycle {cycle_number}] Determining next test based on current implementation...")
             logger.info('─' * 80)
 
-            increment = self._determine_next_increment(requirement, cycle_number, gherkin_context=gherkin_content)
+            increment = self._determine_next_increment(requirement, cycle_number, gherkin_context=gherkin_content, step_definitions=step_definitions)
 
             # Check if requirement is satisfied
             if increment is None:
@@ -216,7 +220,11 @@ class AutonomousTDDAgent:
             try:
                 cycle_result = self._tdd_cycle(increment, cycle_number=cycle_number)
                 results.append(cycle_result)
-                logger.info(f"  ✅ Cycle complete")
+
+                if cycle_result.skipped:
+                    logger.info(f"  ⏭️  Cycle skipped (redundant test)")
+                else:
+                    logger.info(f"  ✅ Cycle complete")
             except Exception as e:
                 logger.error(f"  ❌ Cycle failed: {e}")
                 raise
@@ -251,12 +259,14 @@ class AutonomousTDDAgent:
 
         # Collect results
         total_bullets = sum(len(r.learned_bullets) for r in results)
+        skipped_count = sum(1 for r in results if r.skipped)
+        completed_count = len(results) - skipped_count
         elapsed = time.time() - start_time
 
         logger.info("\n" + "=" * 80)
         logger.info("✅ FEATURE COMPLETE!")
         logger.info("=" * 80)
-        logger.info(f"  • Cycles executed: {len(results)}")
+        logger.info(f"  • Cycles executed: {len(results)} ({completed_count} completed, {skipped_count} skipped)")
         logger.info(f"  • Tests created: {final_result.test_count}")
         logger.info(f"  • Playbook bullets learned: {total_bullets}")
         logger.info(f"  • Time: {elapsed:.1f}s")
@@ -411,7 +421,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         return "\n".join(summaries)
 
-    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None) -> TestIncrement | None:
+    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None, step_definitions: Optional[str] = None) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
 
@@ -421,6 +431,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             requirement: Original feature requirement
             cycle_number: Current cycle number
             gherkin_context: Optional Gherkin scenarios for context
+            step_definitions: Optional step definition code that defines the expected API contract
 
         Returns:
             Next TestIncrement to implement, or None if requirement is satisfied
@@ -464,8 +475,41 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 {gherkin_context}
 ```
 
-These are the business requirements your implementation must satisfy.
-The unit tests should work toward making these scenarios pass.
+🎯 **CRITICAL - Gherkin Steps Define TDD Test Granularity:**
+The Gherkin steps above show the EXACT granularity your TDD tests should follow.
+Each "Then" step should roughly correspond to ONE TDD test.
+
+**Example Mapping:**
+```
+Then the URL should contain the client_id parameter
+  → TDD Test: test_generate_url_contains_client_id()
+
+Then the URL should contain the redirect_uri parameter
+  → TDD Test: test_generate_url_contains_redirect_uri()
+
+Then the URL should contain the scope parameter
+  → TDD Test: test_generate_url_contains_scope()
+```
+
+**Your TDD tests MUST match this granularity** - one observable behavior per test.
+"""
+
+        # Add step definitions if provided (API CONTRACT)
+        step_definitions_section = ""
+        if step_definitions:
+            step_definitions_section = f"""
+**STEP DEFINITIONS (API CONTRACT - MUST MATCH EXACTLY):**
+```python
+{step_definitions}
+```
+
+CRITICAL: The step definitions above define the EXACT API your implementation must provide.
+Pay close attention to:
+- Method names (e.g., `exchange_authorization_code_for_token`, NOT `exchange_code`)
+- Parameter names (e.g., `authorization_code=`, NOT `auth_code=`)
+- Expected return types and object attributes
+
+Your generated code MUST match these signatures EXACTLY.
 """
 
         prompt = f"""You are following TDD (Test-Driven Development) to build: "{requirement}"
@@ -474,6 +518,7 @@ The unit tests should work toward making these scenarios pass.
 {test_context if test_context else "No tests written yet."}
 {impl_context if impl_context else "No implementation yet."}
 {gherkin_section}
+{step_definitions_section}
 
 {test_summaries}
 
@@ -504,8 +549,12 @@ The unit tests should work toward making these scenarios pass.
 3. Look at what's implemented → What's the NEXT SMALLEST step?
 4. Each test discovers ONE new piece of the API
 5. Build incrementally (don't jump ahead to complex features)
-6. If Gherkin scenarios provided → Work toward making those scenarios pass
+6. **If Gherkin scenarios provided → Create TDD tests that match Gherkin step granularity**
+   - Each Gherkin "Then" step = roughly one TDD test
+   - Map acceptance criteria directly to unit tests
+   - Follow the incremental progression shown in Gherkin
 7. **AVOID tests that check behavior already verified by existing tests**
+8. **ONE BEHAVIOR PER TEST** - If a test would verify 5+ things, split it into 5 tests
 
 **CRITICAL Decision:**
 - If the requirement is SATISFIED (all core functionality working), output: COMPLETE
@@ -576,40 +625,139 @@ Output EITHER:
         logger.info(f"      Created: {increment.test_file.relative_to(self.project_root)}")
 
         red_result = self._run_tests()
-        if not red_result.failed:
-            # LEARN from redundancy failure before exiting
+
+        # RED PHASE REFINEMENT: If test passes, refine it to make it fail (proper TDD)
+        MAX_RED_REFINEMENTS = 3
+        refinement_attempt = 0
+
+        while not red_result.failed and refinement_attempt < MAX_RED_REFINEMENTS:
+            refinement_attempt += 1
+
+            logger.info(f"  ⚠️  Test passed unexpectedly (attempt {refinement_attempt}/{MAX_RED_REFINEMENTS})")
             logger.info("  🧠 LEARN: Analyzing redundancy pattern...")
+
+            # Analyze why test is redundant
             redundancy_bullet = self._analyze_redundancy_pattern(increment, test_code)
 
-            # Store bullet in playbook for future learning
-            from src.storage.schemas import BulletCreate
-            bullet_data = BulletCreate(
-                content=redundancy_bullet,
-                section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
-                tags=["test_redundancy", "anti_pattern", "tdd"],
-                created_by_model=self.llm_client.model,
-                model_provider=self.llm_client.provider,
-                license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
-            )
-            self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-            logger.info(f"      Stored redundancy pattern: {redundancy_bullet.split('**')[1]}")
+            # Store bullet in playbook for future learning (only on first refinement)
+            if refinement_attempt == 1:
+                from src.storage.schemas import BulletCreate
+                bullet_data = BulletCreate(
+                    content=redundancy_bullet,
+                    section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
+                    tags=["test_redundancy", "anti_pattern", "tdd"],
+                    created_by_model=self.llm_client.model,
+                    model_provider=self.llm_client.provider,
+                    license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
+                )
+                self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
+                logger.info(f"      Stored redundancy pattern")
 
-            raise RuntimeError(
-                f"Test must fail initially (RED phase). "
-                f"Test passed unexpectedly: {increment.test_name}"
+            # Refine test to make it more specific/strict
+            logger.info(f"  🔧 REFINING: Strengthening test to make it fail...")
+            refined_test_code = self._refine_test_to_fail(
+                increment=increment,
+                test_code=test_code,
+                redundancy_analysis=redundancy_bullet,
+                attempt=refinement_attempt
             )
+
+            # Update test code and test_functions array
+            test_code = refined_test_code
+            test_file_key = str(increment.test_file)
+
+            # Update the stored test function
+            if test_file_key in self.test_functions:
+                for func_data in self.test_functions[test_file_key]:
+                    if func_data['name'] == increment.test_name:
+                        func_data['code'] = refined_test_code
+                        break
+
+            # Reassemble test file with refined test
+            self._assemble_test_file(increment.test_file, increment.implementation_file)
+            logger.info(f"      ✓ Test refined and reloaded")
+
+            # Retry RED phase with refined test
+            red_result = self._run_tests()
+
+        # After refinement loop, check if test finally fails
+        if not red_result.failed:
+            skip_reason = (
+                f"Test passed after {MAX_RED_REFINEMENTS} refinement attempts, "
+                f"indicating the behavior is already fully implemented."
+            )
+            logger.info(f"  ⏭️  SKIPPING: {skip_reason}")
+            logger.info(f"  ✓ Moving to next increment...")
+
+            # Return a skipped cycle result
+            return CycleResult(
+                increment=increment,
+                test_code=test_code,
+                implementation_code="",  # No new implementation needed
+                red_result=red_result,
+                green_result=red_result,  # Reuse red_result since we didn't run GREEN
+                refactored=False,
+                learned_bullets=[],
+                cycle_number=cycle_number,
+                skipped=True,
+                skip_reason=skip_reason
+            )
+
         logger.info(f"  ⚙️  Running tests... FAILED (expected)")
 
-        # GREEN: Write minimal code (with retry logic)
+        # GREEN: Write minimal code (with retry logic and in-loop learning)
         logger.info("  🟢 GREEN: Writing minimal code...")
         MAX_GREEN_RETRIES = 3
         green_result = None
+        previous_impl_code = None
 
         for attempt in range(1, MAX_GREEN_RETRIES + 1):
             if attempt > 1:
                 logger.info(f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)...")
 
-            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result)
+                # LEARN from previous failure BEFORE next attempt
+                logger.info(f"  🧠 LEARN: Analyzing attempt {attempt-1} failure...")
+                failure_analysis = self._analyze_green_failure(
+                    increment=increment,
+                    test_code=test_code,
+                    impl_code=previous_impl_code,
+                    error=green_result.error,
+                    attempts=attempt - 1
+                )
+
+                if failure_analysis:
+                    # Store bullet in playbook NOW - available for next attempt!
+                    from src.storage.schemas import BulletCreate
+                    bullet_data = BulletCreate(
+                        content=failure_analysis["bullet"],
+                        section="troubleshooting",  # Technical gotchas go in troubleshooting
+                        tags=failure_analysis["tags"],
+                        created_by_model=self.llm_client.model,
+                        model_provider=self.llm_client.provider,
+                        license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
+                    )
+                    self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
+                    logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
+
+                    # If test correction is suggested, APPLY IT automatically
+                    if failure_analysis.get("test_correction"):
+                        logger.info(f"      🔧 Applying test correction...")
+                        corrected = self._apply_test_correction(
+                            increment.test_file,
+                            increment.implementation_file,
+                            increment.test_name,
+                            test_code,
+                            failure_analysis["test_correction"],
+                            cycle_number
+                        )
+                        if corrected:
+                            test_code = increment.test_file.read_text()  # Reload corrected test
+                            logger.info(f"      ✓ Test corrected and reloaded")
+                        else:
+                            logger.warning(f"      ⚠️  Test correction failed, continuing with original test")
+
+            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
+            previous_impl_code = impl_code  # Save for learning if this attempt fails
             logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
 
             green_result = self._run_tests()
@@ -617,7 +765,7 @@ Output EITHER:
                 logger.info(f"  ⚙️  Running tests... PASSED ✓")
                 break
             else:
-                logger.warning(f"  ⚠️  Tests still failing after attempt {attempt}: {green_result.error[:100]}...")
+                logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
 
         if not green_result.all_passed:
             raise RuntimeError(
@@ -688,10 +836,16 @@ Output EITHER:
 
 {playbook_guidance}
 
+🎯 **CRITICAL - Single Behavior Test:**
+This test should verify EXACTLY ONE observable behavior.
+Think: "If this was a Gherkin step, what would it say?"
+Example: "Then the URL should contain the client_id parameter" → ONE assertion about client_id
+
 **Project Structure**:
 - Tests in: {self.test_dir.name}/
 - Implementation in: {self.src_dir.name}/
-- Imports use: `from src.{increment.implementation_file.stem} import *`
+- Imports automatically included: `pytest`, `Mock`, `patch`, `MagicMock`, and `from src.{increment.implementation_file.stem} import *`
+- You can use `patch()`, `Mock()`, `MagicMock()` directly without importing them
 
 **Test to write**: {increment.test_name}
 **Description**: {increment.description}
@@ -712,31 +866,38 @@ Output EITHER:
 - If you output multiple functions, the system will FAIL
 - Do NOT write future tests, ONLY this one test
 
-**TDD Test Quality Guidelines**:
-1. **Test BEHAVIOR, not structure**:
-   ❌ BAD: `assert hasattr(obj, 'method_name')` (just checking existence)
-   ✅ GOOD: `result = obj.method_name(arg); assert result == expected` (testing behavior)
+**TDD Test Quality - ONE BEHAVIOR RULE**:
 
-2. **Use REAL values, not dummy checks**:
-   ❌ BAD: `assert result is not None` (too vague)
-   ✅ GOOD: `assert result == "https://auth.example.com?client_id=123"` (specific expectation)
+✅ **GOOD - Single Behavior Tests**:
+```python
+def test_returns_access_token():
+    result = oauth.exchange_code("code")
+    assert "access_token" in result  # ← ONE thing
 
-3. **First test should require initialization**:
-   - If this is cycle 1-2, test should drive out __init__ parameters
-   - Example: `oauth = OAuth('client_123', 'http://callback')`
-   - This forces implementation to store state
+def test_url_contains_client_id():
+    url = oauth.generate_url(...)
+    assert "client_id=" in url  # ← ONE thing
+```
 
-4. **Subsequent tests should use that state**:
-   - Test that methods USE the stored instance variables
-   - Example: `url = oauth.get_auth_url()` should include client_id from __init__
+❌ **BAD - Multiple Behaviors**:
+```python
+def test_everything_at_once():
+    result = oauth.exchange_code("code")
+    assert result["access_token"]  # ← Testing 5+ things
+    assert result["refresh_token"]
+    assert result["expires_in"]
+    assert mock.called
+    assert mock.call_args[0][0] == url
+```
 
-5. **Progressive refinement**:
-   - Early tests: basic behavior with simple inputs
-   - Later tests: edge cases, security (like state parameter)
-
-6. Write ONLY the test function (imports added automatically)
-7. FOLLOW existing patterns from tests above
-8. Use pytest style (simple assert statements)
+**Key Rules**:
+1. **ONE assertion** (or 2-3 closely related assertions max)
+2. **Happy path first** - No error handling in early tests
+3. **Test observable behavior** - Not implementation details
+4. **Match Gherkin granularity** - Each test like a Gherkin step
+5. Write ONLY the test function (imports added automatically)
+6. FOLLOW existing patterns from tests above
+7. Use pytest style (simple assert statements)
 
 **Example showing pattern consistency**:
 ```python
@@ -755,23 +916,55 @@ def test_add_returns_sum():
 **Output**: ONLY the test function code (no imports, no explanations, no markdown).
 """
 
-        response_dict = self.llm_client.generate(prompt)
-        response = response_dict["content"]
+        # Test quality validation loop - retry up to 3 times if test has too many behaviors
+        MAX_QUALITY_RETRIES = 3
+        quality_validation_feedback = ""
 
-        # Extract code from response
-        test_function = self._extract_code(response)
+        for quality_attempt in range(1, MAX_QUALITY_RETRIES + 1):
+            # Generate test code
+            if quality_attempt == 1:
+                # First attempt - use original prompt
+                full_prompt = prompt
+            else:
+                # Retry with quality feedback
+                full_prompt = f"{quality_validation_feedback}\n\n{prompt}"
 
-        # Validate: ensure only ONE function was generated
-        function_count = self._count_functions(test_function)
-        if function_count == 0:
-            raise ValueError(f"LLM generated no test functions for {increment.test_name}")
-        elif function_count > 1:
-            logger.warning(
-                f"⚠️  LLM generated {function_count} functions instead of 1, "
-                f"extracting only '{increment.test_name}'"
-            )
-            # Extract only the requested function
-            test_function = self._extract_single_function(test_function, increment.test_name)
+            response_dict = self.llm_client.generate(full_prompt)
+            response = response_dict["content"]
+
+            # Extract code from response
+            test_function = self._extract_code(response)
+
+            # Validate: ensure only ONE function was generated
+            function_count = self._count_functions(test_function)
+            if function_count == 0:
+                raise ValueError(f"LLM generated no test functions for {increment.test_name}")
+            elif function_count > 1:
+                logger.warning(
+                    f"⚠️  LLM generated {function_count} functions instead of 1, "
+                    f"extracting only '{increment.test_name}'"
+                )
+                # Extract only the requested function
+                test_function = self._extract_single_function(test_function, increment.test_name)
+
+            # Validate test quality (single-behavior principle)
+            is_valid, quality_feedback = self._validate_test_quality(test_function, increment.test_name)
+
+            if is_valid:
+                # Test passes quality check
+                if quality_attempt > 1:
+                    logger.info(f"      ✓ Test quality acceptable (attempt {quality_attempt}/{MAX_QUALITY_RETRIES})")
+                break
+            else:
+                # Test has too many behaviors, needs rewrite
+                logger.warning(f"      ⚠️  Test quality issue (attempt {quality_attempt}/{MAX_QUALITY_RETRIES}): Multiple behaviors detected")
+                quality_validation_feedback = quality_feedback
+
+                if quality_attempt == MAX_QUALITY_RETRIES:
+                    # Last attempt failed - log warning but proceed
+                    # (better to have a working multi-behavior test than to crash)
+                    logger.warning(f"      ⚠️  Test still has quality issues after {MAX_QUALITY_RETRIES} attempts, proceeding anyway")
+                # Continue loop for retry
 
         # Store in array for cycle isolation
         if test_file_key not in self.test_functions:
@@ -788,7 +981,7 @@ def test_add_returns_sum():
 
         return test_function
 
-    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None) -> str:
+    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> str:
         """
         Write minimal code to make test pass (GREEN phase).
 
@@ -796,6 +989,7 @@ def test_add_returns_sum():
             increment: Test specification
             test_result: Result of failed test (RED phase)
             previous_failure: Previous GREEN phase failure (for retry feedback)
+            attempt: Current attempt number (1-3) for retry awareness
 
         Returns:
             Generated implementation code
@@ -808,6 +1002,65 @@ def test_add_returns_sum():
         # Read test code
         test_code = increment.test_file.read_text()
 
+        # Count existing tests for triangulation (PER-METHOD, not per-file)
+        test_file_key = str(increment.test_file)
+        all_tests = self.test_functions.get(test_file_key, [])
+
+        # Extract method being tested from test name
+        method_being_tested = self._extract_method_from_test_name(increment.test_name)
+
+        # Count tests for THIS SPECIFIC METHOD
+        tests_for_this_method = [
+            t for t in all_tests
+            if self._extract_method_from_test_name(t['name']) == method_being_tested
+        ]
+        test_count = len(tests_for_this_method)
+
+        logger.debug(f"  🔍 Method '{method_being_tested}' has {test_count} existing test(s)")
+
+        # Determine triangulation strategy
+        if test_count == 1:
+            triangulation_strategy = "HARDCODE"
+            triangulation_guidance = """🚨🚨🚨 HARDCODE REQUIREMENT - READ CAREFULLY 🚨🚨🚨
+
+This is your FIRST test. You MUST use HARDCODED literal values.
+
+❌ FORBIDDEN (Do NOT use any of these):
+- String formatting with f"..." or format()
+- Complex logic (if/else, loops, comprehensions)
+- Lambda functions or callbacks
+- URL encoding libraries (urlencode, quote, etc.)
+- Validation logic
+- Error handling (try/except, if checks)
+- Requests or HTTP libraries
+
+✅ REQUIRED (Do EXACTLY this):
+- Return a LITERAL hardcoded string or dict
+- Example: return "https://auth.example.com?client_id=test&redirect_uri=http%3A%2F%2Fcallback&scope=read&state=xyz"
+- Example: return {"access_token": "fake_token_123", "token_type": "Bearer"}
+- Copy the EXACT value the test expects, but as a hardcoded literal
+
+🎯 Why? TRUE TDD uses triangulation: Start with the simplest possible thing (hardcoded),
+then add logic in LATER tests when you need to handle different values.
+
+This is NOT lazy coding - this is DISCIPLINED TDD!"""
+        elif test_count == 2:
+            triangulation_strategy = "MINIMAL_LOGIC"
+            triangulation_guidance = """Add MINIMAL logic to satisfy both tests.
+
+✅ ALLOWED:
+- Simple if/else based on parameters
+- Basic string interpolation: f"{self.client_id}"
+- Minimal parameter usage
+
+❌ STILL FORBIDDEN:
+- Complex validation or error handling
+- Lambda functions
+- Over-engineering"""
+        else:
+            triangulation_strategy = "GENERALIZE"
+            triangulation_guidance = "Now you can generalize with proper logic (you have 3+ tests forcing the behavior)"
+
         # Get learned patterns from playbook
         playbook_guidance = self._get_playbook_guidance(
             query=f"TDD implementation minimal code {increment.test_name}",
@@ -817,6 +1070,12 @@ def test_add_returns_sum():
         prompt = f"""You are following TDD discipline: write MINIMAL code to pass the test.
 
 {playbook_guidance}
+
+**🎯 TRIANGULATION STRATEGY ({test_count} test{"s" if test_count != 1 else ""} exist):**
+{triangulation_guidance}
+
+**⚠️ ATTEMPT {attempt}/3** {'- 🚨 THIS IS YOUR FINAL ATTEMPT! 🚨' if attempt == 3 else f'- You have {4-attempt} attempt{"s" if 4-attempt > 1 else ""} remaining if this fails'}
+{'🚨 CRITICAL: The cycle will FAIL if this implementation does not pass the test. There are NO more retries after this.' if attempt == 3 else '⚠️ IMPORTANT: Get this right the FIRST time. While you have retries, each failed attempt wastes time and resources.'}
 
 **CRITICAL**: You are writing an IMPLEMENTATION file, NOT a test file.
 - This is: {self.src_dir.name}/{increment.implementation_file.name}
@@ -839,14 +1098,22 @@ def test_add_returns_sum():
 {existing_code if existing_code else "# Empty file - create what's needed"}
 ```
 {"" if not previous_failure else f'''
-**⚠️ RETRY FEEDBACK**: Your previous implementation didn't pass the test.
-**Previous implementation error**:
+**Previous implementation error** (attempt {attempt-1} failed):
 ```
 {previous_failure.error or previous_failure.output}
 ```
+
 **What went wrong**: The implementation you provided didn't satisfy the test assertion.
-**Action needed**: Fix the implementation to make the test pass. Return a value that satisfies the test.
+**Action needed**: {'CAREFULLY review the error above and the test requirements below.' if attempt == 3 else 'Fix the implementation to make the test pass. Pay close attention to the error message above.'}
 '''}
+
+**PRE-FLIGHT CHECKLIST** (verify before writing code):
+1. ✓ Read the test code above - what class/function names does it use?
+2. ✓ What parameters does the test pass to __init__ or functions?
+3. ✓ What methods does the test call?
+4. ✓ What specific assertions must pass?
+5. ✓ If existing code exists, what must be preserved?
+
 **Task**: Write the MINIMAL implementation code to make THIS test pass.
 
 **TRUE TDD Discipline - CRITICAL Rules**:
@@ -864,15 +1131,18 @@ def test_add_returns_sum():
 4. ✅ If method doesn't exist → Add it with minimal implementation
 5. ✅ Keep ALL existing code (add to it, never delete/replace)
 
-**NO DUMMY VALUES**:
-6. ❌ NEVER return hardcoded/dummy values:
-   - ❌ `return "dummy_token"`
-   - ❌ `return True` (always true)
-   - ❌ `return None`
-7. ✅ Return values built from inputs or instance state:
-   - ✅ `return f"token_{{auth_code}}"`
-   - ✅ `return token in self.valid_tokens`
-   - ✅ `return self._generate_token()`
+**TRIANGULATION - Start Simple, Add Complexity Gradually**:
+6. **Test 1 → HARDCODE** (Yes, really!):
+   - ✅ `return {{"access_token": "fake_token"}}` ← Literal value is OK!
+   - ✅ `return "https://auth.example.com?client_id=123"` ← Hardcoded OK!
+
+7. **Test 2 → Minimal Logic** (Now make it work for both tests):
+   - ✅ Use simple if/else: `return "token_a" if code == "a" else "token_b"`
+   - ✅ Or basic string building: `return f"token_{{auth_code}}"`
+
+8. **Test 3+ → Generalize** (Now you can abstract):
+   - ✅ Now add proper logic, validation, API calls
+   - ✅ Extract helpers, handle edge cases
 
 **SCOPE**:
 8. ❌ Don't add features for future tests
@@ -880,20 +1150,46 @@ def test_add_returns_sum():
 10. ❌ Don't over-engineer
 11. ❌ NEVER include test code in implementation file
 
-**Example - TRUE Incremental TDD Progression**:
+**Example - TRUE Triangulation Progression**:
 
 **Cycle 1 - Test**:
 ```python
-def test_oauth_can_be_created_with_config():
-    oauth = OAuth('client_123', 'http://callback.com')
-    assert oauth is not None
+def test_get_token_returns_access_token():
+    result = oauth.get_token()
+    assert result["access_token"] == "token_123"
 ```
-**Cycle 1 - Implementation** (Store state!):
+**Cycle 1 - Implementation** (HARDCODED!):
 ```python
-class OAuth:
-    def __init__(self, client_id, redirect_uri):
-        self.client_id = client_id
-        self.redirect_uri = redirect_uri
+def get_token(self):
+    return {{"access_token": "token_123"}}  # ← Hardcoded literal!
+```
+
+**Cycle 2 - Test** (Forces different value):
+```python
+def test_get_token_with_different_code():
+    result = oauth.get_token("code_abc")
+    assert result["access_token"] == "token_abc"
+```
+**Cycle 2 - Implementation** (Minimal logic):
+```python
+def get_token(self, code=""):
+    if not code:
+        return {{"access_token": "token_123"}}
+    return {{"access_token": f"token_{{code}}"}}  # ← Now using input!
+```
+
+**Cycle 3 - Test** (Forces real API call):
+```python
+def test_get_token_makes_api_request():
+    with patch("requests.post") as mock:
+        result = oauth.get_token("code")
+        assert mock.called
+```
+**Cycle 3 - Implementation** (NOW generalize):
+```python
+def get_token(self, code=""):
+    response = requests.post(self.token_url, data={{"code": code}})
+    return response.json()  # ← Real implementation!
 ```
 
 **Cycle 2 - Test**:
@@ -1210,6 +1506,125 @@ Output 1-3 bullet points, one per line.""",
             logger.warning("Failed to parse code for function counting")
             return 0
 
+    def _extract_method_from_test_name(self, test_name: str) -> str:
+        """
+        Extract the method being tested from the test name.
+
+        Args:
+            test_name: Test function name (e.g., test_generate_authorization_url_returns_string)
+
+        Returns:
+            Method name being tested (e.g., generate_authorization_url) or __init__ for constructor tests
+        """
+        # Remove 'test_' prefix
+        if not test_name.startswith('test_'):
+            return test_name  # Fallback
+
+        without_prefix = test_name[5:]  # Remove 'test_'
+
+        # Check for constructor tests
+        if any(pattern in without_prefix for pattern in ['can_be_created', 'can_be_instantiated', 'constructor', 'accepts_optional']):
+            return "__init__"
+
+        # Find common action verbs that indicate where the method name ends
+        verbs = ['returns', 'contains', 'accepts', 'sends', 'makes', 'gets', 'sets', 'validates',
+                 'has', 'is', 'should', 'includes', 'uses', 'calls', 'raises', 'handles']
+
+        parts = without_prefix.split('_')
+
+        # Find the first verb and everything before it is the method name
+        for i, part in enumerate(parts):
+            if part in verbs:
+                method = '_'.join(parts[:i])
+                return method if method else parts[0]
+
+        # If no verb found, assume first part is method name
+        # This handles cases like test_<method_name>_<specific_case>
+        return parts[0] if parts else test_name
+
+    def _validate_test_quality(self, test_code: str, test_name: str) -> tuple[bool, str]:
+        """
+        Validate that test follows single-behavior principle by counting assertions.
+
+        Args:
+            test_code: The test function code to validate
+            test_name: Name of the test function
+
+        Returns:
+            Tuple of (is_valid, feedback_message)
+        """
+        try:
+            tree = ast.parse(test_code)
+
+            # Find the test function
+            test_func = None
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == test_name:
+                    test_func = node
+                    break
+
+            if not test_func:
+                return True, ""  # Can't find function, skip validation
+
+            # Count assertions and mock assertions
+            assertion_count = 0
+            for node in ast.walk(test_func):
+                # Count assert statements
+                if isinstance(node, ast.Assert):
+                    assertion_count += 1
+                # Count mock assertions (assert_called, assert_called_once, etc.)
+                elif isinstance(node, ast.Attribute):
+                    if node.attr.startswith('assert_'):
+                        assertion_count += 1
+
+            # Allow up to 2 assertions (some tests need 2 closely related checks)
+            # More than 2 indicates multi-behavior testing
+            if assertion_count > 2:
+                feedback = f"""
+❌ **TEST QUALITY VIOLATION - Multiple Behaviors Detected**
+
+Your test has {assertion_count} assertions, but should verify EXACTLY ONE behavior.
+
+**Current test**: {test_name}
+- {assertion_count} assertions found
+- This violates the single-behavior principle
+- Each assertion should be a SEPARATE test
+
+**Example Fix**:
+Instead of:
+```python
+def test_url_contains_all_params():
+    assert "client_id=" in url
+    assert "redirect_uri=" in url
+    assert "scope=" in url
+    assert "state=" in url  # ← 4 behaviors!
+```
+
+Write FOUR separate tests:
+```python
+def test_url_contains_client_id():
+    assert "client_id=" in url  # ← ONE behavior
+
+def test_url_contains_redirect_uri():
+    assert "redirect_uri=" in url  # ← ONE behavior
+
+def test_url_contains_scope():
+    assert "scope=" in url  # ← ONE behavior
+
+def test_url_contains_state():
+    assert "state=" in url  # ← ONE behavior
+```
+
+**REWRITE the test to verify ONLY ONE behavior.**
+"""
+                return False, feedback
+
+            return True, ""
+
+        except Exception as e:
+            logger.warning(f"Failed to validate test quality: {e}")
+            return True, ""  # Skip validation on error
+
     def _extract_single_function(self, code: str, function_name: str) -> str:
         """
         Extract only the named function from code using AST.
@@ -1285,6 +1700,7 @@ Output 1-3 bullet points, one per line.""",
         module_name = implementation_file.stem
         header = f"""# Test file for {module_name}
 import pytest
+from unittest.mock import Mock, patch, MagicMock
 from src.{module_name} import *
 
 """
@@ -1396,23 +1812,310 @@ Output ONLY the JSON, no other text."""
 **Category:** Test Redundancy Detection
 """
 
+    def _refine_test_to_fail(
+        self,
+        increment: TestIncrement,
+        test_code: str,
+        redundancy_analysis: str,
+        attempt: int
+    ) -> str:
+        """Refine a test that passed unexpectedly to make it actually test new behavior.
+
+        When a test passes in RED phase, it means it's redundant. This method
+        refines the test to make it more specific/strict so it properly fails
+        and drives out new implementation.
+
+        Args:
+            increment: The test increment
+            test_code: Current test code that passed
+            redundancy_analysis: Analysis of why test is redundant
+            attempt: Refinement attempt number
+
+        Returns:
+            Refined test code that should fail
+        """
+        # Get current implementation
+        impl_code = ""
+        if increment.implementation_file.exists():
+            impl_code = increment.implementation_file.read_text()
+
+        # Get existing tests for context
+        test_file_key = str(increment.test_file)
+        existing_functions = self.test_functions.get(test_file_key, [])
+        existing_test_names = [f['name'] for f in existing_functions]
+
+        prompt = f"""You are refining a TDD test that passed unexpectedly in the RED phase.
+
+**The Problem:**
+A test was written but PASSED immediately, violating TDD RED phase discipline.
+This means the test is redundant - the behavior already exists.
+
+**Current test (PASSED when it should FAIL):**
+```python
+{test_code}
+```
+
+**Why it's redundant:**
+{redundancy_analysis}
+
+**Current implementation:**
+```python
+{impl_code if impl_code else "# No implementation yet"}
+```
+
+**Existing tests:**
+{', '.join(existing_test_names) if existing_test_names else "None - this is the first test"}
+
+**Your Task ({attempt}/3 refinement attempts):**
+Refine the test to make it MORE SPECIFIC and STRICTER so it actually FAILS and drives out new behavior.
+
+**Strategies to make test fail properly:**
+1. **Strengthen assertions**: Make expectations more specific
+   - Instead of: `assert result is not None`
+   - Use: `assert result == {{"access_token": "xyz", "expires_in": 3600}}`
+
+2. **Test deeper behavior**: Go beyond surface-level checks
+   - Instead of: `assert hasattr(obj, 'method')`
+   - Use: `result = obj.method(input); assert result == expected_output`
+
+3. **Add edge cases**: Test boundaries, error cases
+   - Test with empty inputs, special characters, boundary values
+   - Test error handling, validation
+
+4. **Test interactions**: Verify method calls, side effects
+   - Use mocks to verify HTTP requests were made with correct params
+   - Check that methods were called in correct order
+
+5. **Verify state changes**: Check that operations have effects
+   - After mutation, verify object state changed correctly
+   - Test that operations are idempotent/non-idempotent as expected
+
+**CRITICAL:**
+- The refined test MUST fail against current implementation
+- The refined test MUST test NEW behavior not yet implemented
+- Keep the same test name: `{increment.test_name}`
+- Output ONLY the refined test function (NO imports, NO explanations)
+
+**Output the complete refined test function:**"""
+
+        response_dict = self.llm_client.generate(prompt)
+        refined_code = self._extract_code(response_dict["content"])
+
+        return refined_code
+
+    def _analyze_green_failure(
+        self,
+        increment: TestIncrement,
+        test_code: str,
+        impl_code: str,
+        error: str,
+        attempts: int
+    ) -> dict | None:
+        """Analyze GREEN failures to detect test quality issues and extract learning.
+
+        This method determines if repeated GREEN failures might indicate:
+        - Malformed test assertions (e.g., incorrect URL encoding expectations)
+        - Missing technical knowledge (e.g., RFC standards, best practices)
+        - Test correctness issues (test might be wrong, not implementation)
+
+        Args:
+            increment: The test increment being implemented
+            test_code: The test code
+            impl_code: The implementation code that failed
+            error: The error message from test failure
+            attempts: Number of attempts made
+
+        Returns:
+            Dict with 'bullet', 'tags', 'summary', and optional 'test_correction'
+            or None if no learning pattern detected
+        """
+        prompt = f"""You are analyzing a TDD GREEN phase failure to detect test quality issues and extract technical knowledge.
+
+**Context:**
+After {attempts} implementation attempts, the test still fails. This suggests:
+1. The implementation might be technically correct
+2. The test assertion might be malformed or technically incorrect
+3. There's technical knowledge worth capturing for future cycles
+
+**Test code:**
+```python
+{test_code}
+```
+
+**Implementation code (attempt {attempts}):**
+```python
+{impl_code}
+```
+
+**Error message:**
+```
+{error}
+```
+
+**Task:** Analyze if there's a test quality issue or technical knowledge worth learning.
+
+**Look for patterns like:**
+- URL encoding: Does test expect `%3A//` instead of `%3A%2F%2F`? (RFC 3986 requires encoding ALL special chars)
+- String comparison: Case sensitivity, whitespace, escaping issues
+- API contracts: Does implementation match but test expects wrong signature?
+- Type mismatches: Strings vs numbers, lists vs tuples
+- Security: Weak validation, missing sanitization
+- Standards violations: HTTP, RFC, ISO standards
+
+**Output a JSON object:**
+- "has_learning": true/false (Is there valuable knowledge to capture?)
+- "issue_type": "malformed_assertion" | "missing_knowledge" | "implementation_bug" | "unclear"
+- "technical_domain": "url_encoding" | "http_apis" | "security" | "testing" | "general" (what domain does this relate to?)
+- "knowledge_summary": One-line summary (e.g., "RFC 3986 requires encoding ALL special characters in URLs")
+- "explanation": Detailed explanation of what's technically correct and why
+- "test_is_wrong": true/false (Should the test be corrected instead of implementation?)
+- "test_correction": If test_is_wrong=true, describe what needs fixing
+- "tags": Array of relevant tags for semantic retrieval
+
+Output ONLY the JSON, no other text."""
+
+        try:
+            response_dict = self.llm_client.generate(prompt)
+            response = response_dict["content"].strip()
+
+            # Parse JSON response
+            import json
+            import re
+
+            # Extract JSON if wrapped in markdown
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+
+            analysis = json.loads(response)
+
+            # Only create bullet if there's actual learning
+            if not analysis.get("has_learning", False):
+                return None
+
+            # Create semantic knowledge bullet
+            bullet = f"""**{analysis['technical_domain'].upper().replace('_', ' ')} - TEST QUALITY INSIGHT**
+
+**Issue Detected:** {analysis['issue_type'].replace('_', ' ').title()}
+
+**Knowledge:** {analysis['knowledge_summary']}
+
+**Explanation:**
+{analysis['explanation']}
+
+**Test Status:** {'⚠️ Test assertion appears incorrect' if analysis.get('test_is_wrong') else '✓ Test is correct, implementation needs work'}
+
+**Learned From:** {increment.test_name} (failed after {attempts} GREEN attempts)
+
+**When This Applies:** Future tests in {analysis['technical_domain']} domain
+"""
+
+            result = {
+                "bullet": bullet,
+                "tags": analysis.get("tags", [analysis["technical_domain"], "test_quality", "learned_from_failure"]),
+                "summary": analysis["knowledge_summary"]
+            }
+
+            if analysis.get("test_is_wrong") and analysis.get("test_correction"):
+                result["test_correction"] = analysis["test_correction"]
+
+            return result
+
+        except (json.JSONDecodeError, KeyError, Exception) as e:
+            logger.warning(f"Failed to analyze GREEN failure: {e}")
+            return None
+
+    def _apply_test_correction(self, test_file: Path, implementation_file: Path, test_name: str,
+                              current_test_code: str, correction_description: str, cycle_number: int) -> bool:
+        """Apply suggested test correction to fix malformed test.
+
+        Args:
+            test_file: Path to test file
+            implementation_file: Path to implementation file (for reassembly)
+            test_name: Name of the test function being corrected
+            current_test_code: Current test code content
+            correction_description: Description of what needs to be fixed
+            cycle_number: Current cycle number
+
+        Returns:
+            True if correction was successfully applied, False otherwise
+        """
+        prompt = f"""You are fixing a malformed test based on failure analysis.
+
+**Current test code:**
+```python
+{current_test_code}
+```
+
+**Required correction:**
+{correction_description}
+
+**Task:** Apply the correction to the test code.
+
+**IMPORTANT:**
+- Make ONLY the changes described in the correction
+- Preserve all existing test logic and assertions
+- Maintain proper Python syntax and indentation
+- Do NOT change test behavior, only fix technical issues (imports, syntax, etc.)
+- Output ONLY the test function code (NO imports - they are added automatically)
+
+**Output the COMPLETE corrected test FUNCTION, nothing else.**"""
+
+        try:
+            response_dict = self.llm_client.generate(prompt)
+            corrected_code = response_dict["content"].strip()
+
+            # Extract code from markdown if present
+            import re
+            code_match = re.search(r'```(?:python)?\s*\n(.*?)\n```', corrected_code, re.DOTALL)
+            if code_match:
+                corrected_code = code_match.group(1)
+
+            # Basic validation - check if it's still valid Python-ish
+            if "def test_" in corrected_code and len(corrected_code) > len(current_test_code) * 0.5:
+                # Update the test_functions array instead of writing directly
+                test_file_key = str(test_file)
+                if test_file_key in self.test_functions:
+                    # Find and update the corrected test function
+                    for func_data in self.test_functions[test_file_key]:
+                        if func_data['name'] == test_name:
+                            func_data['code'] = corrected_code
+                            break
+
+                # Reassemble the complete test file with imports
+                self._assemble_test_file(test_file, implementation_file)
+                return True
+            else:
+                logger.warning(f"Corrected code failed validation")
+                return False
+
+        except Exception as e:
+            logger.warning(f"Failed to apply test correction: {e}")
+            return False
+
     def _get_license_type(self, provider: str, model: str) -> str:
         """
         Map provider/model to license type for auditability.
 
         Args:
-            provider: Model provider (openai, anthropic, google, cohere, ollama, vllm, deepseek)
+            provider: Model provider (ollama, vllm, deepseek, togetherai)
             model: Model name
 
         Returns:
             License type string (e.g., 'apache-2.0', 'mit', 'proprietary')
+
+        Raises:
+            ValueError: If proprietary provider is used
         """
-        # Proprietary/closed-source models (cannot use outputs to train competing models per ToS)
+        # Block proprietary/closed-source models (ToS violation for training)
         if provider in ["openai", "anthropic", "google", "cohere"]:
-            return "proprietary"
+            raise ValueError(
+                f"Proprietary provider '{provider}' is not allowed. "
+                f"Use open-source providers: ollama, vllm, deepseek, togetherai"
+            )
 
         # Open-source models with permissive licenses
-        if provider in ["ollama", "vllm"]:
+        if provider in ["ollama", "vllm", "togetherai"]:
             # Map common open-source models to their licenses
             model_lower = model.lower()
 
@@ -1420,7 +2123,7 @@ Output ONLY the JSON, no other text."""
             if any(name in model_lower for name in ["qwen", "deepseek-coder", "mistral"]):
                 return "apache-2.0"
 
-            # MIT licensed models
+            # MIT licensed models (DeepSeek base models)
             if "deepseek" in model_lower and "coder" not in model_lower:
                 return "mit"
 
@@ -1428,15 +2131,18 @@ Output ONLY the JSON, no other text."""
             if "llama" in model_lower:
                 return "llama-3.1-community"
 
-            # Default for unknown Ollama/vLLM models - assume open source but mark as unknown
+            # Default for unknown Ollama/vLLM/TogetherAI models - assume open source but mark as unknown
             return "open-source-unknown"
 
-        # DeepSeek API provider
+        # DeepSeek API provider (all MIT licensed)
         if provider == "deepseek":
-            return "mit"  # DeepSeek Coder V2 is MIT licensed
+            return "mit"
 
-        # Unknown provider
-        return "unknown"
+        # Unknown provider - raise error for safety
+        raise ValueError(
+            f"Unknown provider '{provider}'. "
+            f"Allowed providers: ollama, vllm, deepseek, togetherai"
+        )
 
     def _collect_test_files(self) -> list[Path]:
         """Collect all test files created."""
@@ -1544,3 +2250,34 @@ Output ONLY the JSON, no other text."""
         except Exception as e:
             logger.error(f"Error reading Gherkin file: {e}")
             return ""
+
+    def _read_step_definitions(self, gherkin_dir: Path) -> str:
+        """Read step definition files to understand the expected API contract.
+
+        Step definitions define the exact method signatures, parameter names,
+        and return types that the generated code must match. This ensures
+        acceptance tests drive the implementation API, not vice versa.
+
+        Args:
+            gherkin_dir: Directory containing .feature files and steps/ subdirectory
+
+        Returns:
+            String containing all step definition code for prompt context
+        """
+        steps_dir = gherkin_dir / "steps"
+        if not steps_dir.exists():
+            logger.warning(f"Step definitions directory not found: {steps_dir}")
+            return ""
+
+        step_definitions = []
+        for step_file in sorted(steps_dir.glob("*.py")):
+            try:
+                content = step_file.read_text()
+                step_definitions.append(f"# {step_file.name}\n{content}")
+            except Exception as e:
+                logger.error(f"Error reading step file {step_file}: {e}")
+
+        if step_definitions:
+            logger.info(f"Loaded step definitions from {len(step_definitions)} file(s)")
+
+        return "\n\n".join(step_definitions)

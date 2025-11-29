@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Demo: Autonomous TDD Agent with Gherkin Acceptance Tests
+Demo: Autonomous TDD Agent with Gherkin Acceptance Tests (Together AI)
 
 This demo shows how the TDD agent can work toward making Gherkin scenarios pass.
+Uses Together AI serverless Qwen models with Apache 2.0 license and model provenance tracking.
+
 The agent will:
 1. Read Gherkin acceptance tests
 2. Use them to guide test planning
@@ -52,7 +54,7 @@ def main():
 
     # Setup
     project_root = Path("/tmp/oauth_auth_demo")
-    gherkin_dir = Path("/tmp/oauth_demo_features")
+    gherkin_dir = Path(__file__).parent / "gherkin_acceptance_tests"
 
     # Verify Gherkin files exist
     if not gherkin_dir.exists():
@@ -67,10 +69,9 @@ def main():
     logger.info(f"✓ Found acceptance tests: {feature_files[0].name}")
     logger.info("")
 
-    # Initialize ensemble
+    # SINGLE CODING MODEL (no voting conflicts, pure code-focused learning!)
     models = [
-        ("openai", "gpt-4o", None),
-        ("openai", "gpt-4o-mini", None),
+        ("togetherai", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8", None), # SWE-bench frontier, 256K context
     ]
 
     # Create playbook
@@ -78,7 +79,7 @@ def main():
     playbook = playbook_manager.create_playbook(
         PlaybookCreate(
             domain="oauth_authentication",
-            base_model="gpt-4o"
+            base_model="Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
         )
     )
 
@@ -91,7 +92,7 @@ def main():
     # Initialize test reviewer
     from src.agents.test_review_agent import TestReviewAgent
     test_reviewer = TestReviewAgent(
-        llm_client=LLMClient(provider="openai", model="gpt-4o")
+        llm_client=LLMClient(provider="togetherai", model="Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8")
     )
 
     # Initialize TDD agent
@@ -124,7 +125,7 @@ token exchange, token validation and refresh"""
         logger.info("=" * 80)
         logger.info(f"  • All acceptance tests passing")
         logger.info(f"  • Unit tests: {len(result.test_files)} files")
-        logger.info(f"  • Implementation: {len(result.impl_files)} files")
+        logger.info(f"  • Implementation: {len(result.implementation_files)} files")
         logger.info("")
 
         # Final acceptance test check

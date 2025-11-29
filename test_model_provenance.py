@@ -16,12 +16,14 @@ def test_license_mapping():
     """Test the _get_license_type logic manually."""
     print("Testing license type mapping...")
 
-    # Import the method logic (simplified version for testing)
+    # Import the method logic (matches updated autonomous_tdd_agent.py)
     def get_license_type(provider: str, model: str) -> str:
+        # Block proprietary providers
         if provider in ["openai", "anthropic", "google", "cohere"]:
-            return "proprietary"
+            raise ValueError(f"Proprietary provider '{provider}' is not allowed")
 
-        if provider in ["ollama", "vllm"]:
+        # Open-source models
+        if provider in ["ollama", "vllm", "togetherai"]:
             model_lower = model.lower()
             if any(name in model_lower for name in ["qwen", "deepseek-coder", "mistral"]):
                 return "apache-2.0"
@@ -34,21 +36,23 @@ def test_license_mapping():
         if provider == "deepseek":
             return "mit"
 
-        return "unknown"
+        raise ValueError(f"Unknown provider '{provider}'")
 
-    # Test cases
+    # Test cases (proprietary providers should raise ValueError)
     test_cases = [
-        ("openai", "gpt-4o", "proprietary"),
-        ("openai", "gpt-4o-mini", "proprietary"),
-        ("anthropic", "claude-3-sonnet", "proprietary"),
-        ("google", "gemini-pro", "proprietary"),
-        ("cohere", "command-r-plus", "proprietary"),
+        # Open-source providers
         ("ollama", "qwen2.5-coder:32b", "apache-2.0"),
         ("ollama", "deepseek-coder:33b", "apache-2.0"),
         ("ollama", "mistral:7b", "apache-2.0"),
         ("ollama", "llama3.1:70b", "llama-3.1-community"),
         ("vllm", "Qwen/Qwen2.5-Coder-32B-Instruct", "apache-2.0"),
+        ("vllm", "meta-llama/Llama-3.1-70B-Instruct", "llama-3.1-community"),
+        ("togetherai", "Qwen/Qwen2.5-Coder-32B-Instruct", "apache-2.0"),
+        ("togetherai", "deepseek-ai/DeepSeek-Coder-V2-Instruct", "apache-2.0"),
+        ("togetherai", "meta-llama/Llama-3.1-70B-Instruct", "llama-3.1-community"),
+        ("togetherai", "mistralai/Mistral-7B-Instruct-v0.2", "apache-2.0"),
         ("deepseek", "deepseek-coder", "mit"),
+        ("deepseek", "deepseek-chat", "mit"),
     ]
 
     all_passed = True

@@ -1,6 +1,6 @@
 """
-LLM Client - Unified interface for multiple LLM providers.
-Supports Ollama, OpenAI, Anthropic, and DeepSeek.
+LLM Client - Unified interface for open-source LLM providers.
+Supports Ollama, vLLM, DeepSeek, and Together AI.
 """
 import json
 import logging
@@ -81,6 +81,8 @@ class LLMClient:
             result = self._generate_anthropic(prompt, system_prompt, max_tokens, temperature)
         elif self.provider == "deepseek":
             result = self._generate_deepseek(prompt, system_prompt, max_tokens, temperature)
+        elif self.provider == "togetherai":
+            result = self._generate_togetherai(prompt, system_prompt, max_tokens, temperature)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -316,6 +318,53 @@ class LLMClient:
         except httpx.HTTPError as e:
             logger.error(f"DeepSeek API error: {e}")
             raise RuntimeError(f"Failed to generate with DeepSeek: {e}")
+
+    def _generate_togetherai(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        max_tokens: Optional[int],
+        temperature: float,
+    ) -> dict[str, Any]:
+        """Generate using Together AI API (open-source models)."""
+        if not settings.togetherai_api_key:
+            raise ValueError("Together AI API key not configured")
+
+        # Together AI uses OpenAI-compatible API
+        url = "https://api.together.xyz/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.togetherai_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+            return {
+                "content": data["choices"][0]["message"]["content"],
+                "tokens_used": data["usage"]["total_tokens"],
+            }
+
+        except httpx.HTTPError as e:
+            logger.error(f"Together AI API error: {e}")
+            raise RuntimeError(f"Failed to generate with Together AI: {e}")
 
     def _get_default_model(self, model: Optional[str]) -> str:
         """Get default model for provider."""

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Demo: Autonomous TDD Agent with Hybrid Ensemble - OAuth Authentication
-- 2x Local Ollama: deepseek-coder:6.7b, qwen2.5-coder:1.5b
-- 1x RunPod vLLM (GPU-accelerated): Qwen2.5-Coder-7B (when ready)
+- Together AI (serverless): Qwen2.5-72B-Instruct-Turbo + 7B-Instruct-Turbo
+- Apache 2.0 licensed - Pay-per-use inference ($1.20 + $0.30 per million tokens)
 
 Tests OAuth authentication implementation with ensemble learning
 """
@@ -31,10 +31,9 @@ logger = logging.getLogger(__name__)
 RUNPOD_IP = "213.173.102.138"
 RUNPOD_PORT = "32277"  # Port for first vLLM server
 
-# Hybrid: OpenAI GPT-4o (quality) + GPT-4o-mini (speed)
+# SINGLE CODING MODEL: No ensemble voting conflicts!
 MODELS = [
-    ("openai", "gpt-4o", None),           # Primary - Best for complex coding
-    ("openai", "gpt-4o-mini", None),      # Secondary - Fast consensus
+    ("togetherai", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8", None), # SWE-bench frontier, 256K context ($2.00/M)
 ]
 
 
@@ -42,18 +41,18 @@ def main():
     print("\n" + "=" * 80)
     print("  AUTONOMOUS TDD AGENT - OAuth Authentication Challenge")
     print("=" * 80)
-    print("\n🚀 Hybrid Configuration:")
-    print(f"   OpenAI GPT-4o (primary) + GPT-4o-mini (consensus)")
-    print(f"   Fast, reliable, cloud-based ensemble")
+    print("\n🚀 SINGLE CODING MODEL Configuration:")
+    print(f"   Together AI Serverless: Qwen3 Coder 480B (SWE-bench frontier)")
+    print(f"   Apache 2.0 licensed - No voting conflicts, pure code-focused learning")
     print(f"\n   Active Models: {len(MODELS)}")
     for i, (provider, model, url) in enumerate(MODELS, 1):
         print(f"     {i}. {model} ({provider.upper()})")
 
-    print("\n💡 Testing Ambitious Feature:")
+    print("\n💡 Testing Single Coding Model TDD:")
     print("   🔐 OAuth Authentication Implementation")
-    print("   ✓ Ensemble learning with security best practices")
-    print("   ✓ Multi-model consensus on auth flows")
-    print("   ✓ TDD for critical security code")
+    print("   ✓ No ensemble voting → No conflicts")
+    print("   ✓ Fresh playbook for code-specific patterns")
+    print("   ✓ Qwen3 Coder: SWE-bench frontier performance")
 
     # Setup demo workspace
     demo_root = Path("/tmp/oauth_auth_demo")
@@ -79,7 +78,7 @@ def main():
     playbook = playbook_manager.create_playbook(
         PlaybookCreate(
             domain="oauth_authentication",
-            base_model="deepseek-coder:6.7b"
+            base_model="Qwen/Qwen2.5-72B-Instruct-Turbo"
         )
     )
 

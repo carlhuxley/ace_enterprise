@@ -48,23 +48,19 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 1440  # 24 hours
 
     # LLM Providers
-    # Ollama (local)
+    # Ollama (local - open-source models)
     ollama_base_url: str = "http://localhost:11434"
     ollama_default_model: str = "qwen3-coder:30b"
 
-    # OpenAI (optional)
-    openai_api_key: str | None = None
-    openai_default_model: str = "gpt-4-turbo-preview"
-
-    # Anthropic (optional)
-    anthropic_api_key: str | None = None
-    anthropic_default_model: str = "claude-3-5-sonnet-20240620"
-
-    # DeepSeek API (optional)
+    # DeepSeek API (MIT license)
     deepseek_api_key: str | None = None
     deepseek_default_model: str = "deepseek-chat"
 
-    default_llm_provider: Literal["ollama", "openai", "anthropic", "deepseek"] = "ollama"
+    # Together AI (open-source models)
+    togetherai_api_key: str | None = None
+    togetherai_default_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+
+    default_llm_provider: Literal["ollama", "vllm", "deepseek", "togetherai"] = "ollama"
 
     # Embedding Configuration
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

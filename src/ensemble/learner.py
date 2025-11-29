@@ -920,11 +920,59 @@ Your reconsidered vote:"""
             f"{', '.join(f'{m}: {p.accuracy_score:.2%}' for m, p in self.model_performance.items())}"
         )
 
+    def _get_license_type(self, provider: str, model: str) -> str:
+        """
+        Determine the license type for a given provider and model.
+
+        Args:
+            provider: LLM provider (e.g., "togetherai", "ollama", "vllm")
+            model: Model name
+
+        Returns:
+            License type string
+        """
+        # Block proprietary/closed-source models (ToS violation for training)
+        if provider in ["openai", "anthropic", "google", "cohere"]:
+            raise ValueError(
+                f"Proprietary provider '{provider}' is not allowed. "
+                f"Use open-source providers: ollama, vllm, deepseek, togetherai"
+            )
+
+        # Open-source models with permissive licenses
+        if provider in ["ollama", "vllm", "togetherai"]:
+            # Map common open-source models to their licenses
+            model_lower = model.lower()
+
+            # Apache 2.0 licensed models
+            if any(name in model_lower for name in ["qwen", "deepseek-coder", "mistral", "arcee"]):
+                return "apache-2.0"
+
+            # MIT licensed models (DeepSeek base models)
+            if "deepseek" in model_lower and "coder" not in model_lower:
+                return "mit"
+
+            # Llama models (Llama 3.1 Community License - permissive)
+            if "llama" in model_lower:
+                return "llama-3.1-community"
+
+            # Default for unknown Ollama/vLLM/TogetherAI models - assume open source but mark as unknown
+            return "open-source-unknown"
+
+        # DeepSeek API provider (all MIT licensed)
+        if provider == "deepseek":
+            return "mit"
+
+        # Unknown provider - raise error for safety
+        raise ValueError(
+            f"Unknown provider '{provider}'. "
+            f"Allowed providers: ollama, vllm, deepseek, togetherai"
+        )
+
     def add_approved_bullets_to_playbook(
         self, result: EnsembleResult
     ) -> int:
         """
-        Add approved consensus bullets to the shared playbook.
+        Add approved consensus bullets to the shared playbook with model provenance.
 
         Args:
             result: Ensemble result with approved bullets
@@ -935,11 +983,28 @@ Your reconsidered vote:"""
         added = 0
 
         for bullet in result.approved_bullets:
-            # Convert back to BulletCreate format
+            # Parse model_id to extract provider and model name
+            # Format: "provider/model/name" e.g., "togetherai/Qwen/Qwen2.5-72B-Instruct-Turbo"
+            model_id = bullet.proposed_by
+            parts = model_id.split("/", 1)
+            provider = parts[0]
+            model_name = parts[1] if len(parts) > 1 else model_id
+
+            # Determine license type
+            try:
+                license_type = self._get_license_type(provider, model_name)
+            except ValueError as e:
+                logger.warning(f"Skipping bullet from {model_id}: {e}")
+                continue
+
+            # Convert back to BulletCreate format WITH provenance
             bullet_data = BulletCreate(
                 content=bullet.content,
                 section=bullet.section.value,
                 tags=bullet.tags,
+                created_by_model=model_name,
+                model_provider=provider,
+                license_type=license_type,
             )
 
             try:

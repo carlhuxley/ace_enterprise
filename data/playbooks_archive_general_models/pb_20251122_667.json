@@ -1,0 +1,18 @@
+{
+  "playbook_id": "pb_20251122_667",
+  "version": "0.1.0",
+  "metadata": {
+    "domain": "oauth_authentication",
+    "base_model": "Qwen/Qwen2.5-72B-Instruct-Turbo",
+    "total_tokens": 0,
+    "total_bullets": 0
+  },
+  "sections": {
+    "strategies_and_hard_rules": [],
+    "code_snippets": [],
+    "troubleshooting": [],
+    "domain_knowledge": []
+  },
+  "created_at": "2025-11-22T11:39:59.270135",
+  "updated_at": "2025-11-22T11:39:59.270135"
+}

@@ -143,7 +143,7 @@ class PlaybookManager:
         except Exception as e:
             logger.warning(f"Failed to generate embedding for bullet {bullet_id}: {e}")
 
-        # Create bullet
+        # Create bullet with model provenance
         now = datetime.utcnow()
         bullet = Bullet(
             id=bullet_id,
@@ -155,6 +155,9 @@ class PlaybookManager:
             created_at=now,
             last_used=None,
             embedding=embedding,
+            created_by_model=bullet_data.created_by_model,
+            model_provider=bullet_data.model_provider,
+            license_type=bullet_data.license_type,
         )
 
         # Add to playbook
@@ -563,6 +566,9 @@ class PlaybookManager:
                     "created_at": b.created_at.isoformat(),
                     "last_used": b.last_used.isoformat() if b.last_used else None,
                     "embedding": b.embedding,
+                    "created_by_model": b.created_by_model,
+                    "model_provider": b.model_provider,
+                    "license_type": b.license_type,
                 }
                 for b in bullets
             ]

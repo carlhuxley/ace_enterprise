@@ -486,4 +486,356 @@ Entries #5 and #6 are coupled: Cannot audit licensing without model provenance. 
 
 ---
 
-*Last updated: 2025-11-21*
+## 2025-11-23 - Session: Gherkin Acceptance Tests & API Contract Discovery
+
+### 7. Critical Discovery: Step Definitions Define the API Contract
+**Timestamp:** 2025-11-23 07:30 GMT
+
+**Insight:** "Are changing the signature in the step code to match what the TDD agent produced? Surely that's not correct?"
+
+**Context:**
+After successfully creating permanent acceptance tests (solving the `/tmp` deletion issue), the agent generated OAuth code that passed unit tests but failed acceptance tests due to API signature mismatches.
+
+**Initial Incorrect Approach:**
+System attempted to modify step definitions to match generated code:
+```python
+# Generated code had:
+def exchange_authorization_code_for_token(self, auth_code, ...)
+
+# Step definition expected:
+exchange_authorization_code_for_token(authorization_code=...)
+
+# WRONG: Tried to change step definition to use auth_code
+```
+
+**User's Crucial Insight:**
+User immediately recognized the fundamental error: **Acceptance tests define the contract**, not the implementation. Changing step definitions to match generated code reverses the entire purpose of Acceptance-Test-Driven Development (ATDD).
+
+**Root Cause Analysis:**
+The agent only reads `.feature` files (Gherkin scenarios), but NOT `steps/*.py` files (step definitions). Without seeing step definitions, the agent:
+1. Doesn't know what method signatures are expected
+2. Generates code based solely on high-level scenarios
+3. Creates valid implementations with wrong APIs
+
+**The Contract Hierarchy:**
+```
+Business Requirements (Gherkin scenarios)
+    ↓
+Technical Contract (Step definitions - method names, parameters, types)
+    ↓
+Implementation (Generated code MUST conform)
+```
+
+**Example Mismatch:**
+```python
+# Step definition (THE CONTRACT):
+@when('I exchange the code for an access token')
+def step_exchange_code_for_token(context):
+    context.access_token = context.oauth_client.exchange_authorization_code_for_token(
+        authorization_code=context.authorization_code  # Required parameter name
+    )
+
+# Generated code (doesn't conform):
+def exchange_authorization_code_for_token(self, auth_code, redirect_uri=None):
+    # Uses 'auth_code' instead of 'authorization_code'
+    # Result: TypeError - unexpected keyword argument
+```
+
+**Strategic Value:**
+This discovery highlights a fundamental architectural gap:
+- **What the agent sees:** Gherkin scenarios (business requirements)
+- **What the agent misses:** Step definitions (technical contract)
+- **Result:** Correct functionality, wrong interface
+
+**Conceptual Clarity:**
+User distinguished between:
+- **Gherkin scenarios** = WHAT to build (business requirements)
+- **Step definitions** = HOW to call it (API contract)
+- **Implementation** = Code that satisfies both
+
+Changing step definitions defeats ATDD because:
+1. Acceptance tests lose their role as requirements specification
+2. No API contract enforcement
+3. Tests become implementation documentation instead of requirements
+
+**Architectural Solution Proposed:**
+
+1. **Add method to read step definitions:**
+```python
+def _read_step_definitions(self, gherkin_dir: Path) -> str:
+    """Read step definition files to understand expected API contract."""
+    steps_dir = gherkin_dir / "steps"
+    if not steps_dir.exists():
+        return ""
+
+    step_definitions = []
+    for step_file in steps_dir.glob("*.py"):
+        content = step_file.read_text()
+        step_definitions.append(f"# {step_file.name}\n{content}")
+
+    return "\n\n".join(step_definitions)
+```
+
+2. **Update prompts to emphasize API contract:**
+```python
+**Step Definitions (API CONTRACT - MUST MATCH EXACTLY):**
+```python
+{step_definitions}
+```
+
+CRITICAL: The step definitions above define the EXACT API your code must implement.
+Pay close attention to:
+- Method names
+- Parameter names (e.g., `authorization_code=`, NOT `auth_code=`)
+- Expected return types
+Your generated code MUST match these signatures exactly.
+```
+
+**Impact:**
+- Identified that step definitions are not just test helpers - they ARE the contract specification
+- Prevented anti-pattern of modifying requirements to match implementation
+- Proposed solution to give agent visibility into complete contract (scenarios + step definitions)
+
+**Benefits of Fix:**
+1. Agent sees complete contract from the start
+2. Generates conforming code on first attempt
+3. Acceptance tests pass without API mismatches
+4. True ATDD: tests drive implementation, not vice versa
+5. Faster iteration (fewer failed attempts)
+
+**Current Files Created:**
+- ✅ `/home/ch_dev/ace_enterprise/gherkin_acceptance_tests/oauth.feature` - Business requirements (5 scenarios)
+- ✅ `/home/ch_dev/ace_enterprise/gherkin_acceptance_tests/steps/oauth_steps.py` - API contract (28 step definitions)
+- ✅ `/home/ch_dev/ace_enterprise/gherkin_acceptance_tests/README.md` - Documentation
+- ⏳ Solution to read and use step definitions in agent prompts (proposed, not yet implemented)
+
+**Key Quote:** "Surely that's not correct?" - Immediately identified that modifying requirements to match implementation reverses the fundamental purpose of acceptance testing.
+
+**Implementation Status:**
+- **Issue identified:** ✅ Complete understanding of root cause
+- **Solution designed:** ✅ Detailed implementation plan documented
+- **Code changes:** ⏳ Pending implementation in `src/agents/autonomous_tdd_agent.py`
+
+**Files Requiring Updates:**
+- `src/agents/autonomous_tdd_agent.py`:
+  - Add `_read_step_definitions()` method (after line 1555)
+  - Update `build_feature()` to read step definitions (lines 187-193)
+  - Update `_determine_next_increment()` signature and prompt (lines 414, 458-469)
+
+---
+
+### 8. Breakthrough: Automatic Knowledge Learning from Failures
+**Timestamp:** 2025-11-23 08:45 GMT
+
+**Context:** After implementing retry awareness and ATDD fixes, demo failed on Cycle 2 with URL encoding issue. The implementation was CORRECT (properly encoded all special chars per RFC 3986), but the TEST had malformed expectations.
+
+**User's Critical Insight:** "The only problem I see with the seed knowledge builder approach is you will need to keep updating the file if more edge cases are found. I'm thinking if the last test failed because the agent realised the URL encoding was wrong then it should have added a note to the playbook and corrected the test."
+
+**Architectural Shift:**
+From: Manual knowledge curation (static seed scripts requiring updates)
+To: **Automatic learning from failures** (dynamic knowledge acquisition)
+
+**Key Observations:**
+1. Agent spent 3 attempts trying to "fix" correct code to match incorrect test
+2. Agent never questioned whether the TEST might be wrong
+3. URL encoding is general engineering knowledge, not domain-specific
+4. This pattern will recur - need automatic capture, not manual seeding
+
+**Solution Implemented:**
+
+New method `_analyze_green_failure()` that triggers after GREEN retry exhaustion:
+
+```python
+def _analyze_green_failure(
+    self,
+    increment: TestIncrement,
+    test_code: str,
+    impl_code: str,
+    error: str,
+    attempts: int
+) -> dict | None:
+    """Analyze GREEN failures to detect test quality issues.
+
+    Looks for:
+    - Malformed test assertions (incorrect URL encoding, etc.)
+    - Missing technical knowledge (RFC standards, best practices)
+    - Test correctness issues (test might be wrong, not implementation)
+
+    Returns:
+        Dict with 'bullet', 'tags', 'summary', 'test_correction' or None
+    """
+```
+
+**Learning Triggers:**
+- URL encoding: RFC 3986 compliance (`:` → `%3A`, `/` → `%2F`)
+- String comparison issues
+- API contract violations
+- Type mismatches
+- Security patterns
+- HTTP/RFC/ISO standards violations
+
+**Auto-Generated Bullets:**
+```markdown
+**URL ENCODING - TEST QUALITY INSIGHT**
+
+**Issue Detected:** Malformed Assertion
+
+**Knowledge:** RFC 3986 requires encoding ALL special characters in URLs
+
+**Explanation:**
+[Detailed technical analysis from LLM]
+
+**Test Status:** ⚠️ Test assertion appears incorrect
+OR
+**Test Status:** ✓ Test is correct, implementation needs work
+
+**Learned From:** test_generate_authorization_url (failed after 3 GREEN attempts)
+```
+
+**Integration:**
+- Triggered in GREEN retry loop (lines 644-676)
+- Stores bullet in `troubleshooting` section (technical gotchas)
+- Tags for semantic retrieval: `["url_encoding", "test_quality", "learned_from_failure"]`
+- Optional test correction suggestion if test is detectably wrong
+- Uses same playbook infrastructure as redundancy learning
+
+**Advantages Over Manual Seeding:**
+1. ✅ **Dynamic**: Learns from actual failures, not pre-guessed patterns
+2. ✅ **Context-aware**: Captures precise edge case that failed
+3. ✅ **Self-improving**: Knowledge base grows organically
+4. ✅ **Zero maintenance**: No manual script updates required
+5. ✅ **Semantic**: Tagged for contextual retrieval
+6. ✅ **Traceable**: Records which test/cycle triggered learning
+
+**Meta-Learning Capability:**
+Agent can now:
+- Question test correctness (not just implementation)
+- Detect technical standards violations
+- Suggest test corrections when assertions are malformed
+- Build foundational engineering knowledge from experience
+
+**Future Potential:**
+- Test correction automation (agent rewrites bad tests)
+- Knowledge deduplication (merge similar learnings)
+- Cross-domain pattern recognition
+- Confidence scoring for "test is wrong" vs "implementation is wrong"
+
+**Impact on ACE System:**
+This implements the **core vision** of ACE playbooks:
+- Knowledge emerges from development cycles
+- Patterns are retrieved when contextually relevant
+- System becomes smarter with each failure
+- No manual curation bottleneck
+
+**Quote:** "if the last test failed because the agent realised the URL encoding was wrong then it should have added a note to the playbook and corrected the test."
+
+This is the difference between:
+- Static knowledge systems (expert curates rules)
+- **Emergent intelligence** (system learns from failures)
+
+**Files Modified:**
+- `src/agents/autonomous_tdd_agent.py`:
+  - Added `_analyze_green_failure()` method (lines 1453-1573)
+  - Integrated learning into retry loop (lines 631-672)
+  - Automatic bullet creation and playbook storage
+  - Test correction suggestions logged
+
+**Critical Improvement from User Feedback:**
+User insight: "Surely a better approach is to learn after every fail and update bullets then attempt again with the new knowledge rather than waiting until the last attempt fails?"
+
+**Revised Implementation:**
+Learning now happens **INSIDE the retry loop**, creating a tight learning cycle:
+
+```python
+for attempt in 1..3:
+    if attempt > 1:
+        # LEARN from previous failure BEFORE next attempt
+        analyze_green_failure(previous_impl, error)
+        store_bullet_in_playbook()  # Available NOW for next attempt!
+
+    # Try implementation (with any newly learned knowledge!)
+    write_minimal_code()
+    run_tests()
+```
+
+**Advantages:**
+1. ✅ Knowledge accumulates across retries **within same cycle**
+2. ✅ Attempt 2 benefits from Attempt 1 analysis
+3. ✅ Attempt 3 has accumulated knowledge from both previous failures
+4. ✅ Tight feedback loop - learn immediately, apply immediately
+5. ✅ Maximizes learning even if cycle eventually succeeds
+
+This transforms retries from "blind attempts" to **progressive learning with accumulated knowledge**.
+
+**Evolution: Automatic Test Correction** (implemented after tight learning loop)
+
+After implementing in-loop learning, we discovered the agent was correctly identifying malformed tests but only logging suggestions instead of fixing them.
+
+**Example from Cycle 1 failure:**
+```
+🧠 LEARN: Analyzing attempt 1 failure...
+   ✓ Stored: Test uses undefined `patch` and `Mock` without importing them
+   💡 Test fix suggested: Add `from unittest.mock import patch, Mock`
+
+[Tries to fix IMPLEMENTATION instead of TEST]
+[Fails again with same error]
+```
+
+**Solution: Automatic Test Correction**
+Added `_apply_test_correction()` method (lines 1587-1638):
+```python
+def _apply_test_correction(self, test_file, current_test_code, correction_description):
+    """Apply suggested test correction to fix malformed test."""
+    # Uses LLM to intelligently apply the fix
+    # Validates corrected code
+    # Writes back to test file
+    # Returns True if successful
+```
+
+**Integration in retry loop:**
+```python
+if failure_analysis.get("test_correction"):
+    logger.info(f"      🔧 Applying test correction...")
+    corrected = self._apply_test_correction(...)
+    if corrected:
+        test_code = increment.test_file.read_text()  # Reload corrected test
+        logger.info(f"      ✓ Test corrected and reloaded")
+```
+
+**Now the flow is:**
+```
+Attempt 1: Fail with malformed test
+    ↓
+🧠 LEARN: "Test missing imports"
+💾 Store knowledge in playbook
+🔧 AUTO-FIX: Add missing imports to test file  ← NEW!
+✅ Reload corrected test
+    ↓
+Attempt 2: Try with FIXED test + new knowledge
+    ↓
+⚙️  PASSED ✓
+```
+
+**Impact:**
+- Agent can now **fix tests**, not just implementations
+- Completes the autonomous loop: Learn → Fix → Retry
+- No human intervention needed for common test mistakes
+- True self-correction capability
+
+**Files Modified:**
+- `src/agents/autonomous_tdd_agent.py`:
+  - Added `_apply_test_correction()` method (lines 1587-1638)
+  - Integrated automatic correction into retry loop (lines 660-671)
+  - Test correction applied BEFORE next implementation attempt
+
+**Common corrections handled:**
+- Missing imports (`unittest.mock`, `pytest`, etc.)
+- Syntax errors in test code
+- Incorrect assertion patterns
+- Type mismatches in test setup
+
+This completes the vision: **The agent learns from failures, stores knowledge, AND fixes broken tests automatically**.
+
+---
+
+*Last updated: 2025-11-23*
