@@ -770,9 +770,10 @@ Output EITHER:
                     if attempt < MAX_GREEN_RETRIES:
                         # Force retry by simulating test failure
                         green_result = TestResult(
-                            all_passed=False,
-                            error=f"HARDCODE VALIDATION FAILED:\n{validation_feedback}",
-                            output=""
+                            passed=False,
+                            failed=True,
+                            output="",
+                            error=f"HARDCODE VALIDATION FAILED:\n{validation_feedback}"
                         )
                         continue
                     else:
