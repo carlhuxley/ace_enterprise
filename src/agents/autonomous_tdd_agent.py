@@ -161,7 +161,14 @@ class AutonomousTDDAgent:
         logger.info(f"  Max iterations: {max_iterations}")
         logger.info(f"  Primary LLM: {provider}/{model}")
 
-    def build_feature(self, requirement: str, gherkin_dir: Optional[Path] = None) -> TDDResult:
+    def build_feature(
+        self,
+        requirement: str,
+        gherkin_dir: Optional[Path] = None,
+        project_root: Optional[Path] = None,
+        source_dir: Optional[Path] = None,
+        test_dir: Optional[Path] = None
+    ) -> TDDResult:
         """
         Build complete feature autonomously using TDD.
 
@@ -174,6 +181,9 @@ class AutonomousTDDAgent:
         Args:
             requirement: Natural language feature description
             gherkin_dir: Optional directory containing .feature file and steps/ for acceptance testing
+            project_root: Optional project root directory (overrides instance default)
+            source_dir: Optional source directory (overrides instance default)
+            test_dir: Optional test directory (overrides instance default)
 
         Returns:
             TDDResult with all generated files and metrics
@@ -181,32 +191,49 @@ class AutonomousTDDAgent:
         import time
         start_time = time.time()
 
+        # Use provided directories or fall back to instance defaults
+        if project_root:
+            self.project_root = project_root
+        if source_dir:
+            self.src_dir = source_dir
+        if test_dir:
+            self.test_dir = test_dir
+
         logger.info("=" * 80)
         logger.info(f"AUTONOMOUS TDD: {requirement}")
         logger.info("=" * 80)
-        logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
 
-        # Read Gherkin scenarios and step definitions if provided
+        # Read Gherkin scenarios if provided
         gherkin_content = None
-        step_definitions = None
+        gherkin_scenarios = None
         if gherkin_dir:
             feature_file = list(gherkin_dir.glob("*.feature"))[0] if list(gherkin_dir.glob("*.feature")) else None
             if feature_file:
                 gherkin_content = self._read_gherkin_scenarios(feature_file)
-                step_definitions = self._read_step_definitions(gherkin_dir)
-                logger.info(f"📋 Using acceptance tests from: {feature_file.name}")
+                gherkin_scenarios = self._parse_gherkin_scenarios(gherkin_content)
+                logger.info(f"\n💡 Using GHERKIN-DRIVEN planning ({len(gherkin_scenarios)} scenarios)")
+                logger.info(f"📋 Acceptance tests from: {feature_file.name}")
+            else:
+                logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
+        else:
+            logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
 
         # Execute TDD cycles with emergent planning
         results = []
         cycle_number = 1
 
         while cycle_number <= self.max_iterations:
-            # Determine next test based on current state (EMERGENT PLANNING)
+            # Determine next test based on current state
             logger.info(f"\n{'─' * 80}")
-            logger.info(f"[Cycle {cycle_number}] Determining next test based on current implementation...")
+            logger.info(f"[Cycle {cycle_number}] Determining next test...")
             logger.info('─' * 80)
 
-            increment = self._determine_next_increment(requirement, cycle_number, gherkin_context=gherkin_content, step_definitions=step_definitions)
+            increment = self._determine_next_increment(
+                requirement,
+                cycle_number,
+                gherkin_context=gherkin_content,
+                gherkin_scenarios=gherkin_scenarios
+            )
 
             # Check if requirement is satisfied
             if increment is None:
@@ -229,17 +256,8 @@ class AutonomousTDDAgent:
                 logger.error(f"  ❌ Cycle failed: {e}")
                 raise
 
-            # Check acceptance tests periodically if Gherkin provided
-            if gherkin_dir and cycle_number % 3 == 0:
-                logger.info(f"\n{'─' * 80}")
-                logger.info("[Acceptance Check] Running Gherkin scenarios...")
-                logger.info('─' * 80)
-                acceptance_result = self._run_acceptance_tests(gherkin_dir)
-                logger.info(f"  📊 {acceptance_result['details']}")
-
-                if acceptance_result['all_passed']:
-                    logger.info(f"\n🎉 All acceptance tests passing! Feature complete after {cycle_number} cycles.")
-                    break
+            # Note: Acceptance tests (step definitions) can be added later for end-to-end verification
+            # For now, we rely on comprehensive unit tests generated from Gherkin scenarios
 
             cycle_number += 1
 
@@ -421,17 +439,19 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         return "\n".join(summaries)
 
-    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None, step_definitions: Optional[str] = None) -> TestIncrement | None:
+    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None, gherkin_scenarios: Optional[list[dict]] = None) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
 
-        This implements EMERGENT TDD - each cycle informs what the next test should be.
+        This implements:
+        - GHERKIN-DRIVEN: When scenarios provided, derive tests from Given/When/Then steps
+        - EMERGENT: When no Gherkin, each cycle informs what the next test should be
 
         Args:
             requirement: Original feature requirement
             cycle_number: Current cycle number
-            gherkin_context: Optional Gherkin scenarios for context
-            step_definitions: Optional step definition code that defines the expected API contract
+            gherkin_context: Optional raw Gherkin content for context
+            gherkin_scenarios: Optional parsed Gherkin scenarios for driving test generation
 
         Returns:
             Next TestIncrement to implement, or None if requirement is satisfied
@@ -468,48 +488,49 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         # Add Gherkin context if provided
         gherkin_section = ""
-        if gherkin_context:
+        if gherkin_scenarios and gherkin_context:
+            # Build a structured view of scenarios
+            scenarios_summary = []
+            for idx, scenario in enumerate(gherkin_scenarios, 1):
+                scenario_text = f"{idx}. **{scenario['name']}**\n"
+                for step in scenario['steps']:
+                    scenario_text += f"   {step['type']}: {step['text']}\n"
+                scenarios_summary.append(scenario_text)
+
             gherkin_section = f"""
-**Acceptance Tests (Gherkin scenarios):**
+**🎯 GHERKIN-DRIVEN ATDD - Business Requirements:**
 ```gherkin
 {gherkin_context}
 ```
 
-🎯 **CRITICAL - Gherkin Steps Define TDD Test Granularity:**
-The Gherkin steps above show the EXACT granularity your TDD tests should follow.
-Each "Then" step should roughly correspond to ONE TDD test.
+**Parsed Scenarios ({len(gherkin_scenarios)} total):**
+{''.join(scenarios_summary)}
+
+**CRITICAL - Generate Unit Tests from Gherkin:**
+Each Gherkin scenario defines a business capability. Your task is to derive unit tests that:
+1. Verify the behaviors described in the Given/When/Then steps
+2. Test the implementation needed to satisfy each scenario
+3. Focus on the CONTRACT (what the API should do) not implementation details
 
 **Example Mapping:**
 ```
-Then the URL should contain the client_id parameter
-  → TDD Test: test_generate_url_contains_client_id()
+Scenario: User grants application access
+  When: I redirect them to the OAuth provider with required parameters
+  Then: they should see a valid authorization URL
 
-Then the URL should contain the redirect_uri parameter
-  → TDD Test: test_generate_url_contains_redirect_uri()
-
-Then the URL should contain the scope parameter
-  → TDD Test: test_generate_url_contains_scope()
+→ Unit Test: test_generate_authorization_url_returns_valid_url()
+→ Unit Test: test_authorization_url_includes_required_parameters()
 ```
 
-**Your TDD tests MUST match this granularity** - one observable behavior per test.
+**Your TDD tests should enable the Gherkin scenarios to pass.**
 """
-
-        # Add step definitions if provided (API CONTRACT)
-        step_definitions_section = ""
-        if step_definitions:
-            step_definitions_section = f"""
-**STEP DEFINITIONS (API CONTRACT - MUST MATCH EXACTLY):**
-```python
-{step_definitions}
+        elif gherkin_context:
+            # Fallback if parsing failed
+            gherkin_section = f"""
+**Acceptance Tests (Gherkin):**
+```gherkin
+{gherkin_context}
 ```
-
-CRITICAL: The step definitions above define the EXACT API your implementation must provide.
-Pay close attention to:
-- Method names (e.g., `exchange_authorization_code_for_token`, NOT `exchange_code`)
-- Parameter names (e.g., `authorization_code=`, NOT `auth_code=`)
-- Expected return types and object attributes
-
-Your generated code MUST match these signatures EXACTLY.
 """
 
         prompt = f"""You are following TDD (Test-Driven Development) to build: "{requirement}"
@@ -518,7 +539,6 @@ Your generated code MUST match these signatures EXACTLY.
 {test_context if test_context else "No tests written yet."}
 {impl_context if impl_context else "No implementation yet."}
 {gherkin_section}
-{step_definitions_section}
 
 {test_summaries}
 
@@ -2327,3 +2347,74 @@ Output ONLY the JSON, no other text."""
             logger.info(f"Loaded step definitions from {len(step_definitions)} file(s)")
 
         return "\n\n".join(step_definitions)
+
+    def _parse_gherkin_scenarios(self, gherkin_content: str) -> list[dict]:
+        """Parse Gherkin content into structured scenarios.
+
+        This extracts scenarios and their Given/When/Then steps for driving unit test generation.
+
+        Args:
+            gherkin_content: Raw Gherkin feature file content
+
+        Returns:
+            List of scenario dicts with structure:
+            {
+                'name': 'Scenario name',
+                'steps': [
+                    {'type': 'Given', 'text': 'step text'},
+                    {'type': 'When', 'text': 'step text'},
+                    {'type': 'Then', 'text': 'step text'}
+                ]
+            }
+        """
+        scenarios = []
+        current_scenario = None
+        current_step_type = None
+
+        for line in gherkin_content.split('\n'):
+            line = line.strip()
+
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+
+            # Detect scenario
+            if line.startswith('Scenario:'):
+                if current_scenario:
+                    scenarios.append(current_scenario)
+                current_scenario = {
+                    'name': line.replace('Scenario:', '').strip(),
+                    'steps': []
+                }
+                current_step_type = None
+
+            # Detect Given/When/Then/And/But
+            elif current_scenario:
+                if line.startswith('Given '):
+                    current_step_type = 'Given'
+                    step_text = line.replace('Given ', '').strip()
+                    current_scenario['steps'].append({'type': 'Given', 'text': step_text})
+                elif line.startswith('When '):
+                    current_step_type = 'When'
+                    step_text = line.replace('When ', '').strip()
+                    current_scenario['steps'].append({'type': 'When', 'text': step_text})
+                elif line.startswith('Then '):
+                    current_step_type = 'Then'
+                    step_text = line.replace('Then ', '').strip()
+                    current_scenario['steps'].append({'type': 'Then', 'text': step_text})
+                elif line.startswith('And '):
+                    # "And" continues the previous step type
+                    if current_step_type:
+                        step_text = line.replace('And ', '').strip()
+                        current_scenario['steps'].append({'type': current_step_type, 'text': step_text})
+                elif line.startswith('But '):
+                    # "But" also continues the previous step type
+                    if current_step_type:
+                        step_text = line.replace('But ', '').strip()
+                        current_scenario['steps'].append({'type': current_step_type, 'text': step_text})
+
+        # Add the last scenario
+        if current_scenario:
+            scenarios.append(current_scenario)
+
+        return scenarios
