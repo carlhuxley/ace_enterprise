@@ -88,3 +88,4 @@ playbook_*.json
 # Examples cache
 examples/**/__pycache__/
 USER_CONTRIBUTIONS.md
+mlruns/
