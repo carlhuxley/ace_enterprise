@@ -27,3 +27,4 @@ Feature: Role-Based Access Control
     Then the permission check should return true
     When I check if they can perform action "delete" on resource "document"
     Then the permission check should return false
+ 

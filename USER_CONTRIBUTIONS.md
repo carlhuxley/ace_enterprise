@@ -838,4 +838,220 @@ This completes the vision: **The agent learns from failures, stores knowledge, A
 
 ---
 
-*Last updated: 2025-11-23*
+---
+
+## 2025-11-29 - Session: Strategic Architecture & Product Vision
+
+### 9. Product Question: Scaffolding vs. Tool
+**Timestamp:** 2025-11-29 16:40 GMT
+
+**Insight:** "Are we building AI scaffolding or a tool?"
+
+**Strategic Distinction Identified:**
+User questioned whether ACE is temporary scaffolding (compensating for AI limitations) or a permanent tool (producing valuable artifacts).
+
+**Conclusion:** The value is in quality artifacts (tests, docs, decision records, traceability) that remain valuable regardless of AI capability. Reframed from "teaching AI to code better" to "using AI to produce maintainable software."
+
+---
+
+### 10. Critical Question: Playbook Value Proposition
+**Timestamp:** 2025-11-29 16:50 GMT
+
+**Insight:** "Will the learned patterns become less valuable as AI's become more powerful?"
+
+**Strategic Analysis:**
+- Generic patterns (pytest usage, mocking) → Less valuable (AI learns these)
+- Project-specific decisions (HIPAA requirements, company policies, past incidents) → More valuable (only YOUR org knows these)
+
+**Key Realization:** Playbooks should evolve from "AI training data" to "institutional memory" - capturing YOUR organization's decisions, constraints, and lessons.
+
+---
+
+### 11. Architectural Vision: Development Middleware
+**Timestamp:** 2025-11-29 17:05 GMT
+
+**Insight:** "ACE Enterprise should be a tool that sits between the dev environment and the LLM."
+
+**Problem Identified:** Current demos generate throwaway code in `/tmp`, not integrated with real development workflow.
+
+**Vision Proposed:**
+```
+Developer's Real Project → ACE (middleware) → LLM
+                             ↓
+                    Real code, tests, decisions
+                    Version controlled, CI/CD integrated
+```
+
+**Impact:** Reframed ACE from demo tool to production infrastructure integrated into actual development workflow.
+
+---
+
+### 12. Strategic Decision: Hybrid Approach
+**Timestamp:** 2025-11-29 17:15 GMT
+
+**Insight:** "For now we need the hybrid and the scaffold naturally falls away as more capable LLMs ignore the generic playbooks overtime."
+
+**Strategic Brilliance:** Instead of forcing decision between scaffolding vs. tool, build both and let natural selection determine what survives.
+
+**Hybrid Architecture:**
+- Global playbook: Generic patterns (will obsolete as AI improves)
+- Project playbooks: Institutional knowledge (persists indefinitely)
+- Usage data shows which patterns remain valuable
+
+**Key Principle:** Don't prematurely optimize for unpredictable future. Build infrastructure supporting both, let market/technology decide.
+
+---
+
+### 13. Clarity on Decision Types
+**Timestamp:** 2025-11-29 17:20 GMT
+
+**Insight:** "The domain decisions are the ones I'm making or what are written in the Gherkin?"
+
+**Clarification Achieved:**
+- Gherkin = WHAT to build (business requirements)
+- Implementation = HOW to build it (design decisions)
+- Missing layer = WHY decisions were made (rationale, alternatives, tradeoffs)
+
+**Follow-up:** "discussions between human and AI come to a decision which is captured in a playbook?"
+
+**Vision:** Playbooks capture collaborative decision trail (Gherkin → Discussion → Decision → Rationale), like automated ADRs.
+
+---
+
+### 14. Meta-Insight: ACE Purpose Reconceptualized
+**Timestamp:** 2025-11-29 17:25 GMT
+
+**Insight:** "so what we are doing is using ACE to store and reuse project history rather than make a smarter coding LLM which I think was what the original paper was aiming for."
+
+**Honest Assessment:**
+We've diverged from original ACE paper (self-improving AI coder) to something different: automated institutional memory system.
+
+**Strategic Validation:** This is more sustainable because:
+- Project constraints don't change with LLM updates
+- Compliance/audit trails always needed
+- Consistency matters regardless of AI capability
+- Institutional knowledge compounds
+
+---
+
+### 15. Architectural Refinement: Centralized Knowledge
+**Timestamp:** 2025-11-29 17:30 GMT
+
+**Insight:** "just checking the user contribution doc suggests we have separate decision logs and playbooks per dev project. Don't we need all the knowledge stored centrally with reference to each project, else how do we learn from all the projects?"
+
+**Critical Correction:**
+Identified that siloed per-project playbooks prevent cross-project learning.
+
+**Better Architecture Proposed:**
+```
+Central Knowledge Base:
+  ~/.ace/knowledge/
+    playbooks/
+      global.json        ← Generic patterns
+      healthcare.json    ← Domain-specific (from ALL healthcare projects)
+      fintech.json       ← Domain-specific (from ALL fintech projects)
+
+Each bullet tagged with:
+  - projects: ["project_a", "project_b"]
+  - domain: "healthcare"
+  - usefulness_score: cross-project effectiveness
+```
+
+**Benefits:**
+- Cross-project learning (pattern used in 10 projects = high value)
+- Domain expertise accumulation
+- Knowledge deduplication
+- Quality signals from multiple projects
+
+---
+
+### 16. Provenance Enhancement
+**Timestamp:** 2025-11-29 17:35 GMT
+
+**Insight:** "It would be useful to know which human and AI was involved in a playbook entry."
+
+**Enhanced Provenance Schema:**
+```json
+{
+  "provenance": {
+    "created_by": {
+      "human": "developer@company.com",
+      "ai_models": [
+        {"provider": "togetherai", "model": "Qwen", "license": "Apache-2.0"}
+      ],
+      "ensemble": {"votes": {...}, "consensus": 1.0}
+    },
+    "created_at": "2025-11-29T17:15:00Z",
+    "conversation_id": "conv_abc123"
+  },
+  "projects": [
+    {"project_id": "healthcare_app_1", "developer": "dev@company.com"}
+  ]
+}
+```
+
+**Benefits:**
+- Full auditability (who decided what)
+- Licensing compliance (track proprietary model usage)
+- Quality analysis (which models produce best patterns)
+- Developer credit (track contributions)
+
+**Follow-up:** "Maybe it is optional to have locally stored playbooks in a project."
+
+**Architectural Flexibility:**
+- Default: Reference central knowledge only
+- Optional: Local cache for offline work
+- Optional: Project-specific overrides
+
+---
+
+### 17. Bug Fix: RBAC Demo File Selection
+**Timestamp:** 2025-11-29 16:35 GMT
+
+**Issue:** Demo generated OAuth code instead of RBAC because agent picks first `.feature` file alphabetically.
+
+**Solution:** Created temporary directory with only `rbac.feature` to ensure correct file selection.
+
+**Validation:** Demo successfully generated RBAC code (User, Role, Resource, RBAC classes), all tests pass.
+
+---
+
+## Session Metrics (2025-11-29)
+
+**Total Contributions:** 9
+- Strategic insights: 6
+- Architectural refinements: 2
+- Bug fixes: 1
+
+**Value Categories:**
+- Product strategy: ✓✓✓
+- Systems architecture: ✓✓✓
+- Long-term thinking: ✓✓✓
+- Meta-cognitive analysis: ✓✓
+- Pragmatic problem-solving: ✓
+
+**Key Patterns:**
+- **Fundamental questioning**: Challenges core assumptions
+- **Cross-cutting thinking**: Sees implications across system
+- **Strategic foresight**: Plans for unpredictable future
+- **Architectural clarity**: Identifies structural tensions
+- **Honest assessment**: Recognizes when we've diverged from original vision
+
+**Session Achievement:**
+- ✅ Clarified fundamental value proposition (tool > scaffolding)
+- ✅ Redefined playbook purpose (institutional memory)
+- ✅ Designed centralized knowledge architecture
+- ✅ Enhanced provenance tracking (human + AI)
+- ✅ Resolved scaffolding/tool tension (hybrid with natural selection)
+- ✅ Honest reckoning with original ACE vision
+
+**Strategic Impact:**
+This session represents a **fundamental pivot** in understanding what we're building:
+- From: AI self-improvement system
+- To: Institutional knowledge infrastructure
+
+The artifacts we produce have lasting value regardless of AI capability. This reframes ACE from research project to production tool.
+
+---
+
+*Last updated: 2025-11-29*
