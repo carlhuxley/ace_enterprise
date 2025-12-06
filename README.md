@@ -36,6 +36,13 @@ But they don't capture *why*:
 - **Automatic test correction**: Identifies and fixes malformed tests during development
 - **Full traceability**: Links Gherkin scenarios → tests → implementation → decisions
 
+### Gherkin Extraction (Reverse Engineering)
+- **Extract from legacy code**: Reverse-engineer Gherkin from existing Python code and tests
+- **Safe refactoring**: Extract specs as blueprint, rebuild with clean implementation
+- **Cross-language migration**: Python → Go/Rust/Java/TypeScript with behavior preservation
+- **Documentation generation**: Auto-generate business-readable docs from legacy systems
+- **Migration validation**: Both old and new implementations pass same Gherkin = behavior preserved
+
 ### MLflow + ACE Integration
 - **Decision capture**: "Why did I choose Adam optimizer?" answered 3 months later
 - **Alternative tracking**: "What else did we try? What failed?"
@@ -91,13 +98,44 @@ The demo shows:
 
 **Storage**: Generated code in `/tmp/ace_demo_*/`, playbooks in project directory
 
+### Try Gherkin Extraction (Reverse Engineering)
+
+Demonstrates extracting Gherkin from existing code for safe refactoring and cross-language migration:
+
+```bash
+# Extract Gherkin from existing Python code
+python3 demo_gherkin_extraction.py
+
+# Full workflow: Python → Gherkin → Go
+python3 demo_cross_language_migration.py
+```
+
+The demo shows:
+1. **Analyze** existing Python code and tests (OAuth client example)
+2. **Extract** Gherkin scenarios capturing business behavior
+3. **Generate** Go step definitions from extracted Gherkin
+4. **Scaffold** Go implementation ready for coding
+5. **Validate** both Python and Go pass same specs
+
+**Use cases:**
+- Refactor legacy Python code safely
+- Migrate Python → Go/Rust for performance
+- Document legacy systems in business-readable format
+- Enable polyglot microservices with shared specs
+
+**Storage**:
+- Gherkin: `extracted_gherkin/oauth.feature`
+- Go impl: `go_oauth_implementation/`
+
 ## Project Structure
 
 ```
 ace_enterprise/
 ├── src/
 │   ├── agents/                    # Autonomous development agents
-│   │   └── autonomous_tdd_agent.py  # Gherkin-driven TDD with learning
+│   │   ├── autonomous_tdd_agent.py  # Gherkin-driven TDD with learning
+│   │   ├── gherkin_extraction_agent.py  # Extract Gherkin from existing code
+│   │   └── go_step_generator.py     # Generate Go step definitions
 │   ├── ml/                        # ML experiment knowledge
 │   │   ├── experiment_knowledge.py  # Decision and pattern schema
 │   │   ├── mlflow_callback.py       # Auto-capture during training
@@ -118,6 +156,8 @@ ace_enterprise/
 │
 ├── demo_mlflow_ace.py             # ML experiment knowledge demo
 ├── demo_rbac_tdd.py               # Autonomous TDD demo
+├── demo_gherkin_extraction.py     # Extract Gherkin from code demo
+├── demo_cross_language_migration.py  # Python → Go migration demo
 ├── requirements-ml.txt            # ML dependencies
 │
 ├── docs/
@@ -125,6 +165,7 @@ ace_enterprise/
 │   ├── mlflow_integration.md      # MLflow + ACE architecture
 │   ├── mlflow_integration_summary.md
 │   ├── gherkin_driven_unit_tests.md  # ATDD approach
+│   ├── gherkin_extraction.md      # Reverse engineering guide
 │   └── mlflow_quick_start.md
 │
 └── USER_CONTRIBUTIONS.md          # Session logs and insights
@@ -278,6 +319,47 @@ Write Gherkin scenario → Agent generates test → Implements code
 → Future cycles avoid same mistake
 ```
 
+### 4. Cross-Language Migration
+
+**Before ACE:**
+```
+"We need to migrate this Python service to Go for performance"
+→ Manual rewrite, hoping behavior matches
+→ No verification, lots of bugs, risky deployment
+```
+
+**With ACE:**
+```python
+# Extract Gherkin from existing Python
+python3 demo_gherkin_extraction.py
+
+# Generates language-agnostic specs:
+# Feature: OAuth Authentication
+#   Scenario: Generate authorization URL
+#     Given an OAuth client with credentials
+#     When I generate an authorization URL
+#     Then the URL should contain required parameters
+
+# Generate Go implementation
+python3 demo_cross_language_migration.py
+
+# Implement in Go
+cd go_oauth_implementation
+# Edit steps/oauth_steps.go
+
+# Validate both pass same specs
+behave features/oauth.feature  # Python ✓
+go test -v                      # Go ✓
+
+# Both pass = behavior preserved!
+```
+
+**Benefits:**
+- Safe migration with behavior verification
+- Incremental (one module at a time)
+- Polyglot microservices with shared specs
+- Performance gains with confidence
+
 ## Documentation
 
 ### Strategic Vision
@@ -288,6 +370,7 @@ Write Gherkin scenario → Agent generates test → Implements code
 - [MLflow Integration](./docs/mlflow_integration.md) - Complete ML experiment knowledge architecture
 - [MLflow Quick Start](./docs/mlflow_quick_start.md) - Quick reference for ML integration
 - [Gherkin-Driven TDD](./docs/gherkin_driven_unit_tests.md) - Acceptance test-driven development approach
+- [Gherkin Extraction](./docs/gherkin_extraction.md) - Reverse engineering and cross-language migration guide
 
 ### Legacy Docs (Historical)
 - [Product Requirements Document](./PRD.md) - Original system specifications
@@ -328,7 +411,10 @@ Write Gherkin scenario → Agent generates test → Implements code
 - [x] Decision capture with provenance tracking
 - [x] Pattern extraction across experiments
 - [x] Unified query interface (MLflow + ACE)
-- [x] Working demos (ML and TDD)
+- [x] Gherkin extraction from existing code (reverse engineering)
+- [x] Cross-language migration support (Python → Go)
+- [x] Go step definition generation
+- [x] Working demos (ML, TDD, and extraction)
 
 ### Phase 1: Production Readiness (Current)
 - [ ] Unit tests for all core components
