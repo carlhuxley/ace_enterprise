@@ -331,7 +331,7 @@ class LLMClient:
             raise ValueError("Together AI API key not configured")
 
         # Together AI uses OpenAI-compatible API
-        url = "https://api.together.xyz/v1/chat/completions"
+        url = "https://api.together.ai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {settings.togetherai_api_key}",
             "Content-Type": "application/json",

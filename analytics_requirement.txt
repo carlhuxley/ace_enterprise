@@ -1,0 +1,23 @@
+REQUIREMENT: Experiment Success Rate Calculator
+
+Build a module that calculates success rates from experiment logs.
+
+CORE FUNCTIONALITY:
+1. Calculate overall success rate (% of experiments with result='SUCCESS')
+2. Calculate success rate for last N days
+3. Get success rate by experiment type (tdd_cycle vs ml_experiment)
+
+EXPECTED API:
+- SuccessRateCalculator class
+- get_overall_success_rate() -> float (returns value between 0.0 and 1.0)
+- get_success_rate_last_n_days(days: int) -> float
+- get_success_rate_by_type(experiment_type: str) -> float
+
+ACCEPTANCE CRITERIA:
+- Returns 0.0 when no experiments exist
+- Returns 1.0 when all experiments succeeded
+- Correctly filters by date range
+- Correctly filters by experiment type
+- Handles empty database gracefully
+
+This is a simple, focused feature perfect for demonstrating the TDD workflow end-to-end.

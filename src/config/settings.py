@@ -58,7 +58,7 @@ class Settings(BaseSettings):
 
     # Together AI (open-source models)
     togetherai_api_key: str | None = None
-    togetherai_default_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+    togetherai_default_model: str = "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
 
     default_llm_provider: Literal["ollama", "vllm", "deepseek", "togetherai"] = "ollama"
 

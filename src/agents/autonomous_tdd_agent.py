@@ -22,6 +22,7 @@ from src.agents.test_review_agent import TestReviewAgent
 from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import ConsensusBullet, Vote
 from src.utils.llm_client import LLMClient
+from src.storage.experiment_logger import ExperimentLogger
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,9 @@ class AutonomousTDDAgent:
 
         # Track test functions per file for cycle isolation
         self.test_functions = {}  # {test_file_path: [{'cycle': int, 'name': str, 'code': str}]}
+
+        # Initialize experiment logger for automatic TDD cycle tracking
+        self.experiment_logger = ExperimentLogger(playbook_version="1.0.0")
 
         logger.info(f"AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -818,6 +822,33 @@ Output EITHER:
         logger.info("  🧠 LEARN: Ensemble reviewing cycle...")
         learned_bullets = self._ensemble_learn(test_code, impl_code, increment)
         logger.info(f"      {len(learned_bullets)} patterns approved")
+
+        # LOG: Record TDD cycle to experiment_logs
+        logger.info("  📊 LOG: Recording cycle to experiment_logs...")
+        try:
+            self.experiment_logger.log_tdd_cycle(
+                cycle_number=cycle_number,
+                requirement=increment.description,
+                test_name=increment.test_name,
+                test_code=test_code,
+                implementation_code=impl_code,
+                red_passed=not red_result.failed,
+                green_passed=green_result.all_passed,
+                red_output=red_result.output[:500] if red_result.output else "",
+                green_output=green_result.output[:500] if green_result.output else "",
+                learned_bullets=[
+                    {
+                        "content": bullet.content,
+                        "section": bullet.section,
+                        "tags": bullet.tags or []
+                    }
+                    for bullet in learned_bullets
+                ],
+                playbook_id=self.playbook_id
+            )
+            logger.info("      ✓ Cycle logged successfully")
+        except Exception as e:
+            logger.warning(f"      ⚠️  Failed to log cycle: {e}")
 
         return CycleResult(
             increment=increment,
