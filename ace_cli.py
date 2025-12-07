@@ -20,7 +20,8 @@ sys.path.insert(0, str(project_root))
 from src.project.detector import ProjectDetector
 from src.project.config import ProjectConfig, ACEConfig
 from src.project.decision_record import generate_adr_from_tdd_result
-from src.playbook.manager import PlaybookManager
+from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+from src.playbook.postgres_retriever import PostgresBulletRetriever
 from src.storage.schemas import PlaybookCreate
 from src.agents.test_review_agent import TestReviewAgent
 from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
@@ -127,26 +128,26 @@ def cmd_build_feature(args):
 
     print(f"   Config: {config.test_framework}, TDD cycles: {config.tdd_cycles}")
 
-    # Initialize ACE components
-    print(f"\n⚙️  Initializing ACE components...")
+    # Initialize ACE components with PostgreSQL
+    print(f"\n⚙️  Initializing ACE components (PostgreSQL backend)...")
 
-    # Playbook manager
-    playbook_manager = PlaybookManager(settings.storage_dir)
+    # PostgreSQL Playbook Adapter
+    playbook_adapter = PostgresPlaybookAdapter()
 
     # Get or create playbook
     playbook_name = f"{project_info.name.lower().replace('-', '_')}_playbook"
-    existing_playbooks = [pb for pb in playbook_manager.list_playbooks()
-                          if project_info.name.lower() in pb['playbook_id'].lower()]
+    existing_playbooks = [pb_id for pb_id in playbook_adapter.list_playbooks()
+                          if project_info.name.lower() in pb_id.lower()]
 
     if existing_playbooks:
-        playbook = playbook_manager.get_playbook(existing_playbooks[0]['playbook_id'])
+        playbook = playbook_adapter.get_playbook(existing_playbooks[0])
         print(f"   Using existing playbook: {playbook.playbook_id}")
     else:
         playbook_create = PlaybookCreate(
             domain=config.project_domain or "general",
             base_model=settings.default_model_id
         )
-        playbook = playbook_manager.create_playbook(playbook_create)
+        playbook = playbook_adapter.create_playbook(playbook_create)
         print(f"   Created new playbook: {playbook.playbook_id}")
 
     # LLM client
@@ -158,15 +159,22 @@ def cmd_build_feature(args):
     # Test reviewer
     test_reviewer = TestReviewAgent(llm_client=llm_client)
 
-    # TDD Agent
+    # TDD Agent with PostgreSQL backend
     tdd_agent = AutonomousTDDAgent(
         playbook=playbook,
         llm_client=llm_client,
         test_reviewer=test_reviewer,
-        playbook_manager=playbook_manager
+        playbook_manager=playbook_adapter  # Use PostgreSQL adapter
     )
 
-    print(f"✅ Components initialized")
+    # Override with PostgreSQL bullet retriever
+    tdd_agent.bullet_retriever = PostgresBulletRetriever(
+        playbook_adapter=playbook_adapter,
+        top_k=10,
+        similarity_threshold=0.3
+    )
+
+    print(f"✅ Components initialized (PostgreSQL backend)")
 
     # Build feature
     print(f"\n🔨 Starting Gherkin-driven TDD...")

@@ -60,6 +60,10 @@ logs/
 postgres_data/
 redis_data/
 
+# Nix PostgreSQL
+.nix-postgres/
+.nix-python-packages/
+
 # Model cache
 models/
 *.pt

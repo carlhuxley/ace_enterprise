@@ -19,7 +19,8 @@ from pathlib import Path
 from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
 from src.agents.test_review_agent import TestReviewAgent
 from src.ensemble.learner import EnsembleLearner
-from src.playbook.manager import PlaybookManager
+from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+from src.playbook.postgres_retriever import PostgresBulletRetriever
 from src.storage.schemas import PlaybookCreate
 
 # Setup logging
@@ -61,14 +62,16 @@ def main():
     # Initialize components
     print("\n[Setup] Initializing components...")
 
-    # Playbook
-    playbook_manager = PlaybookManager()
-    playbook = playbook_manager.create_playbook(
+    # PostgreSQL Playbook (replaces file-based PlaybookManager)
+    print("  → Connecting to PostgreSQL...")
+    playbook_adapter = PostgresPlaybookAdapter()
+    playbook = playbook_adapter.create_playbook(
         PlaybookCreate(
             domain="autonomous_tdd_demo",
             base_model="qwen2.5-coder:1.5b"
         )
     )
+    print(f"  ✓ Created playbook {playbook.playbook_id} in PostgreSQL")
 
     # Ensemble learner (using OpenAI for speed)
     models = [
@@ -80,6 +83,9 @@ def main():
         playbook_id=playbook.playbook_id,
         enable_deliberation=False  # MVP: Simple voting only
     )
+
+    # Override ensemble's playbook manager with PostgreSQL
+    ensemble.playbook_manager = playbook_adapter
 
     # Test reviewer
     test_reviewer = TestReviewAgent(use_llm_analysis=False)
@@ -95,7 +101,15 @@ def main():
         review_threshold=0.7
     )
 
-    print("  ✓ Components initialized")
+    # Override agent's components to use PostgreSQL
+    agent.playbook_manager = playbook_adapter
+    agent.bullet_retriever = PostgresBulletRetriever(
+        playbook_adapter=playbook_adapter,
+        top_k=10,
+        similarity_threshold=0.3
+    )
+
+    print("  ✓ Components initialized with PostgreSQL backend")
 
     # Demo 1: To-Do List (more complex state management)
     print("\n" + "─" * 80)

@@ -23,8 +23,8 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-# For future pgvector integration
-# from pgvector.sqlalchemy import Vector
+# pgvector integration for semantic search
+from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
@@ -85,10 +85,8 @@ class BulletModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     last_used: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # Vector embedding for semantic search (will use pgvector)
-    # embedding: Mapped[list[float]] = mapped_column(Vector(384))  # for sentence-transformers
-    # Placeholder for now - will be migrated to Vector type
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    # Vector embedding for semantic search using pgvector
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
 
     # Relationships
     playbook: Mapped["PlaybookModel"] = relationship("PlaybookModel", back_populates="bullets")
@@ -201,8 +199,8 @@ class CheckpointModel(Base):
         nullable=False,
     )
 
-    # Metadata
-    metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Additional metadata (renamed from 'metadata' to avoid SQLAlchemy conflict)
+    extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Relationships
     playbook: Mapped["PlaybookModel"] = relationship("PlaybookModel", back_populates="checkpoints")
@@ -315,5 +313,5 @@ class RollbackHistoryModel(Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Metadata
-    metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Additional metadata (renamed from 'metadata' to avoid SQLAlchemy conflict)
+    extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
