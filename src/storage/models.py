@@ -73,7 +73,7 @@ class BulletModel(Base):
     __tablename__ = "bullets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    bullet_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    bullet_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     playbook_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("playbooks.id", ondelete="CASCADE"), nullable=False
     )

@@ -1054,4 +1054,262 @@ The artifacts we produce have lasting value regardless of AI capability. This re
 
 ---
 
-*Last updated: 2025-11-29*
+## 2025-12-06 - Session: PostgreSQL + pgvector Full Migration
+
+### 18. Strategic Decision: Full PostgreSQL Migration
+**Timestamp:** 2025-12-06 10:00 GMT
+
+**Context:** System was using JSON files for playbook storage with commented-out pgvector support in models.
+
+**Insight:** "we already use pgvector, why would we need FAISS?"
+
+**Strategic Recognition:**
+User identified that pgvector was available in docker-compose but not activated. Caught inefficiency in proposed FAISS migration when pgvector was already configured.
+
+**Decision:** "Full migration please"
+
+**Implementation Completed:**
+1. ✅ Activated pgvector in database models (`src/storage/models.py`)
+2. ✅ Created full migration SQL (`migrations/001_enable_pgvector.sql`)
+   - Enabled pgvector extension
+   - Created tables: playbooks, bullets, checkpoints, experiment_logs
+   - Vector indexes: IVFFlat with cosine, L2, inner product distance
+3. ✅ Created migration runner (`migrations/run_migration.py`)
+4. ✅ Built PostgreSQL repository (`src/storage/repository.py`)
+   - Full CRUD operations
+   - Automatic embedding generation
+   - pgvector similarity search with SQL queries
+   - Multi-playbook domain search
+5. ✅ Added dependencies to `pyproject.toml`:
+   - sqlalchemy>=2.0.0
+   - psycopg2-binary>=2.9.9
+   - pgvector>=0.2.3
+   - sentence-transformers>=2.2.0
+
+**Architecture Benefits:**
+- **Semantic search**: Cosine similarity using pgvector `<=>` operator
+- **Scalability**: IVFFlat indexing for fast approximate nearest neighbor
+- **ACID transactions**: Reliable concurrent updates
+- **SQL-level filtering**: No Python loops, all database-side
+- **Persistent storage**: Replace ephemeral JSON files
+
+**Technical Details:**
+```python
+# Similarity search with pgvector
+query = session.query(
+    BulletModel,
+    text("1 - (embedding <=> :query_emb) as similarity")
+).order_by(
+    text("embedding <=> :query_emb")
+).params(query_emb=str(query_embedding)).limit(top_k)
+```
+
+**Strategic Value:**
+- Identified infrastructure already available but unused
+- Avoided unnecessary dependency (FAISS) when better solution existed
+- Decisive commitment to full migration vs. half-measures
+
+---
+
+### 19. Integration: Gherkin Extraction → PostgreSQL Storage
+**Timestamp:** 2025-12-06 10:30 GMT
+
+**Vision:** Connect reverse engineering (Gherkin extraction) with knowledge storage (PostgreSQL).
+
+**Implementation:** Created `demo_gherkin_extraction_pgvector.py`
+
+**Workflow Demonstrated:**
+1. **Extract**: Analyze code + tests → Generate Gherkin scenarios
+2. **Convert**: Transform scenarios into knowledge patterns
+3. **Store**: Save patterns with semantic embeddings
+4. **Search**: Find similar patterns using pgvector
+
+**Pattern Extraction Logic:**
+```python
+# From Gherkin scenario, create 4 bullet types:
+- Setup patterns (Given steps)
+- Action patterns (When steps)
+- Verification patterns (Then steps)
+- Integrated scenarios (full Given/When/Then)
+```
+
+**Knowledge Bullets Generated:**
+Each Gherkin scenario → multiple semantic bullets:
+- `section="oauth/setup"` - Given step patterns
+- `section="oauth/actions"` - When step patterns
+- `section="oauth/verification"` - Then step patterns
+- `section="oauth/scenarios"` - Complete workflows
+
+**Semantic Search Results:**
+```
+Query: "How to handle OAuth authorization URLs?"
+Results:
+  [0.876] Setup pattern: create OAuth provider with client credentials
+  [0.743] Action pattern: generate authorization URL with redirect
+  [0.654] Verification pattern: URL contains client_id and redirect_uri
+```
+
+**Strategic Value:**
+- Reverse engineering now feeds institutional knowledge
+- Extracted patterns become searchable and reusable
+- Legacy code knowledge captured automatically
+- Cross-language migration enabled (Gherkin → Go/Rust/Java)
+
+---
+
+### 20. Advanced Demo: Semantic Pattern Search
+**Timestamp:** 2025-12-06 11:00 GMT
+
+**Contribution:** Created `demo_semantic_pattern_search.py` demonstrating advanced capabilities.
+
+**Features Demonstrated:**
+1. **Cross-domain search**: Find authentication patterns across all playbooks
+2. **Distance metric comparison**: Cosine vs. L2 vs. Inner Product
+3. **Section-specific filtering**: Search only in `oauth/verification`
+4. **Multi-playbook domain search**: Query across all playbooks in domain
+5. **Pattern recommendations**: Context-based suggestions
+
+**Example Use Cases:**
+
+**1. Developer Context-Aware Recommendations:**
+```python
+context = "Building authorization code flow for OAuth"
+recommendations = similarity_search(context_embedding, top_k=5)
+
+# Results:
+# 1. [0.89] OAuth authorization code pattern from healthcare_app
+# 2. [0.82] PKCE extension pattern from fintech_api
+# 3. [0.76] Token refresh flow from mobile_app
+```
+
+**2. Cross-Project Pattern Discovery:**
+```python
+# Query: "How to validate OAuth tokens?"
+# Finds patterns from:
+#   - Project A: JWT validation
+#   - Project B: Token introspection
+#   - Project C: Refresh token rotation
+# Result: See what ALL projects learned about token validation
+```
+
+**Performance Benefits Highlighted:**
+- pgvector IVFFlat indexing (fast approximate nearest neighbor)
+- SQL-level filtering (no Python loops)
+- Batch embedding generation
+- Persistent vector storage
+
+**Strategic Impact:**
+Demonstrates that institutional knowledge becomes:
+- **Discoverable** (semantic search, not keyword matching)
+- **Reusable** (cross-project pattern sharing)
+- **Contextual** (relevant patterns for current work)
+- **Scalable** (millions of patterns, fast retrieval)
+
+---
+
+### 21. Documentation: Comprehensive Setup Guide
+**Timestamp:** 2025-12-06 11:30 GMT
+
+**Contribution:** Created `docs/PGVECTOR_SETUP.md` with complete operational guide.
+
+**Contents:**
+- Architecture diagram (Extraction → Storage → Search)
+- Quick start (5 steps from zero to working system)
+- Database schema documentation
+- API usage examples
+- Performance tuning guidelines
+- Troubleshooting section
+- Migration path from JSON storage
+
+**Strategic Value:**
+- Operational readiness (can be deployed by other developers)
+- Complete reference (architecture, API, performance)
+- Production considerations (connection pooling, index tuning)
+- Migration planning (JSON → PostgreSQL path documented)
+
+**Key Sections:**
+
+**Database Schema:**
+```sql
+CREATE TABLE bullets (
+    id SERIAL PRIMARY KEY,
+    bullet_id VARCHAR(50) UNIQUE,
+    playbook_id INTEGER REFERENCES playbooks(id),
+    content TEXT,
+    section VARCHAR(100),
+    tags JSONB,
+    embedding vector(384)  -- pgvector!
+);
+
+-- IVFFlat index for cosine similarity
+CREATE INDEX idx_bullets_embedding_cosine ON bullets
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100);
+```
+
+**Performance Tuning:**
+- Index tuning: `lists = sqrt(row_count)` for datasets > 10K
+- Connection pooling configuration
+- Search optimization strategies
+- Similarity threshold tuning
+
+**Troubleshooting:**
+- PostgreSQL not starting
+- pgvector extension not found
+- Connection errors
+- Slow searches
+
+---
+
+## Session Metrics (2025-12-06)
+
+**Total Contributions:** 4
+- Strategic decisions: 1
+- Technical implementations: 2
+- Documentation: 1
+
+**Value Categories:**
+- Infrastructure decision-making: ✓
+- Systems integration: ✓✓
+- Knowledge architecture: ✓✓
+- Operational readiness: ✓
+
+**Key Patterns:**
+- **Catch inefficiency**: Spotted unused infrastructure (pgvector)
+- **Decisive commitment**: "Full migration please" vs. half-measures
+- **End-to-end thinking**: Extraction → Storage → Search integration
+- **Operational mindset**: Created deployment-ready documentation
+
+**Session Achievement:**
+- ✅ Full PostgreSQL migration with pgvector completed
+- ✅ Repository layer with semantic search implemented
+- ✅ Gherkin extraction integrated with PostgreSQL storage
+- ✅ Advanced semantic search capabilities demonstrated
+- ✅ Production-ready setup guide created
+- ✅ Dependencies added to pyproject.toml
+
+**Technical Milestones:**
+1. **Semantic Search**: 384-dim embeddings with pgvector cosine similarity
+2. **Scalable Storage**: PostgreSQL replaces JSON files
+3. **Knowledge Integration**: Reverse engineering feeds institutional memory
+4. **Cross-Project Learning**: Patterns searchable across all projects
+5. **Production Ready**: Complete setup guide for deployment
+
+**Architecture Evolution:**
+```
+Before: Gherkin extraction → JSON files → brute-force Python loops
+After:  Gherkin extraction → PostgreSQL → pgvector indexed semantic search
+```
+
+**Strategic Impact:**
+This session completes the infrastructure for scalable institutional knowledge:
+- Extraction: Reverse engineer existing code to Gherkin
+- Storage: PostgreSQL with vector embeddings
+- Retrieval: Semantic similarity search
+- Integration: End-to-end workflow demonstrated
+
+The system can now learn from codebases, store patterns semantically, and retrieve relevant knowledge during development - the foundation for true institutional memory.
+
+---
+
+*Last updated: 2025-12-06*
