@@ -333,6 +333,153 @@ def cmd_status(args):
     return 0
 
 
+def cmd_learn(args):
+    """Add knowledge to playbook manually."""
+    from src.storage.schemas import BulletCreate
+    from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+
+    print("\n🧠 Adding knowledge to playbook...\n")
+
+    # Initialize PostgreSQL adapter
+    try:
+        adapter = PostgresPlaybookAdapter()
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        print(f"❌ Database connection failed. Is PostgreSQL running?")
+        print(f"   Error: {e}")
+        return 1
+
+    # Determine playbook ID
+    playbook_id = args.playbook
+    if not playbook_id:
+        # Try to find project-specific playbook
+        detector = ProjectDetector()
+        try:
+            project_info = detector.detect()
+            playbook_id = f"{project_info.name.lower().replace('-', '_')}_playbook"
+        except ValueError:
+            playbook_id = "ace_enterprise_playbook"
+
+    # Check if playbook exists, create if not
+    existing_playbooks = adapter.list_playbooks()
+    if playbook_id not in existing_playbooks:
+        print(f"   Creating new playbook: {playbook_id}")
+        from src.storage.schemas import PlaybookCreate
+        adapter.create_playbook(PlaybookCreate(
+            domain=args.domain or "general",
+            base_model="human"
+        ))
+
+    # Map knowledge type to section
+    section_map = {
+        "decision": "strategies_and_hard_rules",
+        "pattern": "strategies_and_hard_rules",
+        "snippet": "code_snippets",
+        "troubleshooting": "troubleshooting",
+        "domain": "domain_knowledge",
+    }
+    section = section_map.get(args.type, "domain_knowledge")
+
+    # Parse tags
+    tags = []
+    if args.tags:
+        tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+
+    # Add type as a tag for easier filtering
+    if args.type and args.type not in tags:
+        tags.append(args.type)
+
+    # Create bullet
+    bullet_data = BulletCreate(
+        content=args.content,
+        section=section,
+        tags=tags,
+        created_by_model="human",
+        model_provider=None,
+        license_type=None,
+    )
+
+    try:
+        bullet = adapter.add_bullet(playbook_id, bullet_data)
+
+        print(f"✅ Knowledge added successfully!")
+        print(f"   Playbook: {playbook_id}")
+        print(f"   Section: {section}")
+        print(f"   ID: {bullet.id}")
+        if tags:
+            print(f"   Tags: {', '.join(tags)}")
+        print(f"\n📝 Content preview:")
+        preview = args.content[:200] + "..." if len(args.content) > 200 else args.content
+        print(f"   {preview}")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to add bullet: {e}")
+        print(f"❌ Failed to add knowledge: {e}")
+        return 1
+
+
+def cmd_query(args):
+    """Query knowledge from playbook."""
+    from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+    from src.playbook.postgres_retriever import PostgresBulletRetriever
+
+    print(f"\n🔍 Querying playbook for: \"{args.query}\"\n")
+
+    # Initialize adapter and retriever
+    try:
+        adapter = PostgresPlaybookAdapter()
+        retriever = PostgresBulletRetriever(
+            playbook_adapter=adapter,
+            top_k=args.top_k,
+            similarity_threshold=0.3
+        )
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        print(f"❌ Database connection failed: {e}")
+        return 1
+
+    # Determine playbook ID
+    playbook_id = args.playbook
+    if not playbook_id:
+        detector = ProjectDetector()
+        try:
+            project_info = detector.detect()
+            playbook_id = f"{project_info.name.lower().replace('-', '_')}_playbook"
+        except ValueError:
+            playbook_id = "ace_enterprise_playbook"
+
+    # Retrieve relevant bullets
+    try:
+        results = retriever.retrieve(
+            query=args.query,
+            playbook_id=playbook_id,
+            filter_section=args.section,
+        )
+
+        if not results:
+            print("   No matching knowledge found.")
+            return 0
+
+        print(f"Found {len(results)} relevant entries:\n")
+
+        for i, (bullet, score) in enumerate(results, 1):
+            print(f"{'─' * 60}")
+            print(f"[{i}] Score: {score:.2f} | Section: {bullet.section}")
+            if bullet.tags:
+                print(f"    Tags: {', '.join(bullet.tags)}")
+            print(f"    ID: {bullet.id}")
+            print(f"\n    {bullet.content}\n")
+
+        return 0
+
+    except Exception as e:
+        logger.error(f"Query failed: {e}")
+        print(f"❌ Query failed: {e}")
+        return 1
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -343,6 +490,14 @@ Examples:
   ace init                          # Initialize ACE in current project
   ace build-feature auth.feature    # Build auth feature from Gherkin
   ace status                        # Show current project status
+
+  # Add knowledge manually
+  ace learn "Pattern description" --type decision --tags "architecture,design"
+  ace learn "When testing async endpoints, mock at dependency level" --type pattern
+
+  # Query knowledge
+  ace query "auth timeout handling" --top-k 3
+  ace query "testing patterns" --section strategies_and_hard_rules
 
 Documentation: https://github.com/carlhuxley/ace_enterprise
         """
@@ -363,6 +518,49 @@ Documentation: https://github.com/carlhuxley/ace_enterprise
     # Status command
     parser_status = subparsers.add_parser('status', help='Show ACE status for current project')
     parser_status.set_defaults(func=cmd_status)
+
+    # Learn command
+    parser_learn = subparsers.add_parser('learn', help='Add knowledge to playbook manually')
+    parser_learn.add_argument('content', help='Knowledge content to add')
+    parser_learn.add_argument(
+        '--type', '-t',
+        choices=['decision', 'pattern', 'snippet', 'troubleshooting', 'domain'],
+        default='decision',
+        help='Type of knowledge (default: decision)'
+    )
+    parser_learn.add_argument(
+        '--tags',
+        help='Comma-separated tags (e.g., "architecture,cgr3,retrieval")'
+    )
+    parser_learn.add_argument(
+        '--playbook',
+        help='Target playbook ID (default: auto-detect from project)'
+    )
+    parser_learn.add_argument(
+        '--domain',
+        help='Domain for new playbook if created (e.g., "fintech")'
+    )
+    parser_learn.set_defaults(func=cmd_learn)
+
+    # Query command
+    parser_query = subparsers.add_parser('query', help='Query knowledge from playbook')
+    parser_query.add_argument('query', help='Search query')
+    parser_query.add_argument(
+        '--top-k', '-k',
+        type=int,
+        default=5,
+        help='Number of results to return (default: 5)'
+    )
+    parser_query.add_argument(
+        '--section', '-s',
+        choices=['strategies_and_hard_rules', 'code_snippets', 'troubleshooting', 'domain_knowledge'],
+        help='Filter by section'
+    )
+    parser_query.add_argument(
+        '--playbook',
+        help='Target playbook ID (default: auto-detect from project)'
+    )
+    parser_query.set_defaults(func=cmd_query)
 
     args = parser.parse_args()
 
