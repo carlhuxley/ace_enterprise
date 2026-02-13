@@ -1,0 +1,60 @@
+version: "3.8"
+
+# ACE Audit Service - Deployed separately from main ACE
+# This ensures audit trail independence per 202602121757-audit-trail-independence-principle.md
+
+services:
+  # Audit database - SEPARATE from main ACE database
+  audit-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: audit
+      POSTGRES_PASSWORD: ${AUDIT_DB_PASSWORD:-audit_secret}
+      POSTGRES_DB: ace_audit
+    volumes:
+      - audit_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Different port from main ACE DB (5432)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audit -d ace_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Audit collector - receives events from ACE agents (write-only)
+  audit-collector:
+    build:
+      context: ../..
+      dockerfile: services/ace-audit/Dockerfile
+    command: uvicorn src.audit.collector:app --host 0.0.0.0 --port 8081
+    environment:
+      AUDIT_DATABASE_URL: postgresql://audit:${AUDIT_DB_PASSWORD:-audit_secret}@audit-db:5432/ace_audit
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    ports:
+      - "8081:8081"  # Exposed to ACE services for event submission
+    depends_on:
+      audit-db:
+        condition: service_healthy
+
+  # Audit API - query interface for compliance/admin (read-only)
+  audit-api:
+    build:
+      context: ../..
+      dockerfile: services/ace-audit/Dockerfile
+    command: uvicorn src.audit.api:app --host 0.0.0.0 --port 8082
+    environment:
+      AUDIT_DATABASE_URL: postgresql://audit:${AUDIT_DB_PASSWORD:-audit_secret}@audit-db:5432/ace_audit
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    ports:
+      - "8082:8082"  # Exposed for admin/compliance queries
+    depends_on:
+      audit-db:
+        condition: service_healthy
+
+volumes:
+  audit_data:
+    name: ace_audit_data
+
+networks:
+  default:
+    name: ace_audit_network
