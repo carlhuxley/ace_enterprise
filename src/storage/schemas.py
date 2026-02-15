@@ -32,6 +32,27 @@ class BulletCreate(BulletBase):
     model_provider: str | None = None
     license_type: str | None = None
 
+    # CGR³ Context Fields (optional at creation)
+    # Temporal validity
+    valid_from: datetime | None = Field(None, description="When this pattern became valid")
+    valid_until: datetime | None = Field(None, description="When this pattern expires")
+    tech_context: dict[str, str] | None = Field(
+        None, description='Tech stack requirements, e.g., {"python": ">=3.10"}'
+    )
+
+    # Locality context
+    team_id: str | None = Field(None, description="Team that created/owns this pattern")
+    project_ids: list[str] | None = Field(None, description="Projects where this applies")
+    applicable_domains: list[str] | None = Field(None, description="Specific domains")
+
+    # Enhanced provenance
+    created_by_type: Literal["human", "ai", "derived"] = Field(
+        default="ai", description="Who created this: human, ai, or derived"
+    )
+    created_by_id: str | None = Field(None, description="User email or model name")
+    source_conversation_id: str | None = Field(None, description="Source conversation/session")
+    confidence_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Reliability score")
+
 
 class Bullet(BulletBase):
     """Complete bullet schema with metadata"""
@@ -55,6 +76,45 @@ class Bullet(BulletBase):
     license_type: str | None = Field(
         None, description="Model license (e.g., 'apache-2.0', 'mit', 'proprietary')"
     )
+
+    # =========================================================================
+    # CGR³ Context Fields
+    # =========================================================================
+
+    # Temporal validity
+    valid_from: datetime | None = Field(None, description="When this pattern became valid")
+    valid_until: datetime | None = Field(None, description="When this pattern expires (null = still valid)")
+    temporal_confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Time-decayed confidence")
+    tech_context: dict[str, str] | None = Field(
+        None, description='Tech stack requirements, e.g., {"python": ">=3.10", "framework": "fastapi"}'
+    )
+
+    # Locality context
+    team_id: str | None = Field(None, description="Team that created/owns this pattern")
+    project_ids: list[str] | None = Field(None, description="Projects where this pattern has been used")
+    applicable_domains: list[str] | None = Field(None, description="Domains where this applies")
+
+    # Enhanced provenance
+    created_by_type: Literal["human", "ai", "derived"] = Field(
+        default="ai", description="Who created this: human, ai, or derived"
+    )
+    created_by_id: str | None = Field(None, description="User email, model name, or source pattern ID")
+    source_conversation_id: str | None = Field(None, description="Link to source conversation/session")
+    confidence_score: float = Field(default=0.5, ge=0.0, le=1.0, description="How reliable is this pattern?")
+
+    class Config:
+        from_attributes = True
+
+
+class BulletLineage(BaseModel):
+    """Represents a relationship between two bullets for knowledge lineage."""
+
+    id: int
+    child_bullet_id: int
+    parent_bullet_id: int
+    relationship_type: Literal["derived_from", "refined", "contradicts", "supersedes"]
+    created_at: datetime
+    context: str | None = None
 
     class Config:
         from_attributes = True

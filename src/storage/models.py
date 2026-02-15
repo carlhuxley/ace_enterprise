@@ -68,6 +68,11 @@ class PlaybookModel(Base):
 class BulletModel(Base):
     """
     Bullet table - individual knowledge units within a playbook.
+
+    Extended with CGR³ (Context Graph Retrieve-Rank-Reason) fields for:
+    - Temporal validity: when is this knowledge valid?
+    - Locality context: who/what does this apply to?
+    - Enhanced provenance: where did this come from?
     """
 
     __tablename__ = "bullets"
@@ -88,12 +93,132 @@ class BulletModel(Base):
     # Vector embedding for semantic search using pgvector
     embedding: Mapped[list[float] | None] = mapped_column(Vector(384), nullable=True)
 
+    # =========================================================================
+    # CGR³ Context Fields
+    # =========================================================================
+
+    # Temporal validity - when is this knowledge valid?
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None,
+        comment="When this pattern became valid (null = since creation)"
+    )
+    valid_until: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None,
+        comment="When this pattern expires (null = still valid)"
+    )
+    temporal_confidence: Mapped[float] = mapped_column(
+        Float, default=1.0, nullable=False,
+        comment="Confidence score that decays over time (0.0-1.0)"
+    )
+    tech_context: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None,
+        comment='Tech stack requirements, e.g., {"python": ">=3.10", "framework": "fastapi"}'
+    )
+
+    # Locality context - who/what does this apply to?
+    team_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True,
+        comment="Team that created/owns this pattern"
+    )
+    project_ids: Mapped[list[str] | None] = mapped_column(
+        JSON, nullable=True, default=None,
+        comment="Projects where this pattern has been used"
+    )
+    applicable_domains: Mapped[list[str] | None] = mapped_column(
+        JSON, nullable=True, default=None,
+        comment="Domains where this pattern applies (more specific than tags)"
+    )
+
+    # Enhanced provenance - where did this come from?
+    created_by_type: Mapped[str] = mapped_column(
+        Enum("human", "ai", "derived", name="creator_type"),
+        default="ai", nullable=False, index=True,
+        comment="Who created this: human, ai, or derived from other patterns"
+    )
+    created_by_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="User email, model name, or source pattern ID"
+    )
+    source_conversation_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Link to conversation/session where this was created"
+    )
+    confidence_score: Mapped[float] = mapped_column(
+        Float, default=0.5, nullable=False,
+        comment="How reliable is this pattern? (0.0-1.0)"
+    )
+
     # Relationships
     playbook: Mapped["PlaybookModel"] = relationship("PlaybookModel", back_populates="bullets")
+
+    # Lineage relationships (parent patterns this was derived from)
+    derived_from: Mapped[list["BulletLineageModel"]] = relationship(
+        "BulletLineageModel",
+        foreign_keys="BulletLineageModel.child_bullet_id",
+        back_populates="child_bullet",
+        cascade="all, delete-orphan",
+    )
+    derivatives: Mapped[list["BulletLineageModel"]] = relationship(
+        "BulletLineageModel",
+        foreign_keys="BulletLineageModel.parent_bullet_id",
+        back_populates="parent_bullet",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_bullets_playbook_section", "playbook_id", "section"),
         Index("ix_bullets_helpful_count", "helpful_count"),
+        # CGR³ indexes for context-aware retrieval
+        Index("ix_bullets_team", "team_id"),
+        Index("ix_bullets_created_by_type", "created_by_type"),
+        Index("ix_bullets_temporal", "valid_from", "valid_until"),
+        Index("ix_bullets_confidence", "confidence_score"),
+    )
+
+
+class BulletLineageModel(Base):
+    """
+    Tracks relationships between bullets for knowledge lineage.
+
+    Supports CGR³ reasoning about knowledge provenance:
+    - derived_from: This bullet was created based on another
+    - refined: This bullet is an improved version of another
+    - contradicts: This bullet contradicts another (newer takes precedence)
+    - supersedes: This bullet replaces another (marks old as expired)
+    """
+
+    __tablename__ = "bullet_lineage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    child_bullet_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("bullets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_bullet_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("bullets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    relationship_type: Mapped[str] = mapped_column(
+        Enum("derived_from", "refined", "contradicts", "supersedes", name="lineage_type"),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Optional context about the relationship
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    child_bullet: Mapped["BulletModel"] = relationship(
+        "BulletModel", foreign_keys=[child_bullet_id], back_populates="derived_from"
+    )
+    parent_bullet: Mapped["BulletModel"] = relationship(
+        "BulletModel", foreign_keys=[parent_bullet_id], back_populates="derivatives"
+    )
+
+    __table_args__ = (
+        Index("ix_lineage_child_parent", "child_bullet_id", "parent_bullet_id"),
+        Index("ix_lineage_type", "relationship_type"),
     )
 
 
