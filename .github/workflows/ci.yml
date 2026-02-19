@@ -59,6 +59,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        # Report issues but don't fail build (known technical debt)
-        # Remove || true once tests pass
-        run: pytest tests/ -v --tb=short || true
+        run: pytest tests/ -v --tb=short
