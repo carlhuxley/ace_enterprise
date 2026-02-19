@@ -1,0 +1,61 @@
+{
+  "metadata": {
+    "name": "ace-enterprise",
+    "version": "1.0.0",
+    "domain": "institutional-knowledge-system"
+  },
+  "sections": {
+    "strategies_and_hard_rules": [
+      {
+        "id": "ace-001",
+        "content": "Audit trail must be independent from agent access. Agents can write audit events but cannot read, modify, or delete them. Build audit infrastructure as a separate service.",
+        "tags": ["architecture", "security", "audit"]
+      },
+      {
+        "id": "ace-002",
+        "content": "Evaluate features using scaffolding vs tools framework: Scaffolding compensates for weak models (temporary, remove when models improve). Tools provide lasting value regardless of model capability (durable, keep forever).",
+        "tags": ["architecture", "decision-framework"]
+      },
+      {
+        "id": "ace-003",
+        "content": "High-frequency validation: Tests must pass before adding new features. Run validation (tests, lint, types) on every change. Code generation without validation is under-sampling.",
+        "tags": ["process", "quality", "tdd"]
+      },
+      {
+        "id": "ace-004",
+        "content": "Fix lint/type issues incrementally as you touch files, not in big batches. Accept known technical debt, prevent new debt.",
+        "tags": ["process", "quality"]
+      },
+      {
+        "id": "ace-005",
+        "content": "Enterprise branch uses PostgreSQL + pgvector for storage. OSS branch uses simple JSON files. Auditing is enterprise-only.",
+        "tags": ["architecture", "deployment"]
+      }
+    ],
+    "code_snippets": [],
+    "troubleshooting": [
+      {
+        "id": "ace-t01",
+        "content": "If MCP server returns 'Playbook not found', specify --playbook flag with actual playbook ID from data/playbooks/, or use --playbook-file with a JSON file.",
+        "tags": ["mcp", "debugging"]
+      }
+    ],
+    "domain_knowledge": [
+      {
+        "id": "ace-d01",
+        "content": "CGR³ = Context Graph Retrieve-Rank-Reason. Pipeline: (1) Retrieve candidates by semantic similarity, (2) Rank by context match (team, project, tech stack), (3) Reason about applicability → verdict: APPLY, ASK_FIRST, or SKIP.",
+        "tags": ["cgr3", "retrieval"]
+      },
+      {
+        "id": "ace-d02",
+        "content": "ACE is organizational memory. Claude Code is individual session intelligence. ACE persists patterns across sessions; Claude Code forgets when session ends.",
+        "tags": ["concept", "value-prop"]
+      },
+      {
+        "id": "ace-d03",
+        "content": "Playbook sections: strategies_and_hard_rules (patterns, decisions), code_snippets (reusable code), troubleshooting (problem→solution), domain_knowledge (concepts, definitions).",
+        "tags": ["playbook", "structure"]
+      }
+    ]
+  }
+}

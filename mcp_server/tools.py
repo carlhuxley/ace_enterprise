@@ -369,11 +369,13 @@ class ACETools:
 
     def _handle_query(self, args: dict) -> dict:
         """Handle query tool call."""
+        # Use file-based playbook if available (fast, no embedding needed)
+        if self._playbook_data:
+            return self._query_file_playbook(args)
+
+        # Fall back to knowledge service (requires embeddings)
         service = self._get_knowledge_service()
         if service is None:
-            # Fallback to file-based playbook
-            if self._playbook_data:
-                return self._query_file_playbook(args)
             return {"error": "No knowledge source available"}
 
         # Use simple retrieval without CGR³ reasoning
