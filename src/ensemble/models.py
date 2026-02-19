@@ -10,7 +10,6 @@ Defines the core data structures for multi-model consensus building:
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 
 class VoteType(str, Enum):
@@ -63,17 +62,17 @@ class ConsensusBullet:
     votes: list[Vote] = field(default_factory=list)
 
     # Consensus metadata
-    approved: Optional[bool] = None  # None = pending, True/False = decided
-    approval_strategy: Optional[str] = None  # Which strategy approved it?
+    approved: bool | None = None  # None = pending, True/False = decided
+    approval_strategy: str | None = None  # Which strategy approved it?
     deliberation_rounds: int = 0  # How many discussion rounds?
 
     # Similarity clustering
     similar_bullets: list[str] = field(default_factory=list)  # IDs of similar proposals
-    cluster_id: Optional[str] = None  # Which cluster does this belong to?
+    cluster_id: str | None = None  # Which cluster does this belong to?
 
     # Timestamps
     proposed_at: datetime = field(default_factory=datetime.now)
-    decided_at: Optional[datetime] = None
+    decided_at: datetime | None = None
 
     @property
     def vote_counts(self) -> dict[VoteType, int]:
@@ -123,7 +122,7 @@ class ConsensusBullet:
         else:
             self.votes.append(vote)
 
-    def get_vote(self, model_id: str) -> Optional[Vote]:
+    def get_vote(self, model_id: str) -> Vote | None:
         """Get a specific model's vote on this bullet."""
         for vote in self.votes:
             if vote.model_id == model_id:

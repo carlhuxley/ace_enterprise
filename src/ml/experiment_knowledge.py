@@ -1,10 +1,10 @@
 """ML Experiment Knowledge Schema - extends ACE playbook structure for ML experimentation."""
 
+import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
-import json
+from typing import Any
 
 
 @dataclass
@@ -16,19 +16,19 @@ class ExperimentDecision:
     question: str  # "Which optimizer to use?"
     decision: str  # "Adam with lr=0.001"
     rationale: str  # "AdamW showed instability in early experiments"
-    alternatives_considered: List[str]  # ["SGD", "AdamW", "RMSprop"]
-    context: Dict[str, Any]  # {"previous_run_id": "abc123", "metric_observed": "loss_spike"}
+    alternatives_considered: list[str]  # ["SGD", "AdamW", "RMSprop"]
+    context: dict[str, Any]  # {"previous_run_id": "abc123", "metric_observed": "loss_spike"}
 
     # Provenance
-    human_contributor: Optional[str] = None
-    ai_models: List[Dict[str, str]] = field(default_factory=list)  # [{"provider": "openai", "model": "gpt-4"}]
-    conversation_id: Optional[str] = None
+    human_contributor: str | None = None
+    ai_models: list[dict[str, str]] = field(default_factory=list)  # [{"provider": "openai", "model": "gpt-4"}]
+    conversation_id: str | None = None
 
     # Outcome tracking
-    outcome: Optional[str] = None  # "successful" | "failed" | "inconclusive"
-    learned_insight: Optional[str] = None
+    outcome: str | None = None  # "successful" | "failed" | "inconclusive"
+    learned_insight: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
         return {
             "decision_id": self.decision_id,
@@ -46,7 +46,7 @@ class ExperimentDecision:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ExperimentDecision':
+    def from_dict(cls, data: dict[str, Any]) -> 'ExperimentDecision':
         """Load from dictionary."""
         data = data.copy()
         data['timestamp'] = datetime.fromisoformat(data['timestamp'])
@@ -62,26 +62,26 @@ class ExperimentPattern:
     description: str
 
     # Evidence
-    observed_in_experiments: List[str]  # List of MLflow run_ids
+    observed_in_experiments: list[str]  # List of MLflow run_ids
     success_rate: float  # 0.0 to 1.0
-    avg_improvement: Optional[float]  # Metric improvement when pattern applied
+    avg_improvement: float | None  # Metric improvement when pattern applied
 
     # Application guidance
     when_to_apply: str  # "When batch_size > 256 and using Adam optimizer"
     implementation: str  # Code snippet or configuration
-    antipatterns: List[str]  # ["Don't combine with learning rate decay in first epoch"]
+    antipatterns: list[str]  # ["Don't combine with learning rate decay in first epoch"]
 
     # Provenance
     discovered_date: datetime
     experiments_count: int
-    domain_tags: List[str]  # ["computer_vision", "nlp", "tabular"]
+    domain_tags: list[str]  # ["computer_vision", "nlp", "tabular"]
 
     # Quality signals
     usefulness_score: float = 0.0
     times_applied: int = 0
     times_successful: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
         return {
             "pattern_id": self.pattern_id,
@@ -102,7 +102,7 @@ class ExperimentPattern:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ExperimentPattern':
+    def from_dict(cls, data: dict[str, Any]) -> 'ExperimentPattern':
         """Load from dictionary."""
         data = data.copy()
         data['discovered_date'] = datetime.fromisoformat(data['discovered_date'])
@@ -114,13 +114,13 @@ class MLExperimentKnowledge:
     """Knowledge base for ML experiments - integrates with MLflow run tracking."""
 
     experiment_name: str
-    mlflow_experiment_id: Optional[str] = None
+    mlflow_experiment_id: str | None = None
 
     # Decision trail
-    decisions: List[ExperimentDecision] = field(default_factory=list)
+    decisions: list[ExperimentDecision] = field(default_factory=list)
 
     # Learned patterns
-    patterns: List[ExperimentPattern] = field(default_factory=list)
+    patterns: list[ExperimentPattern] = field(default_factory=list)
 
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
@@ -136,28 +136,28 @@ class MLExperimentKnowledge:
         self.patterns.append(pattern)
         self.updated_at = datetime.now()
 
-    def get_decisions_for_run(self, mlflow_run_id: str) -> List[ExperimentDecision]:
+    def get_decisions_for_run(self, mlflow_run_id: str) -> list[ExperimentDecision]:
         """Get all decisions associated with a specific MLflow run."""
         return [
             d for d in self.decisions
             if d.context.get("mlflow_run_id") == mlflow_run_id
         ]
 
-    def get_patterns_by_domain(self, domain: str) -> List[ExperimentPattern]:
+    def get_patterns_by_domain(self, domain: str) -> list[ExperimentPattern]:
         """Get patterns relevant to a specific domain."""
         return [
             p for p in self.patterns
             if domain in p.domain_tags
         ]
 
-    def get_successful_patterns(self, min_success_rate: float = 0.7) -> List[ExperimentPattern]:
+    def get_successful_patterns(self, min_success_rate: float = 0.7) -> list[ExperimentPattern]:
         """Get patterns with high success rate."""
         return [
             p for p in self.patterns
             if p.success_rate >= min_success_rate and p.experiments_count >= 3
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
         return {
             "experiment_name": self.experiment_name,
@@ -169,7 +169,7 @@ class MLExperimentKnowledge:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MLExperimentKnowledge':
+    def from_dict(cls, data: dict[str, Any]) -> 'MLExperimentKnowledge':
         """Load from dictionary."""
         data = data.copy()
         data['decisions'] = [ExperimentDecision.from_dict(d) for d in data.get('decisions', [])]
@@ -187,6 +187,6 @@ class MLExperimentKnowledge:
     @classmethod
     def load(cls, filepath: Path) -> 'MLExperimentKnowledge':
         """Load knowledge base from JSON file."""
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             data = json.load(f)
         return cls.from_dict(data)

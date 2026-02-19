@@ -4,7 +4,7 @@ Based on PRD Section 2.2.2: Reflector Module
 """
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.config.settings import settings
 from src.storage.schemas import (
@@ -35,9 +35,9 @@ class Reflector:
 
     def __init__(
         self,
-        llm_client: Optional[LLMClient] = None,
-        max_refinement_rounds: Optional[int] = None,
-        enable_iterative: Optional[bool] = None,
+        llm_client: LLMClient | None = None,
+        max_refinement_rounds: int | None = None,
+        enable_iterative: bool | None = None,
     ) -> None:
         """
         Initialize Reflector.
@@ -134,7 +134,7 @@ class Reflector:
         task: TaskInput,
         generator_output: GeneratorOutput,
         environment_feedback: EnvironmentFeedback,
-        previous_analysis: Optional[dict[str, Any]],
+        previous_analysis: dict[str, Any] | None,
         iteration: int,
     ) -> dict[str, Any]:
         """
@@ -206,7 +206,7 @@ Be specific, actionable, and focus on patterns that can be generalized."""
         task: TaskInput,
         generator_output: GeneratorOutput,
         environment_feedback: EnvironmentFeedback,
-        previous_analysis: Optional[dict[str, Any]],
+        previous_analysis: dict[str, Any] | None,
         iteration: int,
     ) -> str:
         """Build prompt for reflection analysis."""

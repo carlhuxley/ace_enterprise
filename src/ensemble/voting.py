@@ -9,12 +9,10 @@ Implements multiple voting strategies:
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Protocol
 
 from src.ensemble.models import (
     ConsensusBullet,
     ModelPerformance,
-    Vote,
     VoteType,
 )
 

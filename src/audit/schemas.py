@@ -5,12 +5,13 @@ These schemas are shared between the audit client (in ACE agents) and
 the audit service. They define the structure of audit events and queries.
 """
 
-from datetime import datetime
-from enum import Enum
-from typing import Any, Optional
-from pydantic import BaseModel, Field
 import hashlib
 import json
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class AuditEventType(str, Enum):
@@ -61,16 +62,16 @@ class AuditEvent(BaseModel):
     actor_id: str = Field(..., description="User email, agent name, or 'system'")
 
     # Context
-    session_id: Optional[str] = Field(None, description="Session/conversation ID")
-    playbook_id: Optional[str] = Field(None, description="Related playbook")
-    project_id: Optional[str] = Field(None, description="Project identifier")
+    session_id: str | None = Field(None, description="Session/conversation ID")
+    playbook_id: str | None = Field(None, description="Related playbook")
+    project_id: str | None = Field(None, description="Project identifier")
 
     # Event payload (type-specific data)
     payload: dict[str, Any] = Field(default_factory=dict)
 
     # Hash chain for integrity
-    prev_hash: Optional[str] = Field(None, description="Hash of previous event")
-    event_hash: Optional[str] = Field(None, description="Hash of this event")
+    prev_hash: str | None = Field(None, description="Hash of previous event")
+    event_hash: str | None = Field(None, description="Hash of this event")
 
     def compute_hash(self) -> str:
         """Compute SHA-256 hash of this event's content."""
@@ -79,7 +80,7 @@ class AuditEvent(BaseModel):
         content_str = json.dumps(content, sort_keys=True, default=str)
         return hashlib.sha256(content_str.encode()).hexdigest()
 
-    def with_hash_chain(self, prev_hash: Optional[str] = None) -> "AuditEvent":
+    def with_hash_chain(self, prev_hash: str | None = None) -> "AuditEvent":
         """Return a new event with hash chain fields set."""
         return self.model_copy(update={
             "prev_hash": prev_hash,
@@ -93,9 +94,9 @@ class AuditEventCreate(BaseModel):
     event_type: AuditEventType
     actor_type: str
     actor_id: str
-    session_id: Optional[str] = None
-    playbook_id: Optional[str] = None
-    project_id: Optional[str] = None
+    session_id: str | None = None
+    playbook_id: str | None = None
+    project_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -103,16 +104,16 @@ class AuditQuery(BaseModel):
     """Query parameters for searching audit events."""
 
     # Time range
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
 
     # Filters
-    event_types: Optional[list[AuditEventType]] = None
-    actor_type: Optional[str] = None
-    actor_id: Optional[str] = None
-    session_id: Optional[str] = None
-    playbook_id: Optional[str] = None
-    project_id: Optional[str] = None
+    event_types: list[AuditEventType] | None = None
+    actor_type: str | None = None
+    actor_id: str | None = None
+    session_id: str | None = None
+    playbook_id: str | None = None
+    project_id: str | None = None
 
     # Pagination
     limit: int = Field(default=100, ge=1, le=1000)

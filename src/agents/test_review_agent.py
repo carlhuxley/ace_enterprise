@@ -13,7 +13,6 @@ Helps ensure tests are high-quality before ACE learns from them.
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from src.utils.llm_client import LLMClient
 
@@ -25,9 +24,9 @@ class TestQualityIssue:
     severity: str  # "critical", "warning", "suggestion"
     category: str  # "structure", "coverage", "naming", "isolation", "assertions"
     message: str
-    test_name: Optional[str] = None
-    line_number: Optional[int] = None
-    suggestion: Optional[str] = None
+    test_name: str | None = None
+    line_number: int | None = None
+    suggestion: str | None = None
 
 
 @dataclass
@@ -125,7 +124,7 @@ class TestReviewAgent:
 
     def __init__(
         self,
-        llm_client: Optional[LLMClient] = None,
+        llm_client: LLMClient | None = None,
         use_llm_analysis: bool = True,
     ):
         """

@@ -1,9 +1,9 @@
 """MLflow callback for automatic ACE knowledge capture during training."""
 
-from typing import Dict, Any, Optional, List
+import logging
 from datetime import datetime
 from pathlib import Path
-import logging
+from typing import Any
 
 try:
     import mlflow
@@ -12,11 +12,7 @@ try:
 except ImportError:
     MLFLOW_AVAILABLE = False
 
-from .experiment_knowledge import (
-    MLExperimentKnowledge,
-    ExperimentDecision,
-    ExperimentPattern
-)
+from .experiment_knowledge import ExperimentDecision, ExperimentPattern, MLExperimentKnowledge
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +45,8 @@ class ACEMLflowCallback:
     def __init__(
         self,
         experiment_name: str,
-        knowledge_dir: Optional[Path] = None,
-        human_contributor: Optional[str] = None,
+        knowledge_dir: Path | None = None,
+        human_contributor: str | None = None,
         auto_save: bool = True
     ):
         """Initialize ACE MLflow callback.
@@ -82,10 +78,10 @@ class ACEMLflowCallback:
         self.mlflow_client = MlflowClient()
 
         # Track current run
-        self._current_run_id: Optional[str] = None
+        self._current_run_id: str | None = None
         self._decision_counter = 0
 
-    def _get_current_run_id(self) -> Optional[str]:
+    def _get_current_run_id(self) -> str | None:
         """Get current MLflow run ID."""
         active_run = mlflow.active_run()
         if active_run:
@@ -97,10 +93,10 @@ class ACEMLflowCallback:
         question: str,
         decision: str,
         rationale: str,
-        alternatives_considered: Optional[List[str]] = None,
-        context: Optional[Dict[str, Any]] = None,
-        ai_models: Optional[List[Dict[str, str]]] = None,
-        conversation_id: Optional[str] = None
+        alternatives_considered: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+        ai_models: list[dict[str, str]] | None = None,
+        conversation_id: str | None = None
     ) -> ExperimentDecision:
         """Log a decision made during experimentation.
 
@@ -163,11 +159,11 @@ class ACEMLflowCallback:
         description: str,
         when_to_apply: str,
         implementation: str,
-        observed_in_runs: List[str],
+        observed_in_runs: list[str],
         success_rate: float,
-        domain_tags: Optional[List[str]] = None,
-        antipatterns: Optional[List[str]] = None,
-        avg_improvement: Optional[float] = None
+        domain_tags: list[str] | None = None,
+        antipatterns: list[str] | None = None,
+        avg_improvement: float | None = None
     ) -> ExperimentPattern:
         """Log a learned pattern from multiple experiments.
 
@@ -216,7 +212,7 @@ class ACEMLflowCallback:
         self,
         decision_id: str,
         outcome: str,
-        learned_insight: Optional[str] = None
+        learned_insight: str | None = None
     ) -> None:
         """Update a decision with its outcome after experiment completes.
 
@@ -238,9 +234,9 @@ class ACEMLflowCallback:
 
     def get_recommendations(
         self,
-        current_params: Dict[str, Any],
-        domain_tags: Optional[List[str]] = None
-    ) -> List[ExperimentPattern]:
+        current_params: dict[str, Any],
+        domain_tags: list[str] | None = None
+    ) -> list[ExperimentPattern]:
         """Get pattern recommendations based on current experiment parameters.
 
         Args:

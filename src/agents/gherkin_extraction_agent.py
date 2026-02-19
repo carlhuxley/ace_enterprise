@@ -14,12 +14,11 @@ Workflow:
 """
 
 import ast
-import inspect
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +27,9 @@ logger = logging.getLogger(__name__)
 class MethodSignature:
     """Represents a method signature extracted from code."""
     name: str
-    parameters: List[Tuple[str, Optional[str]]]  # [(param_name, type_hint), ...]
-    return_type: Optional[str]
-    docstring: Optional[str]
+    parameters: list[tuple[str, str | None]]  # [(param_name, type_hint), ...]
+    return_type: str | None
+    docstring: str | None
     is_constructor: bool = False
 
 
@@ -38,16 +37,16 @@ class MethodSignature:
 class ClassAnalysis:
     """Analysis of a single class."""
     name: str
-    methods: List[MethodSignature]
-    docstring: Optional[str]
-    base_classes: List[str]
+    methods: list[MethodSignature]
+    docstring: str | None
+    base_classes: list[str]
 
 
 @dataclass
 class CodeAnalysis:
     """Complete code analysis result."""
-    classes: List[ClassAnalysis]
-    functions: List[MethodSignature]
+    classes: list[ClassAnalysis]
+    functions: list[MethodSignature]
     file_path: Path
 
 
@@ -56,26 +55,26 @@ class TestAssertion:
     """A single assertion extracted from a test."""
     assertion_type: str  # 'equal', 'true', 'false', 'in', 'not_none', etc.
     actual: str  # What's being tested
-    expected: Optional[str]  # Expected value
-    message: Optional[str]
+    expected: str | None  # Expected value
+    message: str | None
 
 
 @dataclass
 class TestScenario:
     """A test scenario extracted from test code."""
     test_name: str
-    setup_actions: List[str]  # Given: Setup code
-    action: Optional[str]  # When: The action being tested
-    assertions: List[TestAssertion]  # Then: What's verified
-    docstring: Optional[str]
+    setup_actions: list[str]  # Given: Setup code
+    action: str | None  # When: The action being tested
+    assertions: list[TestAssertion]  # Then: What's verified
+    docstring: str | None
     line_number: int
 
 
 @dataclass
 class TestAnalysis:
     """Complete test analysis result."""
-    scenarios: List[TestScenario]
-    fixtures: Dict[str, Any]  # Shared setup/fixtures
+    scenarios: list[TestScenario]
+    fixtures: dict[str, Any]  # Shared setup/fixtures
     file_path: Path
 
 
@@ -83,10 +82,10 @@ class TestAnalysis:
 class GherkinScenario:
     """A Gherkin scenario to be generated."""
     name: str
-    given_steps: List[str]
-    when_steps: List[str]
-    then_steps: List[str]
-    background_context: Optional[str] = None
+    given_steps: list[str]
+    when_steps: list[str]
+    then_steps: list[str]
+    background_context: str | None = None
 
 
 @dataclass
@@ -94,8 +93,8 @@ class GherkinFeature:
     """A complete Gherkin feature."""
     name: str
     description: str
-    scenarios: List[GherkinScenario]
-    background: Optional[List[str]] = None
+    scenarios: list[GherkinScenario]
+    background: list[str] | None = None
 
 
 @dataclass
@@ -104,18 +103,18 @@ class StepDefinition:
     step_type: str  # 'given', 'when', 'then'
     pattern: str  # The step pattern
     implementation: str  # Python code to implement the step
-    method_signature: Optional[MethodSignature] = None
+    method_signature: MethodSignature | None = None
 
 
 @dataclass
 class ExtractionResult:
     """Result of Gherkin extraction."""
     feature: GherkinFeature
-    step_definitions: List[StepDefinition]
+    step_definitions: list[StepDefinition]
     code_analysis: CodeAnalysis
     test_analysis: TestAnalysis
     confidence_score: float
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 class CodeAnalyzer:
@@ -125,7 +124,7 @@ class CodeAnalyzer:
         """Analyze code file and extract structure."""
         logger.info(f"Analyzing code: {code_path}")
 
-        with open(code_path, 'r') as f:
+        with open(code_path) as f:
             source = f.read()
 
         tree = ast.parse(source)
@@ -221,7 +220,7 @@ class TestAnalyzer:
         """Analyze test file and extract scenarios."""
         logger.info(f"Analyzing tests: {test_path}")
 
-        with open(test_path, 'r') as f:
+        with open(test_path) as f:
             source = f.read()
 
         tree = ast.parse(source)
@@ -312,7 +311,7 @@ class TestAnalyzer:
             message=None
         )
 
-    def _extract_assertions_from_stmt(self, stmt: ast.stmt) -> List[TestAssertion]:
+    def _extract_assertions_from_stmt(self, stmt: ast.stmt) -> list[TestAssertion]:
         """Extract assertions from assert statements."""
         assertions = []
 
@@ -395,7 +394,7 @@ class GherkinExtractionAgent:
         self,
         code_path: Path,
         test_path: Path,
-        feature_name: Optional[str] = None
+        feature_name: str | None = None
     ) -> ExtractionResult:
         """
         Extract Gherkin from existing codebase.
@@ -446,7 +445,7 @@ class GherkinExtractionAgent:
         self,
         code_analysis: CodeAnalysis,
         test_analysis: TestAnalysis,
-        feature_name: Optional[str]
+        feature_name: str | None
     ) -> GherkinFeature:
         """Generate Gherkin feature from analyses."""
 
@@ -520,7 +519,7 @@ class GherkinExtractionAgent:
             then_steps=then_steps
         )
 
-    def _setup_to_given(self, setup: str) -> Optional[str]:
+    def _setup_to_given(self, setup: str) -> str | None:
         """Convert setup code to Given step."""
         # Extract meaningful context from setup
 
@@ -537,7 +536,7 @@ class GherkinExtractionAgent:
 
         return None
 
-    def _action_to_when(self, action: str) -> Optional[str]:
+    def _action_to_when(self, action: str) -> str | None:
         """Convert action code to When step."""
         # Extract method call: result = obj.method(params)
 
@@ -553,7 +552,7 @@ class GherkinExtractionAgent:
 
         return None
 
-    def _assertion_to_then(self, assertion: TestAssertion) -> Optional[str]:
+    def _assertion_to_then(self, assertion: TestAssertion) -> str | None:
         """Convert assertion to Then step."""
 
         if assertion.assertion_type == 'equal':
@@ -573,7 +572,7 @@ class GherkinExtractionAgent:
         self,
         feature: GherkinFeature,
         code_analysis: CodeAnalysis
-    ) -> List[StepDefinition]:
+    ) -> list[StepDefinition]:
         """Generate step definitions for Gherkin steps."""
 
         step_definitions = []
@@ -637,7 +636,7 @@ class GherkinExtractionAgent:
 
         return score
 
-    def _collect_warnings(self, code_analysis: CodeAnalysis, test_analysis: TestAnalysis) -> List[str]:
+    def _collect_warnings(self, code_analysis: CodeAnalysis, test_analysis: TestAnalysis) -> list[str]:
         """Collect warnings about extraction quality."""
 
         warnings = []
@@ -720,7 +719,7 @@ class GherkinExtractionAgent:
 
     def write_step_definitions(
         self,
-        step_definitions: List[StepDefinition],
+        step_definitions: list[StepDefinition],
         code_analysis: CodeAnalysis,
         output_path: Path
     ) -> None:
@@ -744,8 +743,8 @@ class GherkinExtractionAgent:
             for step_def in step_definitions:
                 decorator = f"@{step_def.step_type}"
                 f.write(f"{decorator}('{step_def.pattern}')\n")
-                f.write(f"def step_impl(context):\n")
+                f.write("def step_impl(context):\n")
                 f.write(f"    {step_def.implementation}\n")
-                f.write(f"    pass\n\n")
+                f.write("    pass\n\n")
 
         logger.info(f"Wrote step definitions to: {output_path}")

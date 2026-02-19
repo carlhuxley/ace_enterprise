@@ -12,19 +12,17 @@ not directly by ACE agents.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     Enum,
     Index,
     Integer,
     String,
-    Text,
-    JSON,
     create_engine,
     func,
 )
@@ -68,7 +66,7 @@ class AuditEventModel(Base):
     timestamp: datetime = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         index=True
     )
 
@@ -117,7 +115,7 @@ class AuditStore:
         """
         self.engine = create_engine(database_url)
         self.SessionLocal = sessionmaker(bind=self.engine)
-        self._last_hash: Optional[str] = None
+        self._last_hash: str | None = None
 
     def create_tables(self) -> None:
         """Create audit tables if they don't exist."""
@@ -137,7 +135,7 @@ class AuditStore:
         finally:
             session.close()
 
-    def _get_last_hash(self, session: Session) -> Optional[str]:
+    def _get_last_hash(self, session: Session) -> str | None:
         """Get the hash of the most recent event for chain continuity."""
         result = session.query(AuditEventModel.event_hash).order_by(
             AuditEventModel.id.desc()
@@ -282,7 +280,7 @@ class AuditStore:
 
         return True
 
-    def verify_full_chain(self) -> tuple[bool, Optional[str]]:
+    def verify_full_chain(self) -> tuple[bool, str | None]:
         """
         Verify the entire hash chain from the beginning.
 

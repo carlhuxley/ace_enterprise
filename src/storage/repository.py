@@ -6,15 +6,12 @@ vector similarity search capabilities.
 """
 
 import logging
-from datetime import datetime
-from typing import List, Optional, Tuple
 
-from sqlalchemy import create_engine, desc, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.config.settings import settings
 from src.storage.models import Base, BulletModel, PlaybookModel
-from src.storage.schemas import Bullet, Playbook
 from src.utils.embedding import get_embedding_service
 
 logger = logging.getLogger(__name__)
@@ -31,7 +28,7 @@ class PlaybookRepository:
     - Transaction support
     """
 
-    def __init__(self, database_url: Optional[str] = None):
+    def __init__(self, database_url: str | None = None):
         """
         Initialize repository with database connection.
 
@@ -52,7 +49,7 @@ class PlaybookRepository:
         )
         self.SessionLocal = sessionmaker(bind=self.engine)
 
-        logger.info(f"PostgreSQL repository initialized")
+        logger.info("PostgreSQL repository initialized")
 
     def create_tables(self):
         """Create all tables (use migrations instead in production)."""
@@ -88,7 +85,7 @@ class PlaybookRepository:
             logger.info(f"Created playbook: {playbook_id}")
             return playbook
 
-    def get_playbook(self, playbook_id: str) -> Optional[PlaybookModel]:
+    def get_playbook(self, playbook_id: str) -> PlaybookModel | None:
         """Get playbook by ID."""
         with self.get_session() as session:
             return session.query(PlaybookModel).filter(
@@ -118,8 +115,8 @@ class PlaybookRepository:
         bullet_id: str,
         content: str,
         section: str,
-        tags: List[str],
-        embedding: Optional[List[float]] = None
+        tags: list[str],
+        embedding: list[float] | None = None
     ) -> BulletModel:
         """Add a bullet to a playbook."""
         with self.get_session() as session:
@@ -161,9 +158,9 @@ class PlaybookRepository:
     def get_bullets(
         self,
         playbook_id: str,
-        section: Optional[str] = None,
-        tags: Optional[List[str]] = None
-    ) -> List[BulletModel]:
+        section: str | None = None,
+        tags: list[str] | None = None
+    ) -> list[BulletModel]:
         """Get bullets from a playbook."""
         with self.get_session() as session:
             # Get playbook internal ID
@@ -190,18 +187,18 @@ class PlaybookRepository:
 
             return query.all()
 
-    def get_bullet(self, bullet_id: str) -> Optional[BulletModel]:
+    def get_bullet(self, bullet_id: str) -> BulletModel | None:
         """Get a single bullet by ID."""
         with self.get_session() as session:
             return session.query(BulletModel).filter(
                 BulletModel.bullet_id == bullet_id
             ).first()
 
-    def get_bullets_by_playbook(self, playbook_id: str) -> List[BulletModel]:
+    def get_bullets_by_playbook(self, playbook_id: str) -> list[BulletModel]:
         """Get all bullets from a playbook (alias for get_bullets without filters)."""
         return self.get_bullets(playbook_id)
 
-    def get_playbook_by_bullet(self, bullet_id: str) -> Optional[PlaybookModel]:
+    def get_playbook_by_bullet(self, bullet_id: str) -> PlaybookModel | None:
         """Get the playbook that owns a bullet."""
         with self.get_session() as session:
             bullet = session.query(BulletModel).filter(
@@ -221,13 +218,13 @@ class PlaybookRepository:
 
     def similarity_search(
         self,
-        query_embedding: List[float],
-        playbook_id: Optional[str] = None,
-        section: Optional[str] = None,
+        query_embedding: list[float],
+        playbook_id: str | None = None,
+        section: str | None = None,
         top_k: int = 10,
         similarity_threshold: float = 0.0,
         distance_metric: str = "cosine"
-    ) -> List[Tuple[BulletModel, float]]:
+    ) -> list[tuple[BulletModel, float]]:
         """
         Semantic similarity search using pgvector.
 
@@ -303,11 +300,11 @@ class PlaybookRepository:
 
     def similarity_search_multi_playbook(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         domain: str,
         top_k: int = 10,
         similarity_threshold: float = 0.5
-    ) -> List[Tuple[BulletModel, float, str]]:
+    ) -> list[tuple[BulletModel, float, str]]:
         """
         Search across all playbooks in a domain.
 
@@ -348,7 +345,7 @@ class PlaybookRepository:
     def bulk_add_bullets(
         self,
         playbook_id: str,
-        bullets: List[dict]
+        bullets: list[dict]
     ) -> int:
         """
         Add multiple bullets in a single transaction.
@@ -423,7 +420,7 @@ class PlaybookRepository:
 
 
 # Global singleton
-_repository: Optional[PlaybookRepository] = None
+_repository: PlaybookRepository | None = None
 
 
 def get_repository() -> PlaybookRepository:

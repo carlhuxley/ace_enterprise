@@ -7,18 +7,17 @@ knowledge retrieval.
 
 import logging
 import time
-from typing import Optional
 
 from src.playbook.retrieval import BulletRetriever
-from src.storage.schemas import Bullet
+from src.retrieval.context_scorer import ContextScorer
 from src.retrieval.schemas import (
-    RetrievalContext,
-    RankedBullet,
-    ReasoningVerdict,
     ContextGap,
     KnowledgeResponse,
+    RankedBullet,
+    ReasoningVerdict,
+    RetrievalContext,
 )
-from src.retrieval.context_scorer import ContextScorer
+from src.storage.schemas import Bullet
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +56,8 @@ class ContextGraphRetriever:
 
     def __init__(
         self,
-        base_retriever: Optional[BulletRetriever] = None,
-        context_scorer: Optional[ContextScorer] = None,
+        base_retriever: BulletRetriever | None = None,
+        context_scorer: ContextScorer | None = None,
         context_weight: float = 0.4,
         min_context_score: float = 0.3,
         skip_threshold: float = 0.15,
@@ -89,9 +88,9 @@ class ContextGraphRetriever:
         self,
         query: str,
         bullets: list[Bullet],
-        context: Optional[RetrievalContext] = None,
-        query_embedding: Optional[list[float]] = None,
-        top_k: Optional[int] = None,
+        context: RetrievalContext | None = None,
+        query_embedding: list[float] | None = None,
+        top_k: int | None = None,
     ) -> KnowledgeResponse:
         """
         Execute the CGR³ pipeline.
@@ -245,7 +244,7 @@ class ContextGraphRetriever:
         self,
         query: str,
         bullets: list[Bullet],
-        context: Optional[RetrievalContext] = None,
+        context: RetrievalContext | None = None,
         include_superseded: bool = False,
     ) -> KnowledgeResponse:
         """

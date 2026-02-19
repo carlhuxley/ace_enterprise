@@ -3,7 +3,6 @@ Fine-Grained Retrieval Engine for Playbook Bullets.
 Based on PRD Section 4.3: Fine-Grained Retrieval
 """
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -28,8 +27,8 @@ class BulletRetriever:
 
     def __init__(
         self,
-        top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
+        top_k: int | None = None,
+        similarity_threshold: float | None = None,
     ) -> None:
         """
         Initialize retriever.
@@ -49,9 +48,9 @@ class BulletRetriever:
         self,
         query: str,
         bullets: list[Bullet],
-        query_embedding: Optional[list[float]] = None,
-        filter_section: Optional[str] = None,
-        min_helpful_ratio: Optional[float] = None,
+        query_embedding: list[float] | None = None,
+        filter_section: str | None = None,
+        min_helpful_ratio: float | None = None,
     ) -> list[tuple[Bullet, float]]:
         """
         Retrieve most relevant bullets for a query.
@@ -121,7 +120,7 @@ class BulletRetriever:
         primary_bullets: list[Bullet],
         secondary_bullets_by_playbook: dict[str, list[Bullet]],
         primary_playbook_id: str,
-        query_embedding: Optional[list[float]] = None,
+        query_embedding: list[float] | None = None,
         secondary_weight: float = 0.5,
     ) -> list[tuple[Bullet, float, str]]:
         """
@@ -213,7 +212,7 @@ class BulletRetriever:
         self,
         query: str,
         bullet: Bullet,
-        query_embedding: Optional[list[float]],
+        query_embedding: list[float] | None,
     ) -> float:
         """
         Calculate relevance score for a bullet.
@@ -324,8 +323,8 @@ class BulletRetriever:
     def filter_by_tags(
         self,
         bullets: list[Bullet],
-        required_tags: Optional[list[str]] = None,
-        excluded_tags: Optional[list[str]] = None,
+        required_tags: list[str] | None = None,
+        excluded_tags: list[str] | None = None,
     ) -> list[Bullet]:
         """
         Filter bullets by tags.

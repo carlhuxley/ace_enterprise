@@ -1,9 +1,8 @@
 """Project detection and analysis - determine project structure."""
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +33,16 @@ class ProjectInfo:
     has_git: bool
 
     # Python version (if detectable)
-    python_version: Optional[str] = None
+    python_version: str | None = None
 
     # Package manager
-    package_manager: Optional[str] = None  # "poetry" | "pip" | "conda" | None
+    package_manager: str | None = None  # "poetry" | "pip" | "conda" | None
 
 
 class ProjectDetector:
     """Detects and analyzes Python project structure."""
 
-    def __init__(self, start_path: Optional[Path] = None):
+    def __init__(self, start_path: Path | None = None):
         """Initialize detector.
 
         Args:
@@ -251,7 +250,7 @@ class ProjectDetector:
         # Default
         return "script"
 
-    def _detect_python_version(self, root: Path) -> Optional[str]:
+    def _detect_python_version(self, root: Path) -> str | None:
         """Detect Python version requirement.
 
         Checks:
@@ -279,7 +278,7 @@ class ProjectDetector:
 
         return None
 
-    def _detect_package_manager(self, root: Path) -> Optional[str]:
+    def _detect_package_manager(self, root: Path) -> str | None:
         """Detect package manager.
 
         Returns:

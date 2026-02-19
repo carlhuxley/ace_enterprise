@@ -1,9 +1,10 @@
 """Project configuration - .ace/config.yml schema and management."""
 
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 import logging
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -15,18 +16,18 @@ class ACEConfig:
 
     # Project metadata
     project_name: str
-    project_domain: Optional[str] = None  # "healthcare", "fintech", "e-commerce", etc.
-    project_tags: List[str] = field(default_factory=list)
+    project_domain: str | None = None  # "healthcare", "fintech", "e-commerce", etc.
+    project_tags: list[str] = field(default_factory=list)
 
     # Central knowledge configuration
     use_central_knowledge: bool = True
-    central_knowledge_path: Optional[str] = None  # Default: ~/.ace/knowledge
+    central_knowledge_path: str | None = None  # Default: ~/.ace/knowledge
 
     # Playbook configuration
-    playbooks: List[str] = field(default_factory=list)  # ["global", "healthcare", "python"]
+    playbooks: list[str] = field(default_factory=list)  # ["global", "healthcare", "python"]
 
     # Local customizations
-    local_playbook: Optional[str] = None  # Path to project-specific playbook
+    local_playbook: str | None = None  # Path to project-specific playbook
 
     # Code generation preferences
     test_framework: str = "pytest"  # "pytest", "unittest", "nose"
@@ -39,19 +40,19 @@ class ACEConfig:
     auto_fix: bool = True  # Auto-fix simple issues
 
     # Provenance
-    contributors: List[str] = field(default_factory=list)  # ["user@company.com"]
-    ai_models: List[Dict[str, str]] = field(default_factory=list)  # [{"provider": "...", "model": "..."}]
+    contributors: list[str] = field(default_factory=list)  # ["user@company.com"]
+    ai_models: list[dict[str, str]] = field(default_factory=list)  # [{"provider": "...", "model": "..."}]
 
     # Git integration
     auto_stage: bool = False  # Auto-stage generated files
     auto_commit: bool = False  # Auto-commit (generally should be False)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for YAML serialization."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ACEConfig':
+    def from_dict(cls, data: dict[str, Any]) -> 'ACEConfig':
         """Load from dictionary."""
         return cls(**data)
 
@@ -65,13 +66,13 @@ class ACEConfig:
     @classmethod
     def load(cls, filepath: Path) -> 'ACEConfig':
         """Load configuration from YAML file."""
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             data = yaml.safe_load(f)
         logger.info(f"Loaded ACE config from: {filepath}")
         return cls.from_dict(data)
 
     @classmethod
-    def create_default(cls, project_name: str, project_domain: Optional[str] = None) -> 'ACEConfig':
+    def create_default(cls, project_name: str, project_domain: str | None = None) -> 'ACEConfig':
         """Create default configuration for a project."""
         return cls(
             project_name=project_name,
@@ -131,7 +132,7 @@ class ProjectConfig:
     def initialize(
         self,
         project_name: str,
-        project_domain: Optional[str] = None,
+        project_domain: str | None = None,
         **kwargs
     ) -> ACEConfig:
         """Initialize ACE for this project.

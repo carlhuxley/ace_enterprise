@@ -2,10 +2,9 @@
 LLM Client - Unified interface for open-source LLM providers.
 Supports Ollama, vLLM, DeepSeek, and Together AI.
 """
-import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -27,9 +26,9 @@ class LLMClient:
 
     def __init__(
         self,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        provider: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         """
         Initialize LLM client.
@@ -49,8 +48,8 @@ class LLMClient:
     def generate(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        max_tokens: Optional[int] = None,
+        system_prompt: str | None = None,
+        max_tokens: int | None = None,
         temperature: float = 0.7,
     ) -> dict[str, Any]:
         """
@@ -100,8 +99,8 @@ class LLMClient:
     def _generate_vllm(
         self,
         prompt: str,
-        system_prompt: Optional[str],
-        max_tokens: Optional[int],
+        system_prompt: str | None,
+        max_tokens: int | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using vLLM API (OpenAI-compatible)."""
@@ -144,7 +143,7 @@ class LLMClient:
     def _generate_ollama(
         self,
         prompt: str,
-        system_prompt: Optional[str],
+        system_prompt: str | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using Ollama API."""
@@ -185,8 +184,8 @@ class LLMClient:
     def _generate_openai(
         self,
         prompt: str,
-        system_prompt: Optional[str],
-        max_tokens: Optional[int],
+        system_prompt: str | None,
+        max_tokens: int | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using OpenAI API."""
@@ -232,8 +231,8 @@ class LLMClient:
     def _generate_anthropic(
         self,
         prompt: str,
-        system_prompt: Optional[str],
-        max_tokens: Optional[int],
+        system_prompt: str | None,
+        max_tokens: int | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using Anthropic API."""
@@ -275,8 +274,8 @@ class LLMClient:
     def _generate_deepseek(
         self,
         prompt: str,
-        system_prompt: Optional[str],
-        max_tokens: Optional[int],
+        system_prompt: str | None,
+        max_tokens: int | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using DeepSeek API."""
@@ -322,8 +321,8 @@ class LLMClient:
     def _generate_togetherai(
         self,
         prompt: str,
-        system_prompt: Optional[str],
-        max_tokens: Optional[int],
+        system_prompt: str | None,
+        max_tokens: int | None,
         temperature: float,
     ) -> dict[str, Any]:
         """Generate using Together AI API (open-source models)."""
@@ -366,7 +365,7 @@ class LLMClient:
             logger.error(f"Together AI API error: {e}")
             raise RuntimeError(f"Failed to generate with Together AI: {e}")
 
-    def _get_default_model(self, model: Optional[str]) -> str:
+    def _get_default_model(self, model: str | None) -> str:
         """Get default model for provider."""
         if model:
             return model

@@ -5,10 +5,9 @@ Generates Go/Cucumber step definitions from extracted Gherkin scenarios.
 This enables cross-language migration: extract Gherkin from Python, implement in Go.
 """
 
-from pathlib import Path
-from typing import List
-import re
 import logging
+import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,7 @@ class GoStepGenerator:
         logger.info(f"Generating Go steps from: {feature_path}")
 
         # Read feature file
-        with open(feature_path, 'r') as f:
+        with open(feature_path) as f:
             feature_content = f.read()
 
         # Extract unique steps
@@ -58,7 +57,7 @@ class GoStepGenerator:
         logger.info(f"Generated Go steps: {output_file}")
         return output_file
 
-    def _extract_steps(self, feature_content: str) -> List[tuple]:
+    def _extract_steps(self, feature_content: str) -> list[tuple]:
         """
         Extract unique steps from feature file.
 
@@ -91,7 +90,7 @@ class GoStepGenerator:
 
         return unique_steps
 
-    def _generate_go_code(self, steps: List[tuple], feature_name: str) -> str:
+    def _generate_go_code(self, steps: list[tuple], feature_name: str) -> str:
         """Generate Go code for step definitions."""
 
         # Start with package and imports
@@ -198,7 +197,7 @@ func (ctx *{self._to_camel_case(feature_name)}Context) {func_name}({param_list})
 
         return f'^{pattern}$'
 
-    def _extract_parameters(self, step_text: str) -> List[tuple]:
+    def _extract_parameters(self, step_text: str) -> list[tuple]:
         """Extract parameters from step text."""
 
         params = []

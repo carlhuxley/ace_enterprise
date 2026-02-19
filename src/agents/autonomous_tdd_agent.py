@@ -16,13 +16,12 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from src.agents.test_review_agent import TestReviewAgent
 from src.ensemble.learner import EnsembleLearner
-from src.ensemble.models import ConsensusBullet, Vote
-from src.utils.llm_client import LLMClient
+from src.ensemble.models import ConsensusBullet
 from src.storage.experiment_logger import ExperimentLogger
+from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ class TestIncrement:
     test_file: Path
     implementation_file: Path
     dependencies: list[str] = field(default_factory=list)
-    scenario_context: Optional[str] = None
+    scenario_context: str | None = None
 
 
 @dataclass
@@ -46,7 +45,7 @@ class TestResult:
     passed: bool
     failed: bool
     output: str
-    error: Optional[str] = None
+    error: str | None = None
     test_count: int = 0
     failed_count: int = 0
 
@@ -158,7 +157,7 @@ class AutonomousTDDAgent:
         # Initialize experiment logger for automatic TDD cycle tracking
         self.experiment_logger = ExperimentLogger(playbook_version="1.0.0")
 
-        logger.info(f"AutonomousTDDAgent initialized")
+        logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
         logger.info(f"  Test dir: {test_dir}")
         logger.info(f"  Src dir: {src_dir}")
@@ -168,10 +167,10 @@ class AutonomousTDDAgent:
     def build_feature(
         self,
         requirement: str,
-        gherkin_dir: Optional[Path] = None,
-        project_root: Optional[Path] = None,
-        source_dir: Optional[Path] = None,
-        test_dir: Optional[Path] = None
+        gherkin_dir: Path | None = None,
+        project_root: Path | None = None,
+        source_dir: Path | None = None,
+        test_dir: Path | None = None
     ) -> TDDResult:
         """
         Build complete feature autonomously using TDD.
@@ -253,9 +252,9 @@ class AutonomousTDDAgent:
                 results.append(cycle_result)
 
                 if cycle_result.skipped:
-                    logger.info(f"  ⏭️  Cycle skipped (redundant test)")
+                    logger.info("  ⏭️  Cycle skipped (redundant test)")
                 else:
-                    logger.info(f"  ✅ Cycle complete")
+                    logger.info("  ✅ Cycle complete")
             except Exception as e:
                 logger.error(f"  ❌ Cycle failed: {e}")
                 raise
@@ -443,7 +442,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         return "\n".join(summaries)
 
-    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: Optional[str] = None, gherkin_scenarios: Optional[list[dict]] = None) -> TestIncrement | None:
+    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: str | None = None, gherkin_scenarios: list[dict] | None = None) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
 
@@ -604,7 +603,7 @@ Output EITHER:
 
         # Check if complete
         if "COMPLETE" in response.upper() and "|" not in response:
-            logger.info(f"  ✓ LLM determined requirement is satisfied")
+            logger.info("  ✓ LLM determined requirement is satisfied")
             return None
 
         # Parse response
@@ -675,10 +674,10 @@ Output EITHER:
                     license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
                 )
                 self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-                logger.info(f"      Stored redundancy pattern")
+                logger.info("      Stored redundancy pattern")
 
             # Refine test to make it more specific/strict
-            logger.info(f"  🔧 REFINING: Strengthening test to make it fail...")
+            logger.info("  🔧 REFINING: Strengthening test to make it fail...")
             refined_test_code = self._refine_test_to_fail(
                 increment=increment,
                 test_code=test_code,
@@ -699,7 +698,7 @@ Output EITHER:
 
             # Reassemble test file with refined test
             self._assemble_test_file(increment.test_file, increment.implementation_file)
-            logger.info(f"      ✓ Test refined and reloaded")
+            logger.info("      ✓ Test refined and reloaded")
 
             # Retry RED phase with refined test
             red_result = self._run_tests()
@@ -711,7 +710,7 @@ Output EITHER:
                 f"indicating the behavior is already fully implemented."
             )
             logger.info(f"  ⏭️  SKIPPING: {skip_reason}")
-            logger.info(f"  ✓ Moving to next increment...")
+            logger.info("  ✓ Moving to next increment...")
 
             # Return a skipped cycle result
             return CycleResult(
@@ -727,7 +726,7 @@ Output EITHER:
                 skip_reason=skip_reason
             )
 
-        logger.info(f"  ⚙️  Running tests... FAILED (expected)")
+        logger.info("  ⚙️  Running tests... FAILED (expected)")
 
         # GREEN: Write minimal code (with retry logic and in-loop learning)
         logger.info("  🟢 GREEN: Writing minimal code...")
@@ -765,7 +764,7 @@ Output EITHER:
 
                     # If test correction is suggested, APPLY IT automatically
                     if failure_analysis.get("test_correction"):
-                        logger.info(f"      🔧 Applying test correction...")
+                        logger.info("      🔧 Applying test correction...")
                         corrected = self._apply_test_correction(
                             increment.test_file,
                             increment.implementation_file,
@@ -776,9 +775,9 @@ Output EITHER:
                         )
                         if corrected:
                             test_code = increment.test_file.read_text()  # Reload corrected test
-                            logger.info(f"      ✓ Test corrected and reloaded")
+                            logger.info("      ✓ Test corrected and reloaded")
                         else:
-                            logger.warning(f"      ⚠️  Test correction failed, continuing with original test")
+                            logger.warning("      ⚠️  Test correction failed, continuing with original test")
 
             impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
             previous_impl_code = impl_code  # Save for learning if this attempt fails
@@ -789,7 +788,7 @@ Output EITHER:
 
             green_result = self._run_tests()
             if green_result.all_passed:
-                logger.info(f"  ⚙️  Running tests... PASSED ✓")
+                logger.info("  ⚙️  Running tests... PASSED ✓")
                 break
             else:
                 logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
@@ -1286,8 +1285,9 @@ class OAuth:
             return []
 
         # Use standard ACE learning flow
-        from src.storage.schemas import TaskInput, EnvironmentFeedback
         import uuid
+
+        from src.storage.schemas import EnvironmentFeedback, TaskInput
 
         task = TaskInput(
             id=str(uuid.uuid4()),
@@ -2183,7 +2183,7 @@ Output ONLY the JSON, no other text."""
                 self._assemble_test_file(test_file, implementation_file)
                 return True
             else:
-                logger.warning(f"Corrected code failed validation")
+                logger.warning("Corrected code failed validation")
                 return False
 
         except Exception as e:

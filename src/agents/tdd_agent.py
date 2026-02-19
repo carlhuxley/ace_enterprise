@@ -9,21 +9,17 @@ This agent follows TDD workflow:
 
 The agent works with real project structures and separate test files.
 """
+import re
 import subprocess
 from pathlib import Path
-from typing import Optional
-import re
 
 from src.core.curator.module import Curator
 from src.core.generator.module import Generator
 from src.core.reflector.module import Reflector
 from src.playbook.manager import PlaybookManager
 from src.storage.schemas import (
-    CuratorOutput,
     EnvironmentFeedback,
-    GeneratorOutput,
     PlaybookCreate,
-    ReflectorOutput,
     TaskInput,
 )
 from src.utils.llm_client import LLMClient
@@ -42,9 +38,9 @@ class TDDAgent:
 
     def __init__(
         self,
-        playbook_manager: Optional[PlaybookManager] = None,
-        llm_client: Optional[LLMClient] = None,
-        playbook_id: Optional[str] = None,
+        playbook_manager: PlaybookManager | None = None,
+        llm_client: LLMClient | None = None,
+        playbook_id: str | None = None,
         language: str = "python",
     ):
         """
@@ -80,7 +76,7 @@ class TDDAgent:
     def run_tests(
         self,
         test_path: Path,
-        specific_test: Optional[str] = None,
+        specific_test: str | None = None,
     ) -> tuple[bool, str, list[str]]:
         """
         Run tests and return results.
@@ -100,7 +96,7 @@ class TDDAgent:
     def _run_python_tests(
         self,
         test_path: Path,
-        specific_test: Optional[str] = None,
+        specific_test: str | None = None,
     ) -> tuple[bool, str, list[str]]:
         """Run Python tests with pytest."""
         cmd = [
@@ -157,7 +153,7 @@ class TDDAgent:
         self,
         test_path: Path,
         impl_path: Path,
-        test_name: Optional[str] = None,
+        test_name: str | None = None,
         max_iterations: int = 3,
     ) -> dict:
         """
@@ -258,7 +254,7 @@ class TDDAgent:
     def _create_task(
         self,
         test_content: str,
-        test_name: Optional[str],
+        test_name: str | None,
         impl_path: Path,
         iteration: int,
     ) -> TaskInput:

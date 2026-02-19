@@ -1,24 +1,20 @@
 """Unified query interface for MLflow runs + ACE knowledge."""
 
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 try:
     import mlflow
-    from mlflow.tracking import MlflowClient
     from mlflow.entities import Run
+    from mlflow.tracking import MlflowClient
     MLFLOW_AVAILABLE = True
 except ImportError:
     MLFLOW_AVAILABLE = False
     Run = Any  # Type placeholder when MLflow not available
 
-from .experiment_knowledge import (
-    MLExperimentKnowledge,
-    ExperimentDecision,
-    ExperimentPattern
-)
+from .experiment_knowledge import ExperimentDecision, ExperimentPattern, MLExperimentKnowledge
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +28,19 @@ class EnrichedRun:
     experiment_id: str
     status: str
     start_time: int
-    end_time: Optional[int]
-    params: Dict[str, Any]
-    metrics: Dict[str, float]
-    tags: Dict[str, str]
+    end_time: int | None
+    params: dict[str, Any]
+    metrics: dict[str, float]
+    tags: dict[str, str]
 
     # ACE knowledge
-    decisions: List[ExperimentDecision]
-    related_patterns: List[ExperimentPattern]
+    decisions: list[ExperimentDecision]
+    related_patterns: list[ExperimentPattern]
 
     # Computed insights
     decision_count: int
     has_failed_decisions: bool
-    applied_patterns: List[str]  # Pattern names that were applied
+    applied_patterns: list[str]  # Pattern names that were applied
 
 
 class MLflowKnowledgeQuery:
@@ -69,8 +65,8 @@ class MLflowKnowledgeQuery:
     def __init__(
         self,
         experiment_name: str,
-        knowledge_dir: Optional[Path] = None,
-        mlflow_tracking_uri: Optional[str] = None
+        knowledge_dir: Path | None = None,
+        mlflow_tracking_uri: str | None = None
     ):
         """Initialize query interface.
 
@@ -112,9 +108,9 @@ class MLflowKnowledgeQuery:
 
     def get_enriched_runs(
         self,
-        filter_string: Optional[str] = None,
+        filter_string: str | None = None,
         max_results: int = 100
-    ) -> List[EnrichedRun]:
+    ) -> list[EnrichedRun]:
         """Get MLflow runs enriched with ACE knowledge.
 
         Args:
@@ -182,10 +178,10 @@ class MLflowKnowledgeQuery:
 
     def find_runs_by_decision(
         self,
-        question: Optional[str] = None,
-        decision: Optional[str] = None,
-        outcome: Optional[str] = None
-    ) -> List[EnrichedRun]:
+        question: str | None = None,
+        decision: str | None = None,
+        outcome: str | None = None
+    ) -> list[EnrichedRun]:
         """Find runs by decision criteria.
 
         Args:
@@ -221,7 +217,7 @@ class MLflowKnowledgeQuery:
     def find_runs_by_pattern(
         self,
         pattern_name: str
-    ) -> List[EnrichedRun]:
+    ) -> list[EnrichedRun]:
         """Find runs where a specific pattern was observed.
 
         Args:
@@ -250,10 +246,10 @@ class MLflowKnowledgeQuery:
 
     def get_recommendations_for_params(
         self,
-        params: Dict[str, Any],
-        domain_tags: Optional[List[str]] = None,
+        params: dict[str, Any],
+        domain_tags: list[str] | None = None,
         min_success_rate: float = 0.7
-    ) -> List[Tuple[ExperimentPattern, str]]:
+    ) -> list[tuple[ExperimentPattern, str]]:
         """Get pattern recommendations for given parameters.
 
         Args:
@@ -304,8 +300,8 @@ class MLflowKnowledgeQuery:
 
     def get_decision_history(
         self,
-        question_keyword: Optional[str] = None
-    ) -> List[ExperimentDecision]:
+        question_keyword: str | None = None
+    ) -> list[ExperimentDecision]:
         """Get decision history across all runs.
 
         Args:
@@ -332,7 +328,7 @@ class MLflowKnowledgeQuery:
         self,
         run_id_1: str,
         run_id_2: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compare two runs including their decisions and patterns.
 
         Args:

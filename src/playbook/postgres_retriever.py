@@ -4,7 +4,6 @@ PostgreSQL-backed Bullet Retriever using pgvector.
 Replaces in-memory retrieval with PostgreSQL vector similarity search.
 """
 import logging
-from typing import Optional
 
 from src.config.settings import settings
 from src.playbook.postgres_adapter import PostgresPlaybookAdapter
@@ -27,8 +26,8 @@ class PostgresBulletRetriever:
     def __init__(
         self,
         playbook_adapter: PostgresPlaybookAdapter,
-        top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
+        top_k: int | None = None,
+        similarity_threshold: float | None = None,
     ) -> None:
         """
         Initialize PostgreSQL retriever.
@@ -49,10 +48,10 @@ class PostgresBulletRetriever:
     def retrieve(
         self,
         query: str,
-        playbook_id: Optional[str] = None,
-        filter_section: Optional[str] = None,
-        min_helpful_ratio: Optional[float] = None,
-        top_k: Optional[int] = None,
+        playbook_id: str | None = None,
+        filter_section: str | None = None,
+        min_helpful_ratio: float | None = None,
+        top_k: int | None = None,
     ) -> list[tuple[Bullet, float]]:
         """
         Retrieve most relevant bullets using PostgreSQL vector search.
@@ -99,9 +98,9 @@ class PostgresBulletRetriever:
         self,
         query: str,
         bullets: list[Bullet],
-        query_embedding: Optional[list[float]] = None,
-        filter_section: Optional[str] = None,
-        min_helpful_ratio: Optional[float] = None,
+        query_embedding: list[float] | None = None,
+        filter_section: str | None = None,
+        min_helpful_ratio: float | None = None,
     ) -> list[tuple[Bullet, float]]:
         """
         Retrieve from a pre-filtered list of bullets (fallback to in-memory).

@@ -7,7 +7,6 @@ Defines the data structures for context-aware knowledge retrieval.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from src.storage.schemas import Bullet
 
@@ -39,12 +38,12 @@ class RetrievalContext:
     """
 
     # Who is asking?
-    team_id: Optional[str] = None
-    user_id: Optional[str] = None
+    team_id: str | None = None
+    user_id: str | None = None
 
     # What project/codebase?
-    project_id: Optional[str] = None
-    project_path: Optional[str] = None
+    project_id: str | None = None
+    project_path: str | None = None
 
     # What tech stack?
     tech_stack: dict[str, str] = field(default_factory=dict)
@@ -54,11 +53,11 @@ class RetrievalContext:
     query_timestamp: datetime = field(default_factory=datetime.utcnow)
 
     # What domain?
-    domain: Optional[str] = None
+    domain: str | None = None
     """e.g., "fintech", "healthcare", "ml-ops" """
 
     # Session context
-    session_id: Optional[str] = None
+    session_id: str | None = None
     """Current conversation/session ID for continuity."""
 
 
@@ -106,7 +105,7 @@ class RankedBullet:
     """Should this pattern be applied?"""
 
     # Explanation
-    reasoning: Optional[str] = None
+    reasoning: str | None = None
     """Why this verdict was reached."""
 
 
@@ -131,7 +130,7 @@ class KnowledgeResponse:
 
     # Query metadata
     query: str = ""
-    context: Optional[RetrievalContext] = None
+    context: RetrievalContext | None = None
     retrieval_time_ms: float = 0.0
 
     @property

@@ -13,6 +13,7 @@ The audit service runs as a separate deployment with separate credentials.
 Reference: 202602121757-audit-trail-independence-principle.md
 """
 
+from src.audit.client import AuditClient, NoOpAuditClient, get_audit_client
 from src.audit.schemas import (
     AuditEvent,
     AuditEventCreate,
@@ -20,7 +21,6 @@ from src.audit.schemas import (
     AuditQuery,
     AuditResult,
 )
-from src.audit.client import AuditClient, NoOpAuditClient, get_audit_client
 from src.audit.store import AuditStore
 
 __all__ = [

@@ -5,7 +5,7 @@ Replaces file-based storage with PostgreSQL experiment_logs table.
 """
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 try:
     import mlflow
@@ -14,8 +14,8 @@ try:
 except ImportError:
     MLFLOW_AVAILABLE = False
 
-from src.storage.experiment_logger import ExperimentLogger
 from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+from src.storage.experiment_logger import ExperimentLogger
 from src.storage.schemas import BulletCreate
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class PostgresACEMLflowCallback:
         experiment_name: str,
         playbook_id: str,
         playbook_version: str = "1.0.0",
-        human_contributor: Optional[str] = None,
+        human_contributor: str | None = None,
     ):
         """
         Initialize PostgreSQL-backed MLflow callback.
@@ -86,13 +86,13 @@ class PostgresACEMLflowCallback:
         self.mlflow_client = MlflowClient()
 
         # Track current experiment
-        self.current_run_id: Optional[str] = None
+        self.current_run_id: str | None = None
         self.decisions: list[dict[str, Any]] = []
         self.patterns: list[dict[str, Any]] = []
 
         logger.info(f"Initialized PostgreSQL MLflow callback for: {experiment_name}")
 
-    def _get_current_run_id(self) -> Optional[str]:
+    def _get_current_run_id(self) -> str | None:
         """Get current MLflow run ID."""
         active_run = mlflow.active_run()
         return active_run.info.run_id if active_run else None
@@ -102,8 +102,8 @@ class PostgresACEMLflowCallback:
         question: str,
         decision: str,
         rationale: str,
-        alternatives_considered: Optional[list[str]] = None,
-        context: Optional[dict[str, Any]] = None,
+        alternatives_considered: list[str] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Log a decision made during experimentation.
@@ -149,9 +149,9 @@ class PostgresACEMLflowCallback:
         description: str,
         when_to_apply: str,
         success_rate: float,
-        implementation: Optional[str] = None,
-        antipatterns: Optional[list[str]] = None,
-        domain_tags: Optional[list[str]] = None,
+        implementation: str | None = None,
+        antipatterns: list[str] | None = None,
+        domain_tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Log a learned pattern that should be added to playbook.

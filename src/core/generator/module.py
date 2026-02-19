@@ -4,7 +4,7 @@ Based on PRD Section 2.2.1: Generator Module
 """
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from src.config.settings import settings
 from src.playbook.manager import PlaybookManager
@@ -31,8 +31,8 @@ class Generator:
     def __init__(
         self,
         playbook_manager: PlaybookManager,
-        llm_client: Optional[LLMClient] = None,
-        retriever: Optional[BulletRetriever] = None,
+        llm_client: LLMClient | None = None,
+        retriever: BulletRetriever | None = None,
     ) -> None:
         """
         Initialize Generator.
@@ -50,7 +50,7 @@ class Generator:
         self,
         task: TaskInput,
         playbook_id: str,
-        query_embedding: Optional[list[float]] = None,
+        query_embedding: list[float] | None = None,
     ) -> GeneratorOutput:
         """
         Execute a task using playbook-guided generation.
@@ -152,7 +152,7 @@ class Generator:
         trajectory, solution = self._parse_response(content)
 
         # Request feedback on bullets (will be provided later by user/environment)
-        bullet_feedback = {bullet_id: "neutral" for bullet_id in bullets_used}
+        bullet_feedback = dict.fromkeys(bullets_used, "neutral")
 
         output = GeneratorOutput(
             trajectory=trajectory,

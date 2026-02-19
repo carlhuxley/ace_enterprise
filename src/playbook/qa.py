@@ -6,7 +6,6 @@ learned patterns. Supports single-model and ensemble consensus answers.
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 from src.playbook.manager import PlaybookManager
 from src.playbook.retrieval import BulletRetriever
@@ -24,8 +23,8 @@ class QAAnswer:
     answer: str
     confidence: float  # 0.0-1.0 based on playbook coverage
     sources: list[Bullet] = field(default_factory=list)  # Playbook bullets used
-    model_id: Optional[str] = None  # Which model answered (if single model)
-    consensus: Optional[dict] = None  # If ensemble: {model: answer, votes: ...}
+    model_id: str | None = None  # Which model answered (if single model)
+    consensus: dict | None = None  # If ensemble: {model: answer, votes: ...}
     playbook_coverage: float = 0.0  # How much playbook knowledge was available
 
 
@@ -43,7 +42,7 @@ class PlaybookQA:
     def __init__(
         self,
         playbook_manager: PlaybookManager,
-        default_model: Optional[tuple[str, str]] = None,
+        default_model: tuple[str, str] | None = None,
     ):
         """
         Initialize Q&A system.
@@ -66,7 +65,7 @@ class PlaybookQA:
     def ask(
         self,
         question: str,
-        domain: Optional[str] = None,
+        domain: str | None = None,
         top_k: int = 5,
     ) -> QAAnswer:
         """
@@ -119,7 +118,7 @@ class PlaybookQA:
         self,
         question: str,
         models: list[tuple[str, str]],
-        domain: Optional[str] = None,
+        domain: str | None = None,
         top_k: int = 5,
     ) -> QAAnswer:
         """
@@ -187,7 +186,7 @@ class PlaybookQA:
             playbook_coverage=len(relevant_bullets) / max(top_k, 1),
         )
 
-    def _get_relevant_bullets(self, domain: Optional[str] = None) -> list[Bullet]:
+    def _get_relevant_bullets(self, domain: str | None = None) -> list[Bullet]:
         """Get all bullets from playbooks (optionally filtered by domain)."""
         all_bullets = []
 

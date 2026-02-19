@@ -10,9 +10,7 @@ Coordinates:
 import concurrent.futures
 import logging
 from datetime import datetime
-from typing import Optional
 
-from src.config.settings import settings
 from src.core.curator.module import Curator
 from src.core.generator.module import Generator
 from src.core.reflector.module import Reflector
@@ -53,7 +51,7 @@ class EnsembleLearner:
         self,
         models: list[tuple[str, str] | tuple[str, str, str]],  # [(provider, model_name[, base_url]), ...]
         playbook_id: str,
-        voting_strategy: Optional[VotingStrategy] = None,
+        voting_strategy: VotingStrategy | None = None,
         similarity_threshold: float = 0.85,
         enable_deliberation: bool = True,
         deliberation_threshold_low: float = 0.4,
@@ -284,7 +282,7 @@ class EnsembleLearner:
         model: str,
         task: TaskInput,
         environment_feedback: EnvironmentFeedback,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
     ) -> list[ConsensusBullet]:
         """
         Execute Generator -> Reflector -> Curator for a single model.
@@ -746,7 +744,7 @@ Your reconsidered vote:"""
             vote_type = VoteType[vote_str]
         else:
             # Default to APPROVE if parsing fails
-            logger.warning(f"Could not parse vote type from response, defaulting to APPROVE")
+            logger.warning("Could not parse vote type from response, defaulting to APPROVE")
             vote_type = VoteType.APPROVE
 
         # Extract confidence

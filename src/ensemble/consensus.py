@@ -12,9 +12,7 @@ import uuid
 from collections import defaultdict
 
 from src.ensemble.models import (
-    BulletSection,
     ConsensusBullet,
-    VoteType,
 )
 from src.utils.embedding import get_embedding_service
 

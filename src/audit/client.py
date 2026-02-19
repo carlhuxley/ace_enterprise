@@ -16,10 +16,9 @@ Usage:
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime
-from typing import Optional
-import os
 
 import httpx
 
@@ -41,7 +40,7 @@ class AuditClient:
 
     def __init__(
         self,
-        endpoint: Optional[str] = None,
+        endpoint: str | None = None,
         timeout: float = 5.0,
         async_mode: bool = True,
     ):
@@ -56,7 +55,7 @@ class AuditClient:
         self.endpoint = endpoint or os.getenv("AUDIT_ENDPOINT", "http://localhost:8081")
         self.timeout = timeout
         self.async_mode = async_mode
-        self._client: Optional[httpx.Client] = None
+        self._client: httpx.Client | None = None
 
     def _get_client(self) -> httpx.Client:
         """Get or create HTTP client."""
@@ -68,9 +67,9 @@ class AuditClient:
         self,
         event: AuditEventCreate,
         *,
-        session_id: Optional[str] = None,
-        playbook_id: Optional[str] = None,
-        project_id: Optional[str] = None,
+        session_id: str | None = None,
+        playbook_id: str | None = None,
+        project_id: str | None = None,
     ) -> bool:
         """
         Emit an audit event.
@@ -128,12 +127,12 @@ class AuditClient:
         self,
         event_type: AuditEventType,
         actor_id: str,
-        payload: Optional[dict] = None,
+        payload: dict | None = None,
         *,
         actor_type: str = "agent",
-        session_id: Optional[str] = None,
-        playbook_id: Optional[str] = None,
-        project_id: Optional[str] = None,
+        session_id: str | None = None,
+        playbook_id: str | None = None,
+        project_id: str | None = None,
     ) -> bool:
         """
         Convenience method to emit an event without creating AuditEventCreate.

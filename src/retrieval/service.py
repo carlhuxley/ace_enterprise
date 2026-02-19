@@ -6,17 +6,13 @@ This is the main entry point for CGR³ functionality.
 """
 
 import logging
-import os
-from typing import Optional
 
-from src.playbook.retrieval import BulletRetriever
-from src.storage.schemas import Bullet
-from src.retrieval.schemas import (
-    RetrievalContext,
-    KnowledgeResponse,
-)
 from src.retrieval.cgr3_retriever import ContextGraphRetriever
-from src.retrieval.context_scorer import ContextScorer
+from src.retrieval.schemas import (
+    KnowledgeResponse,
+    RetrievalContext,
+)
+from src.storage.schemas import Bullet
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +55,8 @@ class InstitutionalKnowledgeService:
     def __init__(
         self,
         playbook_manager=None,
-        retriever: Optional[ContextGraphRetriever] = None,
-        default_playbook_id: Optional[str] = None,
+        retriever: ContextGraphRetriever | None = None,
+        default_playbook_id: str | None = None,
     ):
         """
         Initialize the knowledge service.
@@ -77,9 +73,9 @@ class InstitutionalKnowledgeService:
     def get_guidance(
         self,
         query: str,
-        context: Optional[RetrievalContext] = None,
-        playbook_id: Optional[str] = None,
-        domain: Optional[str] = None,
+        context: RetrievalContext | None = None,
+        playbook_id: str | None = None,
+        domain: str | None = None,
         top_k: int = 10,
         include_cross_playbook: bool = True,
     ) -> KnowledgeResponse:
@@ -122,7 +118,7 @@ class InstitutionalKnowledgeService:
         self,
         test_name: str,
         implementation_context: str,
-        context: Optional[RetrievalContext] = None,
+        context: RetrievalContext | None = None,
     ) -> KnowledgeResponse:
         """
         Get guidance specifically for TDD cycles.
@@ -148,7 +144,7 @@ class InstitutionalKnowledgeService:
     def get_guidance_for_implementation(
         self,
         feature_description: str,
-        context: Optional[RetrievalContext] = None,
+        context: RetrievalContext | None = None,
     ) -> KnowledgeResponse:
         """
         Get guidance for implementing a feature.
@@ -168,7 +164,7 @@ class InstitutionalKnowledgeService:
     def get_anti_patterns(
         self,
         context_description: str,
-        context: Optional[RetrievalContext] = None,
+        context: RetrievalContext | None = None,
     ) -> KnowledgeResponse:
         """
         Get anti-patterns to avoid.
@@ -188,8 +184,8 @@ class InstitutionalKnowledgeService:
 
     def _get_bullets(
         self,
-        playbook_id: Optional[str],
-        domain: Optional[str],
+        playbook_id: str | None,
+        domain: str | None,
         include_cross_playbook: bool,
     ) -> list[Bullet]:
         """
@@ -272,7 +268,7 @@ class InstitutionalKnowledgeService:
 
 
 # Module-level service instance
-_service_instance: Optional[InstitutionalKnowledgeService] = None
+_service_instance: InstitutionalKnowledgeService | None = None
 
 
 def get_knowledge_service(

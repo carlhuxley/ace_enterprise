@@ -1,10 +1,9 @@
 """Decision Record (ADR) generation - document what was built and why."""
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -18,25 +17,25 @@ class DecisionRecord:
     date: datetime
 
     # Context
-    gherkin_scenarios: Optional[str] = None
-    requirement: Optional[str] = None
+    gherkin_scenarios: str | None = None
+    requirement: str | None = None
 
     # Decision
     implementation_summary: str = ""
-    tests_generated: List[str] = None
-    files_created: List[str] = None
+    tests_generated: list[str] = None
+    files_created: list[str] = None
 
     # Rationale
-    design_decisions: List[str] = None
-    patterns_applied: List[str] = None
-    patterns_learned: List[str] = None
+    design_decisions: list[str] = None
+    patterns_applied: list[str] = None
+    patterns_learned: list[str] = None
 
     # Status
     status: str = "Accepted"  # "Proposed" | "Accepted" | "Deprecated"
 
     # Contributors
-    human_contributor: Optional[str] = None
-    ai_models: List[str] = None
+    human_contributor: str | None = None
+    ai_models: list[str] = None
 
     def __post_init__(self):
         """Initialize empty lists."""
@@ -138,7 +137,7 @@ class DecisionRecord:
 
         return "\n".join(md)
 
-    def save(self, directory: Path, filename: Optional[str] = None) -> Path:
+    def save(self, directory: Path, filename: str | None = None) -> Path:
         """Save ADR to file.
 
         Args:
@@ -167,12 +166,12 @@ class DecisionRecord:
 
 def generate_adr_from_tdd_result(
     feature_name: str,
-    gherkin_content: Optional[str],
-    files_created: List[str],
-    tests_generated: List[str],
-    patterns_learned: List[str],
-    human_contributor: Optional[str] = None,
-    ai_models: Optional[List[str]] = None
+    gherkin_content: str | None,
+    files_created: list[str],
+    tests_generated: list[str],
+    patterns_learned: list[str],
+    human_contributor: str | None = None,
+    ai_models: list[str] | None = None
 ) -> DecisionRecord:
     """Generate ADR from TDD result.
 

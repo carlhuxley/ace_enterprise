@@ -6,11 +6,10 @@ along a specific dimension (temporal, team, tech stack, project).
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
+from src.retrieval.schemas import ContextGap, RetrievalContext
 from src.storage.schemas import Bullet
-from src.retrieval.schemas import RetrievalContext, ContextGap
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class ContextScorer:
 
     def __init__(
         self,
-        weights: Optional[dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
         temporal_decay_days: int = 365,
     ):
         """
@@ -97,7 +96,7 @@ class ContextScorer:
         self,
         bullet: Bullet,
         context: RetrievalContext,
-    ) -> tuple[float, Optional[ContextGap]]:
+    ) -> tuple[float, ContextGap | None]:
         """
         Score temporal validity.
 
@@ -106,7 +105,7 @@ class ContextScorer:
         - How old is the pattern? (temporal decay)
         - Does temporal_confidence indicate reliability?
         """
-        now = context.query_timestamp or datetime.now(timezone.utc)
+        now = context.query_timestamp or datetime.now(UTC)
 
         # Check validity window
         if bullet.valid_from and bullet.valid_from > now:
@@ -157,7 +156,7 @@ class ContextScorer:
         self,
         bullet: Bullet,
         context: RetrievalContext,
-    ) -> tuple[float, Optional[ContextGap]]:
+    ) -> tuple[float, ContextGap | None]:
         """
         Score team locality.
 
@@ -188,7 +187,7 @@ class ContextScorer:
         self,
         bullet: Bullet,
         context: RetrievalContext,
-    ) -> tuple[float, Optional[ContextGap]]:
+    ) -> tuple[float, ContextGap | None]:
         """
         Score tech stack compatibility.
 
@@ -272,7 +271,7 @@ class ContextScorer:
         self,
         bullet: Bullet,
         context: RetrievalContext,
-    ) -> tuple[float, Optional[ContextGap]]:
+    ) -> tuple[float, ContextGap | None]:
         """
         Score project relevance.
 
@@ -305,7 +304,7 @@ class ContextScorer:
         self,
         bullet: Bullet,
         context: RetrievalContext,
-    ) -> tuple[float, Optional[ContextGap]]:
+    ) -> tuple[float, ContextGap | None]:
         """
         Score domain relevance.
 

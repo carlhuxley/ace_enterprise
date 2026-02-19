@@ -3,7 +3,6 @@ Embedding Service - Generate embeddings for playbook bullets.
 Uses local sentence-transformers model (no API calls required).
 """
 import logging
-from typing import Optional
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -27,8 +26,8 @@ class EmbeddingService:
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        device: Optional[str] = None,
+        model_name: str | None = None,
+        device: str | None = None,
     ) -> None:
         """
         Initialize embedding service.
@@ -44,7 +43,7 @@ class EmbeddingService:
 
         try:
             self.model = SentenceTransformer(self.model_name, device=self.device)
-            logger.info(f"✓ Embedding model loaded successfully")
+            logger.info("✓ Embedding model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
@@ -145,7 +144,7 @@ class EmbeddingService:
 
 
 # Global singleton instance (lazy-loaded)
-_embedding_service: Optional[EmbeddingService] = None
+_embedding_service: EmbeddingService | None = None
 
 
 def get_embedding_service() -> EmbeddingService:

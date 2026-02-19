@@ -2,9 +2,8 @@
 Curator Module - Synthesize insights into playbook updates.
 Based on PRD Section 2.2.3: Curator Module
 """
-import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.config.settings import settings
 from src.playbook.manager import PlaybookManager
@@ -30,9 +29,9 @@ class Curator:
     def __init__(
         self,
         playbook_manager: PlaybookManager,
-        llm_client: Optional[LLMClient] = None,
-        token_budget_per_section: Optional[int] = None,
-        enable_redundancy_checking: Optional[bool] = None,
+        llm_client: LLMClient | None = None,
+        token_budget_per_section: int | None = None,
+        enable_redundancy_checking: bool | None = None,
     ) -> None:
         """
         Initialize Curator.
@@ -60,7 +59,7 @@ class Curator:
         self,
         reflector_output: ReflectorOutput,
         playbook_id: str,
-        task_context: Optional[dict[str, Any]] = None,
+        task_context: dict[str, Any] | None = None,
     ) -> CuratorOutput:
         """
         Synthesize reflector insights into playbook updates.
@@ -107,7 +106,7 @@ class Curator:
         reflector_output: ReflectorOutput,
         playbook: Playbook,
         playbook_stats: dict[str, Any],
-        task_context: Optional[dict[str, Any]],
+        task_context: dict[str, Any] | None,
     ) -> tuple[list[DeltaBullet], str]:
         """
         Synthesize insights into actionable bullets.
@@ -166,7 +165,7 @@ Generate bullets that will genuinely help prevent similar mistakes in the future
         reflector_output: ReflectorOutput,
         playbook: Playbook,
         playbook_stats: dict[str, Any],
-        task_context: Optional[dict[str, Any]],
+        task_context: dict[str, Any] | None,
     ) -> str:
         """Build prompt for bullet synthesis."""
         prompt = f"""# Playbook Update Request

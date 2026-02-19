@@ -8,6 +8,8 @@ For now, they serve as the data model specification.
 from datetime import datetime
 from typing import Any
 
+# pgvector integration for semantic search
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -22,9 +24,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-# pgvector integration for semantic search
-from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 

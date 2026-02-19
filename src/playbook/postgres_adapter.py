@@ -6,21 +6,18 @@ for storage and retrieval instead of file-based JSON storage.
 """
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 from src.config.settings import settings
 from src.storage.repository import PlaybookRepository
 from src.storage.schemas import (
     Bullet,
     BulletCreate,
-    DeltaBullet,
     Playbook,
     PlaybookCreate,
     PlaybookMetadata,
 )
 from src.utils.embedding import get_embedding_service
-from src.utils.id_generator import generate_bullet_id, generate_playbook_id
+from src.utils.id_generator import generate_playbook_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +33,7 @@ class PostgresPlaybookAdapter:
     - Automatic embedding generation
     """
 
-    def __init__(self, storage_path: Optional[str] = None) -> None:
+    def __init__(self, storage_path: str | None = None) -> None:
         """
         Initialize PostgreSQL adapter.
 
@@ -103,7 +100,7 @@ class PostgresPlaybookAdapter:
 
         return playbook
 
-    def get_playbook(self, playbook_id: str) -> Optional[Playbook]:
+    def get_playbook(self, playbook_id: str) -> Playbook | None:
         """
         Retrieve a playbook from PostgreSQL.
 
@@ -270,7 +267,7 @@ class PostgresPlaybookAdapter:
     def semantic_search(
         self,
         query: str,
-        playbook_id: Optional[str] = None,
+        playbook_id: str | None = None,
         top_k: int = 5,
         similarity_threshold: float = 0.3,
     ) -> list[tuple[Bullet, float]]:
@@ -332,6 +329,7 @@ class PostgresPlaybookAdapter:
         # Note: The repository doesn't have a list method yet,
         # so we'll need to add one or query directly
         from sqlalchemy import select
+
         from src.storage.models import PlaybookModel
 
         with self.repo.get_session() as session:

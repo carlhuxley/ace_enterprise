@@ -8,7 +8,7 @@ their execution logic.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("ace-mcp.tools")
 
@@ -30,8 +30,8 @@ class ACETools:
 
     def __init__(
         self,
-        playbook_id: Optional[str] = None,
-        playbook_file: Optional[Path] = None,
+        playbook_id: str | None = None,
+        playbook_file: Path | None = None,
         enable_tdd: bool = True,
     ):
         self.playbook_id = playbook_id
@@ -362,7 +362,7 @@ class ACETools:
                 "success": True,
                 "bullet_id": bullet.id,
                 "playbook_id": playbook_id,
-                "message": f"Knowledge added successfully",
+                "message": "Knowledge added successfully",
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -507,8 +507,9 @@ class ACETools:
             return {"error": "TDD tools not enabled"}
 
         try:
-            from src.agents.autonomous_tdd_agent import AutonomousTDDAgent  # noqa: F401
             from pathlib import Path
+
+            from src.agents.autonomous_tdd_agent import AutonomousTDDAgent  # noqa: F401
 
             project_path = Path(args["project_path"])
             _src_dir = project_path / args.get("src_dir", "src")

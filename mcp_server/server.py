@@ -8,13 +8,12 @@ exposing ACE's institutional knowledge service.
 Protocol: JSON-RPC 2.0 over stdio
 """
 
-import sys
-import json
 import argparse
+import json
 import logging
+import sys
 from pathlib import Path
-from typing import Any, Optional
-from datetime import datetime
+from typing import Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -51,8 +50,8 @@ class ACEMCPServer:
 
     def __init__(
         self,
-        playbook_id: Optional[str] = None,
-        playbook_file: Optional[Path] = None,
+        playbook_id: str | None = None,
+        playbook_file: Path | None = None,
         enable_tdd: bool = True,
     ):
         """
@@ -74,7 +73,7 @@ class ACEMCPServer:
             enable_tdd=enable_tdd,
         )
 
-        self._log(f"ACE MCP Server initialized")
+        self._log("ACE MCP Server initialized")
         self._log(f"Playbook: {playbook_id or playbook_file or 'default'}")
 
     def _log(self, message: str, level: str = "info"):
@@ -102,7 +101,7 @@ class ACEMCPServer:
                 self._log(f"Error handling request: {e}", "error")
                 self._send_error(-32603, str(e), None)
 
-    def _handle_request(self, request: dict) -> Optional[dict]:
+    def _handle_request(self, request: dict) -> dict | None:
         """Handle a JSON-RPC request."""
         method = request.get("method")
         params = request.get("params", {})

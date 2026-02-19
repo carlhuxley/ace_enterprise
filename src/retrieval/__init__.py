@@ -14,13 +14,13 @@ Key components:
 Enterprise-only feature that adds reasoning on top of semantic retrieval.
 """
 
+from src.retrieval.cgr3_retriever import ContextGraphRetriever
 from src.retrieval.schemas import (
-    RetrievalContext,
+    KnowledgeResponse,
     RankedBullet,
     ReasoningVerdict,
-    KnowledgeResponse,
+    RetrievalContext,
 )
-from src.retrieval.cgr3_retriever import ContextGraphRetriever
 from src.retrieval.service import InstitutionalKnowledgeService, get_knowledge_service
 
 __all__ = [

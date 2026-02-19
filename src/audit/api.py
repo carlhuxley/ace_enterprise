@@ -12,9 +12,8 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional
 
-from fastapi import FastAPI, Query, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.audit.schemas import (
@@ -67,14 +66,14 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         description="Search and retrieve audit events with filtering and pagination.",
     )
     async def query_events(
-        start_time: Optional[datetime] = Query(None, description="Filter events after this time"),
-        end_time: Optional[datetime] = Query(None, description="Filter events before this time"),
-        event_types: Optional[str] = Query(None, description="Comma-separated event types"),
-        actor_type: Optional[str] = Query(None, description="Filter by actor type"),
-        actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
-        session_id: Optional[str] = Query(None, description="Filter by session ID"),
-        playbook_id: Optional[str] = Query(None, description="Filter by playbook ID"),
-        project_id: Optional[str] = Query(None, description="Filter by project ID"),
+        start_time: datetime | None = Query(None, description="Filter events after this time"),
+        end_time: datetime | None = Query(None, description="Filter events before this time"),
+        event_types: str | None = Query(None, description="Comma-separated event types"),
+        actor_type: str | None = Query(None, description="Filter by actor type"),
+        actor_id: str | None = Query(None, description="Filter by actor ID"),
+        session_id: str | None = Query(None, description="Filter by session ID"),
+        playbook_id: str | None = Query(None, description="Filter by playbook ID"),
+        project_id: str | None = Query(None, description="Filter by project ID"),
         limit: int = Query(100, ge=1, le=1000, description="Max results to return"),
         offset: int = Query(0, ge=0, description="Number of results to skip"),
         order_by: str = Query("timestamp", description="Field to order by"),

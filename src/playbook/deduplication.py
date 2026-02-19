@@ -3,7 +3,6 @@ Semantic Deduplication for Playbook Bullets.
 Based on PRD Section 4.2: Semantic De-duplication
 """
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -26,7 +25,7 @@ class BulletDeduplicator:
 
     def __init__(
         self,
-        similarity_threshold: Optional[float] = None,
+        similarity_threshold: float | None = None,
     ) -> None:
         """
         Initialize deduplicator.

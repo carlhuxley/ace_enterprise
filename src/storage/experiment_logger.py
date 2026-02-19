@@ -6,7 +6,7 @@ interface for both TDD cycles and ML training runs.
 """
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from src.storage.models import ExperimentLogModel
 from src.storage.repository import PlaybookRepository
@@ -26,7 +26,7 @@ class ExperimentLogger:
     - Curator: What should we add to the playbook?
     """
 
-    def __init__(self, playbook_version: str, repository: Optional[PlaybookRepository] = None):
+    def __init__(self, playbook_version: str, repository: PlaybookRepository | None = None):
         """
         Initialize experiment logger.
 
@@ -44,8 +44,8 @@ class ExperimentLogger:
         generator_data: dict[str, Any],
         environment_data: dict[str, Any],
         result: str,  # "SUCCESS" | "FAILED" | "TIMEOUT" | "ERROR"
-        reflector_data: Optional[dict[str, Any]] = None,
-        curator_data: Optional[dict[str, Any]] = None,
+        reflector_data: dict[str, Any] | None = None,
+        curator_data: dict[str, Any] | None = None,
         playbook_updated: bool = False,
         performance_delta: float = 0.0,
         checkpoint_created: bool = False,
@@ -184,7 +184,7 @@ class ExperimentLogger:
         metrics: dict[str, float],
         decisions: list[dict[str, Any]],
         patterns_learned: list[dict[str, Any]],
-        mlflow_run_id: Optional[str] = None,
+        mlflow_run_id: str | None = None,
         success: bool = True,
     ) -> ExperimentLogModel:
         """
@@ -231,8 +231,8 @@ class ExperimentLogger:
     def get_recent_experiments(
         self,
         limit: int = 10,
-        result_filter: Optional[str] = None,
-        experiment_type: Optional[str] = None,
+        result_filter: str | None = None,
+        experiment_type: str | None = None,
     ) -> list[ExperimentLogModel]:
         """
         Get recent experiments from the database.
