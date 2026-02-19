@@ -16,12 +16,14 @@ class ExperimentDecision:
     question: str  # "Which optimizer to use?"
     decision: str  # "Adam with lr=0.001"
     rationale: str  # "AdamW showed instability in early experiments"
-    alternatives_considered: list[str]  # ["SGD", "AdamW", "RMSprop"]
-    context: dict[str, Any]  # {"previous_run_id": "abc123", "metric_observed": "loss_spike"}
+
+    # Optional fields with defaults
+    alternatives_considered: list[str] = field(default_factory=list)  # ["SGD", "AdamW", "RMSprop"]
+    context: dict[str, Any] = field(default_factory=dict)  # {"previous_run_id": "abc123"}
 
     # Provenance
     human_contributor: str | None = None
-    ai_models: list[dict[str, str]] = field(default_factory=list)  # [{"provider": "openai", "model": "gpt-4"}]
+    ai_models: list[dict[str, str]] = field(default_factory=list)
     conversation_id: str | None = None
 
     # Outcome tracking
@@ -64,17 +66,19 @@ class ExperimentPattern:
     # Evidence
     observed_in_experiments: list[str]  # List of MLflow run_ids
     success_rate: float  # 0.0 to 1.0
-    avg_improvement: float | None  # Metric improvement when pattern applied
 
     # Application guidance
     when_to_apply: str  # "When batch_size > 256 and using Adam optimizer"
     implementation: str  # Code snippet or configuration
-    antipatterns: list[str]  # ["Don't combine with learning rate decay in first epoch"]
 
     # Provenance
     discovered_date: datetime
-    experiments_count: int
-    domain_tags: list[str]  # ["computer_vision", "nlp", "tabular"]
+
+    # Optional fields with defaults
+    avg_improvement: float | None = None  # Metric improvement when pattern applied
+    antipatterns: list[str] = field(default_factory=list)
+    experiments_count: int = 1
+    domain_tags: list[str] = field(default_factory=list)
 
     # Quality signals
     usefulness_score: float = 0.0
@@ -150,11 +154,13 @@ class MLExperimentKnowledge:
             if domain in p.domain_tags
         ]
 
-    def get_successful_patterns(self, min_success_rate: float = 0.7) -> list[ExperimentPattern]:
+    def get_successful_patterns(
+        self, min_success_rate: float = 0.7, min_experiments: int = 1
+    ) -> list[ExperimentPattern]:
         """Get patterns with high success rate."""
         return [
             p for p in self.patterns
-            if p.success_rate >= min_success_rate and p.experiments_count >= 3
+            if p.success_rate >= min_success_rate and p.experiments_count >= min_experiments
         ]
 
     def to_dict(self) -> dict[str, Any]:
