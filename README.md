@@ -1,14 +1,14 @@
 # ACE Enterprise
 
-**Double-Blind Agentic Coding Orchestrator**
+**Double-Blind Agentic Coding Capability Broker**
 
-ACE orchestrates a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to build software. The orchestrator sees capabilities, not identities. Evaluation is blind. Humans see everything via audit and make final decisions.
+ACE brokers a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to build software. The capability broker sees capabilities, not identities. Evaluation is blind. Humans see everything via audit and make final decisions.
 
 ## The Vision
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    ORCHESTRATOR (Product Manager)                │
+│                    CAPABILITY BROKER (Product Manager)                │
 │                                                                 │
 │   Sees:                           Doesn't see:                  │
 │   • Capability tags               • Agent identity              │
@@ -64,7 +64,7 @@ ACE orchestrates a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans t
 
 ## Core Principles
 
-1. **Orchestrator sees capabilities, not identities** - Routes by skill match, not agent preference
+1. **Capability Broker sees capabilities, not identities** - Routes by skill match, not agent preference
 2. **Evaluation is blind** - Scores output quality without knowing source
 3. **Humans see everything via audit** - Make informed business decisions
 4. **Playbook accepts quality patterns anonymously** - Source irrelevant, quality matters
@@ -183,7 +183,7 @@ Use [effGen](https://github.com/ctrl-gaurav/effGen) to wrap small/open models as
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    ACE Orchestrator (Blind)                      │
+│                    ACE Capability Broker (Blind)                      │
 │                                                                 │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
@@ -288,7 +288,7 @@ ace_enterprise/
 
 | Layer | Sees | Purpose |
 |-------|------|---------|
-| **Orchestrator** | Capabilities, success rates | Recommend agents by fit |
+| **Capability Broker** | Capabilities, success rates | Recommend agents by fit |
 | **Evaluation** | Output quality only | Score without bias |
 | **Playbook** | Patterns, no attribution | Store quality knowledge |
 | **Audit** | Everything | Human decision support |
@@ -296,7 +296,7 @@ ace_enterprise/
 ### Data Flow
 
 ```
-Task → Orchestrator (recommend by capability)
+Task → Capability Broker (recommend by capability)
     → Human (decide with audit context)
     → Agent (execute blind)
     → Evaluation (score blind)
@@ -319,10 +319,10 @@ Task → Orchestrator (recommend by capability)
 - [ ] Tests for core modules (autonomous_tdd_agent, playbook_manager, ensemble)
 - [ ] Session logging visibility
 
-### Planned: Orchestrator Modules
+### Planned: Capability Broker Modules
 - [ ] **Capability registry** - Anonymous agent registration
 - [ ] **Blind evaluation service** - Score outputs without identity
-- [ ] **Orchestrator advisor** - Recommend by capability fit
+- [ ] **Capability Broker advisor** - Recommend by capability fit
 - [ ] **Human decision interface** - Accept/override recommendations
 - [ ] **effGen MCP adapter** - Connect small models
 - [ ] **Audit analysis dashboard** - Spot winning teams
@@ -366,7 +366,7 @@ Key rules in `playbook.json`:
 **Evolution:**
 1. Original: AI self-improvement system
 2. Pivot: Institutional knowledge infrastructure
-3. Current: **Double-blind agentic coding orchestrator**
+3. Current: **Double-blind agentic coding capability broker**
 
 The system operates on merit and rules, not trust or identity. Like blockchain philosophy without needing actual blockchain.
 
