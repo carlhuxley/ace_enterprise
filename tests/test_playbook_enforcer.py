@@ -82,3 +82,13 @@ class TestPlaybookEnforcer:
         assert stats["edits"] == 2
         assert stats["tests"] == 1
         assert stats["ratio"] == 2.0
+
+    def test_auto_logs_edit_when_allowed(self, tmp_path):
+        """Should auto-log the edit when allowed."""
+        from src.utils.playbook_enforcer import PlaybookEnforcer
+
+        enforcer = PlaybookEnforcer(session_log_path=tmp_path / "session.json")
+        enforcer.check_can_edit("src/foo.py")
+
+        stats = enforcer.get_stats()
+        assert stats["edits"] == 1
