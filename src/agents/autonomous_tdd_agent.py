@@ -17,6 +17,11 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.agents.redundancy_checker import (
+    ExistingTest,
+    ProposedTest,
+    RedundancyPreChecker,
+)
 from src.agents.test_review_agent import TestReviewAgent
 from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import ConsensusBullet
@@ -153,6 +158,9 @@ class AutonomousTDDAgent:
 
         # Track test functions per file for cycle isolation
         self.test_functions = {}  # {test_file_path: [{'cycle': int, 'name': str, 'code': str}]}
+
+        # Redundancy pre-checker to avoid writing duplicate tests
+        self.redundancy_checker = RedundancyPreChecker()
 
         # Initialize experiment logger for automatic TDD cycle tracking
         self.experiment_logger = ExperimentLogger(playbook_version="1.0.0")
@@ -442,6 +450,20 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         return "\n".join(summaries)
 
+    def _build_existing_tests_list(self) -> list[ExistingTest]:
+        """Build list of ExistingTest objects for redundancy pre-check."""
+        existing_tests = []
+        for test_file_key, functions in self.test_functions.items():
+            for func in functions:
+                code = func['code']
+                assertions = [line.strip() for line in code.split('\n') if 'assert' in line.lower()]
+                existing_tests.append(ExistingTest(
+                    name=func['name'],
+                    assertions=assertions,
+                    file_path=test_file_key
+                ))
+        return existing_tests
+
     def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: str | None = None, gherkin_scenarios: list[dict] | None = None) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
@@ -642,6 +664,32 @@ Output EITHER:
         Returns:
             CycleResult with all artifacts
         """
+        # PRE-CHECK: Detect redundancy BEFORE writing test code
+        existing_tests = self._build_existing_tests_list()
+        proposed = ProposedTest(
+            name=increment.test_name,
+            description=increment.description
+        )
+        redundancy_result = self.redundancy_checker.check(existing_tests, proposed)
+
+        if redundancy_result.is_redundant:
+            logger.info(f"  ⏭️  PRE-CHECK: Skipping redundant test (confidence: {redundancy_result.confidence:.0%})")
+            logger.info(f"      Reason: {redundancy_result.reason}")
+
+            # Return skipped cycle without writing any code
+            return CycleResult(
+                increment=increment,
+                test_code="",
+                implementation_code="",
+                red_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
+                green_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
+                refactored=False,
+                learned_bullets=[],
+                cycle_number=cycle_number,
+                skipped=True,
+                skip_reason=f"Pre-check redundancy: {redundancy_result.reason}"
+            )
+
         # RED: Write failing test
         logger.info("  🔴 RED: Writing failing test...")
         test_code = self._write_test(increment, cycle_number)

@@ -30,6 +30,11 @@
         "id": "ace-005",
         "content": "Enterprise branch uses PostgreSQL + pgvector for storage. OSS branch uses simple JSON files. Auditing is enterprise-only.",
         "tags": ["architecture", "deployment"]
+      },
+      {
+        "id": "ace-006",
+        "content": "HIGH-FREQUENCY FEEDBACK: (1) Work in small incremental chunks - never generate large batches without feedback. (2) Tests are absolute source of truth - validate behavior, not syntax. (3) Run automated checks on every change - types, lint, architecture. (4) Trigger CI constantly - feedback within seconds. (5) Integrate frequently - avoid long-lived branches. (6) Validate for CD - every change must be production-releasable.",
+        "tags": ["process", "tdd", "ci-cd", "hard-rule"]
       }
     ],
     "code_snippets": [],
@@ -38,6 +43,16 @@
         "id": "ace-t01",
         "content": "If MCP server returns 'Playbook not found', specify --playbook flag with actual playbook ID from data/playbooks/, or use --playbook-file with a JSON file.",
         "tags": ["mcp", "debugging"]
+      },
+      {
+        "id": "ace-t02",
+        "content": "MISSING FEATURE: No audit MCP tool exists. Cannot query what changes were made or track edit history. Need to add 'get_audit_trail' tool to mcp_server/tools.py.",
+        "tags": ["mcp", "audit", "gap"]
+      },
+      {
+        "id": "ace-t03",
+        "content": "FAILURE PATTERN: Batching multiple edits to same file without testing. Must run tests after EACH edit, not after batch. Check session log for edits-without-tests.",
+        "tags": ["process", "ci", "anti-pattern"]
       }
     ],
     "domain_knowledge": [
