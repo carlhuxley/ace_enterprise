@@ -35,6 +35,11 @@
         "id": "ace-006",
         "content": "HIGH-FREQUENCY FEEDBACK: (1) Work in small incremental chunks - never generate large batches without feedback. (2) Tests are absolute source of truth - validate behavior, not syntax. (3) Run automated checks on every change - types, lint, architecture. (4) Trigger CI constantly - feedback within seconds. (5) Integrate frequently - avoid long-lived branches. (6) Validate for CD - every change must be production-releasable.",
         "tags": ["process", "tdd", "ci-cd", "hard-rule"]
+      },
+      {
+        "id": "ace-007",
+        "content": "Track key untested modules in beads. When modifying an untested module, prioritize adding tests via task before feature work. Check test coverage gaps periodically and create P1 tasks for critical modules.",
+        "tags": ["process", "testing", "beads"]
       }
     ],
     "code_snippets": [],
