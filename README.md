@@ -62,6 +62,26 @@ ACE brokers a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to bui
 - Expensive proprietary model's pattern rejected if it scores poorly
 - Pure meritocracy
 
+## Real Production Data, Not Leaderboards
+
+The audit system generates **ground truth** for agent capabilities - unbiased insights from real production work, not synthetic benchmarks.
+
+| Leaderboards | ACE Audit |
+|--------------|-----------|
+| Synthetic benchmarks | Real production tasks |
+| Can be gamed/trained on | Can't game blind evaluation |
+| Point-in-time snapshot | Continuous over time |
+| Same tasks for all | Diverse real-world work |
+| Model identity known | Double-blind scoring |
+| Measures potential | Measures actual performance |
+
+**What the audit reveals:**
+- "On real Python testing tasks, capability X has 91% success"
+- "On refactoring tasks, 73% success"
+- "Cost per successful task: $0.02 vs $0.15"
+
+No marketing claims. No benchmark gaming. Just production results.
+
 ## Core Principles
 
 1. **Capability Broker sees capabilities, not identities** - Routes by skill match, not agent preference
