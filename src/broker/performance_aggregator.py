@@ -1,0 +1,319 @@
+"""Performance Aggregator - Extracts metrics from audit trail.
+
+This component queries the audit trail and extracts ONLY performance
+metrics (success rate, latency, cost, complexity). It maintains the
+double-blind principle: no content, prompts, or agent identities.
+
+Bead: ace_enterprise-lfu
+"""
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+from src.audit.store import AuditStore, AuditQuery
+from src.audit.schemas import AuditEventType
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AgentPerformanceMetrics:
+    """Performance metrics for an agent (anonymized by agent_ref)."""
+
+    agent_ref: str  # Opaque reference, not identity
+
+    # Success metrics
+    total_tasks: int = 0
+    successful_tasks: int = 0
+    failed_tasks: int = 0
+
+    # Timing metrics
+    avg_latency_seconds: float = 0.0
+    min_latency_seconds: float = 0.0
+    max_latency_seconds: float = 0.0
+
+    # Complexity breakdown
+    success_by_complexity: dict[int, float] = field(default_factory=dict)
+
+    # Task type breakdown
+    success_by_task_type: dict[str, float] = field(default_factory=dict)
+
+    # Cost (if tracked)
+    total_cost: float = 0.0
+    avg_cost_per_task: float = 0.0
+
+    # Temporal
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+
+    @property
+    def success_rate(self) -> float:
+        """Overall success rate."""
+        if self.total_tasks == 0:
+            return 0.0
+        return self.successful_tasks / self.total_tasks
+
+    @property
+    def reliability_score(self) -> float:
+        """Reliability based on volume and success."""
+        if self.total_tasks < 5:
+            # Low confidence with few samples
+            return self.success_rate * 0.5
+        elif self.total_tasks < 20:
+            return self.success_rate * 0.8
+        else:
+            return self.success_rate
+
+    def can_handle_complexity(self, level: int, min_success_rate: float = 0.7) -> bool:
+        """Check if agent can handle a complexity level."""
+        if level not in self.success_by_complexity:
+            return False
+        return self.success_by_complexity[level] >= min_success_rate
+
+
+class PerformanceAggregator:
+    """Aggregates performance metrics from audit trail.
+
+    Key principle: Extract ONLY metrics, never content.
+
+    What it extracts:
+    - Success/failure counts
+    - Latency statistics
+    - Complexity level performance
+    - Task type performance
+    - Cost summaries
+
+    What it NEVER extracts:
+    - Prompt contents
+    - Output contents
+    - Agent identity/model names
+    - Business logic
+    """
+
+    def __init__(self, audit_store: AuditStore):
+        """Initialize with audit store connection."""
+        self._store = audit_store
+        self._cache: dict[str, AgentPerformanceMetrics] = {}
+        self._cache_expiry: datetime | None = None
+        self._cache_ttl = timedelta(minutes=5)
+
+    def get_agent_metrics(
+        self,
+        agent_ref: str,
+        time_window: timedelta | None = None,
+    ) -> AgentPerformanceMetrics:
+        """Get performance metrics for a specific agent.
+
+        Args:
+            agent_ref: Agent reference (opaque ID)
+            time_window: Only consider events within this window
+
+        Returns:
+            AgentPerformanceMetrics (never includes content)
+        """
+        # Check cache
+        if self._is_cache_valid() and agent_ref in self._cache:
+            return self._cache[agent_ref]
+
+        # Query audit for this agent's events
+        query = AuditQuery(
+            actor_id=agent_ref,
+            event_types=[AuditEventType.CYCLE_COMPLETED],
+            limit=1000,
+        )
+
+        result = self._store.query(query)
+
+        metrics = self._aggregate_metrics(agent_ref, result.events, time_window)
+
+        # Cache result
+        self._cache[agent_ref] = metrics
+        self._cache_expiry = datetime.now() + self._cache_ttl
+
+        return metrics
+
+    def get_all_agent_metrics(
+        self,
+        time_window: timedelta | None = None,
+    ) -> dict[str, AgentPerformanceMetrics]:
+        """Get metrics for all known agents.
+
+        Returns:
+            Dict of agent_ref -> metrics
+        """
+        if self._is_cache_valid() and self._cache:
+            return self._cache
+
+        # Query all cycle_completed events (max 1000 per query)
+        query = AuditQuery(
+            event_types=[AuditEventType.CYCLE_COMPLETED],
+            limit=1000,
+        )
+
+        result = self._store.query(query)
+
+        # Group by agent
+        events_by_agent: dict[str, list] = {}
+        for event in result.events:
+            agent_ref = event.actor_id
+            if agent_ref not in events_by_agent:
+                events_by_agent[agent_ref] = []
+            events_by_agent[agent_ref].append(event)
+
+        # Aggregate each
+        all_metrics = {}
+        for agent_ref, events in events_by_agent.items():
+            all_metrics[agent_ref] = self._aggregate_metrics(
+                agent_ref, events, time_window
+            )
+
+        # Cache
+        self._cache = all_metrics
+        self._cache_expiry = datetime.now() + self._cache_ttl
+
+        return all_metrics
+
+    def get_best_agent_for_task(
+        self,
+        task_type: str | None = None,
+        complexity: int | None = None,
+        min_success_rate: float = 0.7,
+    ) -> list[tuple[str, float]]:
+        """Suggest best agents for a task based on historical performance.
+
+        Args:
+            task_type: Type of task (e.g., "coding", "math")
+            complexity: Complexity level (1-6)
+            min_success_rate: Minimum acceptable success rate
+
+        Returns:
+            List of (agent_ref, confidence_score) sorted by confidence
+        """
+        all_metrics = self.get_all_agent_metrics()
+
+        candidates = []
+
+        for agent_ref, metrics in all_metrics.items():
+            score = 0.0
+
+            # Base score from overall reliability
+            score = metrics.reliability_score
+
+            # Adjust for task type match
+            if task_type and task_type in metrics.success_by_task_type:
+                type_success = metrics.success_by_task_type[task_type]
+                if type_success >= min_success_rate:
+                    score = (score + type_success) / 2
+                else:
+                    score *= 0.5  # Penalize poor task type performance
+
+            # Adjust for complexity match
+            if complexity and complexity in metrics.success_by_complexity:
+                complexity_success = metrics.success_by_complexity[complexity]
+                if complexity_success >= min_success_rate:
+                    score = (score + complexity_success) / 2
+                else:
+                    score *= 0.3  # Heavy penalty for complexity mismatch
+            elif complexity:
+                # No data for this complexity - uncertain
+                score *= 0.6
+
+            if score >= min_success_rate * 0.5:  # Allow some tolerance
+                candidates.append((agent_ref, score))
+
+        # Sort by score descending
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        return candidates
+
+    def _aggregate_metrics(
+        self,
+        agent_ref: str,
+        events: list,
+        time_window: timedelta | None = None,
+    ) -> AgentPerformanceMetrics:
+        """Aggregate events into metrics.
+
+        IMPORTANT: Only extracts metrics, never content.
+        """
+        metrics = AgentPerformanceMetrics(agent_ref=agent_ref)
+
+        latencies = []
+        complexity_results: dict[int, list[bool]] = {}
+        task_type_results: dict[str, list[bool]] = {}
+
+        cutoff = None
+        if time_window:
+            cutoff = datetime.now() - time_window
+
+        for event in events:
+            # Apply time filter
+            if cutoff and event.timestamp < cutoff:
+                continue
+
+            payload = event.payload or {}
+
+            # Track timing
+            if metrics.first_seen is None or event.timestamp < metrics.first_seen:
+                metrics.first_seen = event.timestamp
+            if metrics.last_seen is None or event.timestamp > metrics.last_seen:
+                metrics.last_seen = event.timestamp
+
+            # Extract ONLY metrics from payload
+            success = payload.get("success", False)
+            elapsed = payload.get("elapsed_seconds", 0)
+            complexity = payload.get("complexity", None)
+            task_type = payload.get("task_type", None)
+
+            # Never extract: prompt, output, content, agent identity
+
+            metrics.total_tasks += 1
+            if success:
+                metrics.successful_tasks += 1
+            else:
+                metrics.failed_tasks += 1
+
+            if elapsed:
+                latencies.append(elapsed)
+
+            # Track by complexity
+            if complexity is not None:
+                if complexity not in complexity_results:
+                    complexity_results[complexity] = []
+                complexity_results[complexity].append(success)
+
+            # Track by task type
+            if task_type:
+                if task_type not in task_type_results:
+                    task_type_results[task_type] = []
+                task_type_results[task_type].append(success)
+
+        # Compute averages
+        if latencies:
+            metrics.avg_latency_seconds = sum(latencies) / len(latencies)
+            metrics.min_latency_seconds = min(latencies)
+            metrics.max_latency_seconds = max(latencies)
+
+        # Compute success rates by complexity
+        for level, results in complexity_results.items():
+            if results:
+                metrics.success_by_complexity[level] = sum(results) / len(results)
+
+        # Compute success rates by task type
+        for ttype, results in task_type_results.items():
+            if results:
+                metrics.success_by_task_type[ttype] = sum(results) / len(results)
+
+        return metrics
+
+    def _is_cache_valid(self) -> bool:
+        """Check if cache is still valid."""
+        if self._cache_expiry is None:
+            return False
+        return datetime.now() < self._cache_expiry
+
+    def invalidate_cache(self) -> None:
+        """Force cache invalidation."""
+        self._cache = {}
+        self._cache_expiry = None
