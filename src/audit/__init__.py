@@ -22,6 +22,7 @@ from src.audit.schemas import (
     AuditResult,
 )
 from src.audit.store import AuditStore
+from src.audit.dashboard import AgentIdentity, AgentPerformance, AuditDashboard
 
 __all__ = [
     # Schemas
@@ -36,4 +37,8 @@ __all__ = [
     "get_audit_client",
     # Store (for audit service)
     "AuditStore",
+    # Dashboard (for humans)
+    "AgentIdentity",
+    "AgentPerformance",
+    "AuditDashboard",
 ]
