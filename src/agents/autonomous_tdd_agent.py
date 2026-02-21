@@ -23,6 +23,8 @@ from src.agents.redundancy_checker import (
     RedundancyPreChecker,
 )
 from src.agents.test_review_agent import TestReviewAgent
+from src.audit.local_client import LocalAuditClient
+from src.audit.schemas import AuditEventType
 from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import ConsensusBullet
 from src.storage.experiment_logger import ExperimentLogger
@@ -165,12 +167,42 @@ class AutonomousTDDAgent:
         # Initialize experiment logger for automatic TDD cycle tracking
         self.experiment_logger = ExperimentLogger(playbook_version="1.0.0")
 
+        # Initialize audit client for event tracking
+        self.audit_client = LocalAuditClient()
+        self._agent_id = f"tdd-agent-{id(self)}"
+
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
         logger.info(f"  Test dir: {test_dir}")
         logger.info(f"  Src dir: {src_dir}")
         logger.info(f"  Max iterations: {max_iterations}")
         logger.info(f"  Primary LLM: {provider}/{model}")
+
+    def _emit_audit_event(
+        self,
+        event_type: AuditEventType,
+        payload: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """Emit an audit event.
+
+        Args:
+            event_type: Type of audit event
+            payload: Event-specific data
+            session_id: Optional session identifier
+
+        Returns:
+            True if event was emitted successfully
+        """
+        return self.audit_client.emit_simple(
+            event_type=event_type,
+            actor_id=self._agent_id,
+            payload=payload,
+            actor_type="agent",
+            session_id=session_id,
+            playbook_id=self.playbook_id,
+            project_id=str(self.project_root),
+        )
 
     def build_feature(
         self,
