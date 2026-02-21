@@ -9,6 +9,13 @@ from src.broker.human_decision import (
     HumanDecision,
     HumanDecisionInterface,
 )
+from src.broker.effgen_adapter import (
+    EffGenAdapter,
+    EffGenAgentConfig,
+    HealthStatus,
+    TaskRequest,
+    TaskResponse,
+)
 
 __all__ = [
     "AgentCapabilities",
@@ -23,4 +30,9 @@ __all__ = [
     "DecisionResult",
     "HumanDecision",
     "HumanDecisionInterface",
+    "EffGenAdapter",
+    "EffGenAgentConfig",
+    "HealthStatus",
+    "TaskRequest",
+    "TaskResponse",
 ]
