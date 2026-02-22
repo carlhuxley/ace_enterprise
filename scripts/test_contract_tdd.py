@@ -61,13 +61,37 @@ class TDDCycleResult:
 def generate_pytest_from_contract(contract: InterfaceContract) -> str:
     """Generate pytest test file from contract test cases."""
 
+    # Determine imports based on fixtures
+    imports = f"from implementation import {contract.function_name}"
+    if contract.fixtures and contract.fixtures.setup:
+        # Extract function names from setup for imports
+        setup_funcs = [f.split("(")[0] for f in contract.fixtures.setup.split(";") if f.strip()]
+        for func in setup_funcs:
+            func = func.strip()
+            if func and func != contract.function_name:
+                imports += f", {func}"
+
     test_code = f'''"""Auto-generated tests for {contract.function_name}."""
 import pytest
-from implementation import {contract.function_name}
+{imports}
 
 
 class Test{contract.function_name.title().replace("_", "")}:
     """Tests for {contract.function_name}."""
+
+'''
+    # Add setup method if fixtures defined
+    if contract.fixtures and contract.fixtures.setup:
+        test_code += f'''    def setup_method(self):
+        """Setup before each test."""
+        {contract.fixtures.setup}
+
+'''
+    # Add teardown method if fixtures defined
+    if contract.fixtures and contract.fixtures.teardown:
+        test_code += f'''    def teardown_method(self):
+        """Cleanup after each test."""
+        {contract.fixtures.teardown}
 
 '''
     for tc in contract.test_cases:
