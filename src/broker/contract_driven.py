@@ -33,6 +33,13 @@ class TestCase:
 
 
 @dataclass
+class Fixtures:
+    """Test fixtures for setup/teardown."""
+    setup: str = ""  # Code to run before tests
+    teardown: str = ""  # Code to run after tests
+
+
+@dataclass
 class InterfaceContract:
     """Defines what needs to be implemented.
 
@@ -53,6 +60,9 @@ class InterfaceContract:
     # Implementation constraints
     max_lines: int = 50
     allowed_imports: list[str] = field(default_factory=list)
+
+    # Test fixtures (setup/teardown)
+    fixtures: Fixtures | None = None
 
     def to_prompt(self) -> str:
         """Generate implementation prompt from contract."""

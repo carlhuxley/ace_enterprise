@@ -128,6 +128,93 @@ class TestContractSpecFields:
         assert spec.hints == []
 
 
+class TestContractFixtures:
+    """Tests for contract fixtures (setup/teardown)."""
+
+    def test_supports_fixtures_field(self):
+        """Should support optional fixtures field."""
+        from src.broker.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+
+        fixtures = FixtureSpec(
+            setup="init_db()",
+            teardown="cleanup_db()",
+        )
+
+        spec = ContractSpec(
+            id="test-001",
+            function_name="create_record",
+            signature="(name: str) -> dict",
+            docstring="Create a record",
+            complexity=2,
+            test_cases=[TestCaseSpec(name="t", input="('test')", expected="{'id': 1}")],
+            fixtures=fixtures,
+        )
+
+        assert spec.fixtures is not None
+        assert spec.fixtures.setup == "init_db()"
+        assert spec.fixtures.teardown == "cleanup_db()"
+
+    def test_fixtures_default_none(self):
+        """Fixtures should default to None."""
+        from src.broker.contract_schema import ContractSpec, TestCaseSpec
+
+        spec = ContractSpec(
+            id="test-001",
+            function_name="calc",
+            signature="(x: int) -> int",
+            docstring="Calc",
+            complexity=1,
+            test_cases=[TestCaseSpec(name="t", input="(1)", expected="1")],
+        )
+
+        assert spec.fixtures is None
+
+    def test_loads_fixtures_from_yaml(self):
+        """Should load fixtures from YAML."""
+        from src.broker.contract_schema import load_contracts
+
+        yaml_content = """
+contracts:
+  - id: db-001
+    function_name: create_user
+    signature: "(name: str) -> dict"
+    docstring: "Create a user"
+    complexity: 2
+    fixtures:
+      setup: "init_db()"
+      teardown: "cleanup_db()"
+    test_cases:
+      - name: basic
+        input: "('Alice')"
+        expected: "{'id': 1, 'name': 'Alice'}"
+"""
+        contracts = load_contracts(yaml_content)
+
+        assert contracts[0].fixtures is not None
+        assert contracts[0].fixtures.setup == "init_db()"
+        assert contracts[0].fixtures.teardown == "cleanup_db()"
+
+    def test_fixtures_converts_to_interface_contract(self):
+        """Fixtures should be included in InterfaceContract."""
+        from src.broker.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+
+        spec = ContractSpec(
+            id="fix-001",
+            function_name="get_item",
+            signature="(id: int) -> dict",
+            docstring="Get item by ID",
+            complexity=1,
+            test_cases=[TestCaseSpec(name="t", input="(1)", expected="{'id': 1}")],
+            fixtures=FixtureSpec(setup="db.connect()", teardown="db.close()"),
+        )
+
+        interface = spec.to_interface_contract()
+
+        assert interface.fixtures is not None
+        assert interface.fixtures.setup == "db.connect()"
+        assert interface.fixtures.teardown == "db.close()"
+
+
 class TestContractToInterfaceContract:
     """Tests for converting ContractSpec to InterfaceContract."""
 

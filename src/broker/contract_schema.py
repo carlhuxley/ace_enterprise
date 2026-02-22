@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from src.broker.contract_driven import InterfaceContract, TestCase
+from src.broker.contract_driven import InterfaceContract, TestCase, Fixtures
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,14 @@ class TestCaseSpec:
     input: str  # Python expression for input args
     expected: str  # Python expression for expected result
     description: str = ""
+
+
+@dataclass
+class FixtureSpec:
+    """Fixture specification for test setup/teardown."""
+
+    setup: str = ""  # Code to run before tests
+    teardown: str = ""  # Code to run after tests
 
 
 @dataclass
@@ -58,9 +66,18 @@ class ContractSpec:
     complexity: int
     test_cases: list[TestCaseSpec]
     hints: list[str] = field(default_factory=list)
+    fixtures: FixtureSpec | None = None
 
     def to_interface_contract(self) -> InterfaceContract:
         """Convert to InterfaceContract for TDD execution."""
+        # Convert fixtures if present
+        fixtures = None
+        if self.fixtures:
+            fixtures = Fixtures(
+                setup=self.fixtures.setup,
+                teardown=self.fixtures.teardown,
+            )
+
         return InterfaceContract(
             contract_id=self.id,
             function_name=self.function_name,
@@ -77,6 +94,7 @@ class ContractSpec:
             ],
             estimated_complexity=self.complexity,
             hints=self.hints,
+            fixtures=fixtures,
         )
 
 
@@ -126,6 +144,14 @@ def load_contracts(yaml_content: str) -> list[ContractSpec]:
             for tc in entry["test_cases"]
         ]
 
+        # Parse fixtures if present
+        fixtures = None
+        if "fixtures" in entry:
+            fixtures = FixtureSpec(
+                setup=entry["fixtures"].get("setup", ""),
+                teardown=entry["fixtures"].get("teardown", ""),
+            )
+
         contract = ContractSpec(
             id=entry["id"],
             function_name=entry["function_name"],
@@ -134,6 +160,7 @@ def load_contracts(yaml_content: str) -> list[ContractSpec]:
             complexity=complexity,
             test_cases=test_cases,
             hints=entry.get("hints", []),
+            fixtures=fixtures,
         )
 
         contracts.append(contract)
@@ -163,28 +190,33 @@ def save_contracts(contracts: list[ContractSpec], file_path: Path) -> None:
         contracts: List of ContractSpec objects
         file_path: Output path
     """
-    data = {
-        "contracts": [
-            {
-                "id": c.id,
-                "function_name": c.function_name,
-                "signature": c.signature,
-                "docstring": c.docstring,
-                "complexity": c.complexity,
-                "test_cases": [
-                    {
-                        "name": tc.name,
-                        "input": tc.input,
-                        "expected": tc.expected,
-                        "description": tc.description,
-                    }
-                    for tc in c.test_cases
-                ],
-                "hints": c.hints,
+    contracts_data = []
+    for c in contracts:
+        contract_dict = {
+            "id": c.id,
+            "function_name": c.function_name,
+            "signature": c.signature,
+            "docstring": c.docstring,
+            "complexity": c.complexity,
+            "test_cases": [
+                {
+                    "name": tc.name,
+                    "input": tc.input,
+                    "expected": tc.expected,
+                    "description": tc.description,
+                }
+                for tc in c.test_cases
+            ],
+            "hints": c.hints,
+        }
+        if c.fixtures:
+            contract_dict["fixtures"] = {
+                "setup": c.fixtures.setup,
+                "teardown": c.fixtures.teardown,
             }
-            for c in contracts
-        ]
-    }
+        contracts_data.append(contract_dict)
+
+    data = {"contracts": contracts_data}
 
     file_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
     logger.info(f"Saved {len(contracts)} contracts to {file_path}")
