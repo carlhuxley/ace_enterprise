@@ -29,6 +29,10 @@ class AuditEventType(str, Enum):
     TEST_EXECUTED = "test_executed"               # Test run result
     CYCLE_COMPLETED = "cycle_completed"           # Full TDD cycle done
 
+    # Contract-driven events
+    CONTRACT_GENERATED = "contract_generated"     # Architect produced contract
+    CONTRACT_DECOMPOSED = "contract_decomposed"   # Requirement split into contracts
+
     # Agent events
     AGENT_STARTED = "agent_started"               # Agent session began
     AGENT_COMPLETED = "agent_completed"           # Agent session ended

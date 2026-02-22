@@ -214,6 +214,7 @@ def {contract.function_name}{contract.signature}:
         payload={
             "contract_id": contract.contract_id,
             "function_name": contract.function_name,
+            "complexity": contract.estimated_complexity,  # For broker learning
             "red_passed": red_passed,
             "green_passed": green_passed,
             "attempts": attempt + 1 if 'attempt' in dir() else 0,

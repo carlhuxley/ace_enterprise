@@ -14,6 +14,7 @@ Key principle: Methodical over vibe coding.
 import ast
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1505,7 +1506,7 @@ Output 1-3 bullet points, one per line.""",
             env["PYTHONPATH"] = str(self.project_root)
 
             result = subprocess.run(
-                ["python", "-m", "pytest", str(self.test_dir), "-v", "--tb=short"],
+                [sys.executable, "-m", "pytest", str(self.test_dir), "-v", "--tb=short"],
                 capture_output=True,
                 text=True,
                 cwd=self.project_root,
