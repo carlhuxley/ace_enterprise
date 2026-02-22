@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Test the full architect → broker → builder flow with audit tracking.
+"""Test the full architect → broker → builder flow with escalation.
 
 This script demonstrates:
 1. Architect (Llama 3.3 70B) generates contracts from requirements
-2. Broker routes each contract to the best builder based on complexity
-3. Builder implements each contract
-4. Audit captures everything, broker learns for next time
+2. Broker routes each contract starting with cheapest viable agent
+3. On failure, escalates to more capable (expensive) agent
+4. Audit captures everything including escalations
 
 Run: python scripts/test_architect_flow.py
 """
@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
 from src.audit.store import AuditStore
-from src.broker.adaptive_broker import AdaptiveBroker, BrokerConfig
 from src.broker.contract_architect import create_architect_from_config
 from src.broker.contract_driven import ContractValidator
 from src.broker.performance_aggregator import PerformanceAggregator
@@ -28,62 +27,103 @@ from src.utils.llm_client import LLMClient
 
 
 # =============================================================================
-# AGENT POOL CONFIGURATION
+# AGENT POOL - ORDERED BY COST (CHEAPEST FIRST)
 # =============================================================================
-# Define available agents with their capabilities and costs
 
-AGENT_POOL = {
-    "togetherai-Qwen2.5-1.5B-Instruct-Turbo": {
-        "provider": "togetherai",
-        "model": "Qwen/Qwen2.5-1.5B-Instruct-Turbo",
-        "base_url": "https://api.together.xyz/v1",
-        "cost_tier": "low",
-        "max_complexity": 2,  # Good for simple tasks
-    },
-    "togetherai-Qwen2.5-7B-Instruct-Turbo": {
+AGENT_TIERS = [
+    {
+        "id": "togetherai-Qwen2.5-7B-Instruct-Turbo",
         "provider": "togetherai",
         "model": "Qwen/Qwen2.5-7B-Instruct-Turbo",
         "base_url": "https://api.together.xyz/v1",
-        "cost_tier": "medium",
-        "max_complexity": 4,  # Good for moderate tasks
+        "tier": 1,
+        "cost": "low",
+        "max_complexity": 3,  # Good for simple-medium tasks
     },
-    "togetherai-Llama-3.3-70B-Instruct-Turbo": {
+    {
+        "id": "togetherai-Llama-3.3-70B-Instruct-Turbo",
         "provider": "togetherai",
         "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
         "base_url": "https://api.together.xyz/v1",
-        "cost_tier": "high",
+        "tier": 2,
+        "cost": "high",
         "max_complexity": 6,  # Can handle complex tasks
     },
-}
+]
 
-# Architect configuration (always use capable model for decomposition)
+# Architect configuration
 ARCHITECT_PROVIDER = "togetherai"
 ARCHITECT_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 ARCHITECT_BASE_URL = "https://api.together.xyz/v1"
 
-# Fallback agent when broker has no data
-FALLBACK_AGENT = "togetherai-Qwen2.5-7B-Instruct-Turbo"
-
 AUDIT_DB_URL = "sqlite:///.local/audit.db"
 
+# Escalation thresholds
+MIN_SUCCESS_RATE = 0.20  # Don't use agent if <20% success at this complexity
+MIN_SAMPLES = 3  # Need at least 3 samples before trusting success rate
 
-def create_llm_client(agent_id: str) -> LLMClient:
-    """Create LLM client for an agent from the pool."""
-    if agent_id not in AGENT_POOL:
-        raise ValueError(f"Unknown agent: {agent_id}")
 
-    config = AGENT_POOL[agent_id]
+def create_llm_client(agent_config: dict) -> LLMClient:
+    """Create LLM client from agent config."""
     return LLMClient(
-        provider=config["provider"],
-        model=config["model"],
-        base_url=config["base_url"],
+        provider=agent_config["provider"],
+        model=agent_config["model"],
+        base_url=agent_config["base_url"],
     )
 
 
+def get_agent_success_rate(aggregator: PerformanceAggregator, agent_id: str, complexity: int) -> tuple[float, int]:
+    """Get agent's success rate at a specific complexity level.
+
+    Returns: (success_rate, sample_count)
+    """
+    try:
+        metrics = aggregator.get_agent_metrics(agent_id)
+        if complexity in metrics.success_by_complexity:
+            rate = metrics.success_by_complexity[complexity]
+            # Estimate samples from total tasks
+            samples = max(1, metrics.total_tasks // len(metrics.success_by_complexity)) if metrics.success_by_complexity else 0
+            return rate, samples
+        return 0.5, 0  # No data, assume 50%
+    except Exception:
+        return 0.5, 0  # No data
+
+
+def select_starting_agent(aggregator: PerformanceAggregator, complexity: int) -> dict:
+    """Select cheapest agent that can handle this complexity with acceptable success rate."""
+
+    for agent in AGENT_TIERS:
+        # Skip if complexity exceeds agent's max
+        if complexity > agent["max_complexity"]:
+            continue
+
+        # Check historical success rate
+        success_rate, samples = get_agent_success_rate(aggregator, agent["id"], complexity)
+
+        # If we have enough samples and success rate is too low, skip
+        if samples >= MIN_SAMPLES and success_rate < MIN_SUCCESS_RATE:
+            print(f"    Skipping {agent['id']}: {success_rate:.0%} @ complexity {complexity} ({samples} samples)")
+            continue
+
+        return agent
+
+    # Fallback to most capable
+    return AGENT_TIERS[-1]
+
+
+def get_next_tier_agent(current_agent: dict) -> dict | None:
+    """Get the next tier agent for escalation."""
+    current_tier = current_agent["tier"]
+    for agent in AGENT_TIERS:
+        if agent["tier"] > current_tier:
+            return agent
+    return None  # Already at highest tier
+
+
 def run_full_flow(requirement: str):
-    """Run the full architect → broker → builder flow."""
+    """Run the full architect → broker → builder flow with escalation."""
     print("=" * 70)
-    print("CONTRACT-DRIVEN TDD: ARCHITECT → BROKER → BUILDER FLOW")
+    print("CONTRACT-DRIVEN TDD: ARCHITECT → BROKER → BUILDER (WITH ESCALATION)")
     print("=" * 70)
     print(f"\nRequirement: {requirement}\n")
 
@@ -91,24 +131,13 @@ def run_full_flow(requirement: str):
     audit = LocalAuditClient(AUDIT_DB_URL)
     session_id = f"architect-flow-{int(time.time())}"
 
-    # Initialize broker with performance aggregator
+    # Initialize performance aggregator
     print("-" * 70)
     print("INITIALIZING BROKER")
     print("-" * 70)
 
     audit_store = AuditStore(AUDIT_DB_URL)
     aggregator = PerformanceAggregator(audit_store)
-    broker = AdaptiveBroker(
-        aggregator=aggregator,
-        config=BrokerConfig(
-            apply_threshold=0.70,
-            ask_threshold=0.35,
-            complexity_weight=0.4,  # Weight complexity heavily
-            task_type_weight=0.2,
-            overall_weight=0.4,
-            fallback_agent=FALLBACK_AGENT,
-        ),
-    )
 
     # Show what broker knows
     all_metrics = aggregator.get_all_agent_metrics()
@@ -151,104 +180,98 @@ def run_full_flow(requirement: str):
         print(f"      Tests: {len(contract.test_cases)}")
         print()
 
-    # Phase 2: Broker routes, Builder implements
+    # Phase 2: Builder implements with escalation
     print("-" * 70)
-    print("PHASE 2: BROKER ROUTES → BUILDER IMPLEMENTS")
+    print("PHASE 2: BUILD WITH ESCALATION (cheap → expensive)")
     print("-" * 70)
 
     validator = ContractValidator()
     results = []
-    routing_decisions = []
 
     for contract in arch_result.contracts:
         print(f"\n[{contract.id}] {contract.function_name} (complexity {contract.complexity})")
 
-        # ASK BROKER: Which agent should handle this?
-        routing = broker.route_task(complexity=contract.complexity)
-
-        selected_agent = routing.selected_agent
-
-        # Ensure selected agent is in our pool
-        if selected_agent not in AGENT_POOL:
-            print(f"  Broker suggested unknown agent '{selected_agent}', using fallback")
-            selected_agent = FALLBACK_AGENT
-
-        print(f"  Broker decision: {routing.verdict} → {selected_agent}")
-        print(f"    Confidence: {routing.confidence:.2f}")
-        if routing.candidates:
-            print(f"    Candidates: {[(a, f'{s:.2f}') for a, s in routing.candidates[:3]]}")
-
-        routing_decisions.append({
-            "contract_id": contract.id,
-            "complexity": contract.complexity,
-            "selected_agent": selected_agent,
-            "verdict": routing.verdict,
-            "confidence": routing.confidence,
-        })
-
-        # Get LLM client for selected agent
-        builder_llm = create_llm_client(selected_agent)
-
         interface = contract.to_interface_contract()
         prompt = interface.to_prompt()
 
-        start_time = time.time()
+        # Select starting agent (cheapest viable)
+        current_agent = select_starting_agent(aggregator, contract.complexity)
+        print(f"  Starting with: {current_agent['id']} (tier {current_agent['tier']}, {current_agent['cost']} cost)")
+
         success = False
-        attempts = 0
-        max_attempts = 3
+        total_attempts = 0
+        escalations = 0
+        agents_tried = []
+        max_attempts_per_agent = 2  # Try each agent twice before escalating
 
-        for attempt in range(max_attempts):
-            attempts = attempt + 1
-            print(f"  Attempt {attempts}...", end=" ", flush=True)
+        while not success and current_agent is not None:
+            agents_tried.append(current_agent["id"])
+            builder_llm = create_llm_client(current_agent)
+            agent_start_time = time.time()
 
-            # Generate implementation
-            llm_result = builder_llm.generate(prompt)
-            code = llm_result["content"]
+            for attempt in range(max_attempts_per_agent):
+                total_attempts += 1
+                print(f"  [{current_agent['id'].split('-')[-1]}] Attempt {attempt + 1}...", end=" ", flush=True)
 
-            # Extract function code
-            if "def " in code:
-                code = code[code.index("def "):]
-                if "```" in code:
-                    code = code[:code.index("```")]
+                # Generate implementation
+                llm_result = builder_llm.generate(prompt)
+                code = llm_result["content"]
 
-            # Validate
-            impl = validator.validate(interface, code)
+                # Extract function code
+                if "def " in code:
+                    code = code[code.index("def "):]
+                    if "```" in code:
+                        code = code[:code.index("```")]
 
-            if impl.status.value == "validated":
-                print("PASSED")
-                success = True
-                break
-            else:
-                print(f"FAILED - {impl.error or 'tests failed'}")
+                # Validate
+                impl = validator.validate(interface, code)
 
-        elapsed = time.time() - start_time
+                if impl.status.value == "validated":
+                    print("PASSED")
+                    success = True
+                    break
+                else:
+                    print("FAILED")
 
-        # Audit: CYCLE_COMPLETED (broker will learn from this)
-        audit.emit_simple(
-            event_type=AuditEventType.CYCLE_COMPLETED,
-            actor_id=selected_agent,
-            payload={
-                "contract_id": contract.id,
-                "function_name": contract.function_name,
-                "complexity": contract.complexity,
-                "attempts": attempts,
-                "elapsed_seconds": elapsed,
-                "success": success,
-                "architect_model": arch_result.architect_model,
-                "routing_verdict": routing.verdict,
-                "routing_confidence": routing.confidence,
-            },
-            session_id=session_id,
-        )
+            agent_elapsed = time.time() - agent_start_time
+
+            # Audit this agent's attempt
+            audit.emit_simple(
+                event_type=AuditEventType.CYCLE_COMPLETED,
+                actor_id=current_agent["id"],
+                payload={
+                    "contract_id": contract.id,
+                    "function_name": contract.function_name,
+                    "complexity": contract.complexity,
+                    "attempts": min(attempt + 1, max_attempts_per_agent),
+                    "elapsed_seconds": agent_elapsed,
+                    "success": success,
+                    "tier": current_agent["tier"],
+                    "escalation_number": escalations,
+                },
+                session_id=session_id,
+            )
+
+            if not success:
+                # Try to escalate
+                next_agent = get_next_tier_agent(current_agent)
+                if next_agent:
+                    escalations += 1
+                    print(f"  ↑ ESCALATING to tier {next_agent['tier']} ({next_agent['id'].split('/')[-1]})")
+                    current_agent = next_agent
+                else:
+                    print(f"  ✗ No higher tier available")
+                    current_agent = None
 
         results.append({
             "contract_id": contract.id,
             "function_name": contract.function_name,
             "complexity": contract.complexity,
-            "selected_agent": selected_agent,
             "success": success,
-            "attempts": attempts,
-            "elapsed": elapsed,
+            "total_attempts": total_attempts,
+            "escalations": escalations,
+            "agents_tried": agents_tried,
+            "final_agent": agents_tried[-1] if agents_tried else None,
         })
 
     # Summary
@@ -258,36 +281,29 @@ def run_full_flow(requirement: str):
     print("=" * 70)
 
     success_count = sum(1 for r in results if r["success"])
+    total_escalations = sum(r["escalations"] for r in results)
+    total_attempts = sum(r["total_attempts"] for r in results)
+
     print(f"\nContracts: {len(results)}")
     print(f"Successful: {success_count}/{len(results)}")
+    print(f"Total attempts: {total_attempts}")
+    print(f"Total escalations: {total_escalations}")
 
     print("\nBy complexity:")
     for complexity in sorted(set(r["complexity"] for r in results)):
         c_results = [r for r in results if r["complexity"] == complexity]
         c_success = sum(1 for r in c_results if r["success"])
-        print(f"  Complexity {complexity}: {c_success}/{len(c_results)}")
+        c_escalations = sum(r["escalations"] for r in c_results)
+        print(f"  Complexity {complexity}: {c_success}/{len(c_results)} ({c_escalations} escalations)")
 
-    print("\nRouting decisions:")
-    for decision in routing_decisions:
-        status = "✓" if any(r["contract_id"] == decision["contract_id"] and r["success"] for r in results) else "✗"
-        print(f"  {status} [{decision['contract_id']}] complexity {decision['complexity']} → {decision['selected_agent']} ({decision['verdict']})")
+    print("\nDetails:")
+    for r in results:
+        status = "✓" if r["success"] else "✗"
+        agents = " → ".join([a.split("-")[-1] for a in r["agents_tried"]])
+        esc = f" ({r['escalations']} esc)" if r["escalations"] > 0 else ""
+        print(f"  {status} [{r['contract_id']}] {r['function_name']}: {agents}{esc}")
 
-    print("\nBy agent:")
-    agents_used = set(r["selected_agent"] for r in results)
-    for agent in agents_used:
-        agent_results = [r for r in results if r["selected_agent"] == agent]
-        agent_success = sum(1 for r in agent_results if r["success"])
-        print(f"  {agent}: {agent_success}/{len(agent_results)}")
-
-    print("\nAudit events recorded:")
-    print(f"  - CONTRACT_GENERATED: {len(arch_result.contracts)}")
-    print(f"  - CONTRACT_DECOMPOSED: 1")
-    print(f"  - CYCLE_COMPLETED: {len(results)}")
     print(f"\nSession ID: {session_id}")
-
-    # Invalidate broker cache so next run sees new data
-    broker.invalidate_cache()
-    print("\nBroker cache invalidated - next run will use updated metrics.")
 
 
 if __name__ == "__main__":
