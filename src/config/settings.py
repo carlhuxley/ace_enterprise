@@ -60,7 +60,19 @@ class Settings(BaseSettings):
     togetherai_api_key: str | None = None
     togetherai_default_model: str = "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
 
-    default_llm_provider: Literal["ollama", "vllm", "deepseek", "togetherai"] = "ollama"
+    # OpenRouter (access to many models, including free tiers)
+    openrouter_api_key: str | None = None
+    openrouter_default_model: str = "qwen/qwen3-coder:free"
+
+    # OpenAI
+    openai_api_key: str | None = None
+    openai_default_model: str = "gpt-4o-mini"
+
+    # Anthropic
+    anthropic_api_key: str | None = None
+    anthropic_default_model: str = "claude-sonnet-4-20250514"
+
+    default_llm_provider: Literal["ollama", "vllm", "deepseek", "togetherai", "openrouter", "openai", "anthropic"] = "ollama"
 
     # Embedding Configuration
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

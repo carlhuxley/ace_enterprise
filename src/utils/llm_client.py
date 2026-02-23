@@ -82,6 +82,8 @@ class LLMClient:
             result = self._generate_deepseek(prompt, system_prompt, max_tokens, temperature)
         elif self.provider == "togetherai":
             result = self._generate_togetherai(prompt, system_prompt, max_tokens, temperature)
+        elif self.provider == "openrouter":
+            result = self._generate_openrouter(prompt, system_prompt, max_tokens, temperature)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -365,6 +367,56 @@ class LLMClient:
             logger.error(f"Together AI API error: {e}")
             raise RuntimeError(f"Failed to generate with Together AI: {e}")
 
+    def _generate_openrouter(
+        self,
+        prompt: str,
+        system_prompt: str | None,
+        max_tokens: int | None,
+        temperature: float,
+    ) -> dict[str, Any]:
+        """Generate using OpenRouter API (access to many models including free tiers)."""
+        if not settings.openrouter_api_key:
+            raise ValueError("OpenRouter API key not configured")
+
+        # OpenRouter uses OpenAI-compatible API
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/carlhuxley/ace_enterprise",  # Required by OpenRouter
+            "X-Title": "ACE Enterprise",
+        }
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens or 4096,  # OpenRouter requires explicit max_tokens
+        }
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+            return {
+                "content": data["choices"][0]["message"]["content"],
+                "tokens_used": data.get("usage", {}).get("total_tokens", 0),
+            }
+
+        except httpx.HTTPError as e:
+            logger.error(f"OpenRouter API error: {e}")
+            # Include response body for better debugging
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response: {e.response.text}")
+            raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+
     def _get_default_model(self, model: str | None) -> str:
         """Get default model for provider."""
         if model:
@@ -378,6 +430,10 @@ class LLMClient:
             return settings.anthropic_default_model
         elif self.provider == "deepseek":
             return settings.deepseek_default_model
+        elif self.provider == "togetherai":
+            return settings.togetherai_default_model
+        elif self.provider == "openrouter":
+            return settings.openrouter_default_model
         else:
             return "unknown"
 
@@ -403,6 +459,10 @@ class LLMClient:
                     return bool(settings.anthropic_api_key)
                 elif self.provider == "deepseek":
                     return bool(settings.deepseek_api_key)
+                elif self.provider == "togetherai":
+                    return bool(settings.togetherai_api_key)
+                elif self.provider == "openrouter":
+                    return bool(settings.openrouter_api_key)
 
         except Exception as e:
             logger.warning(f"LLM provider {self.provider} not available: {e}")
