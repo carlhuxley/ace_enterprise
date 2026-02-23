@@ -405,9 +405,14 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
 
+            # OpenRouter returns actual model used (important for auto-routing)
+            actual_model = data.get("model", self.model)
+
             return {
                 "content": data["choices"][0]["message"]["content"],
                 "tokens_used": data.get("usage", {}).get("total_tokens", 0),
+                "actual_model": actual_model,  # The model that actually served the request
+                "provider": data.get("provider", "unknown"),
             }
 
         except httpx.HTTPError as e:

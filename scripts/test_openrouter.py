@@ -49,6 +49,11 @@ def test_model(model: str):
 
         print(f"  Latency: {result['latency_ms']}ms")
         print(f"  Tokens: {result['tokens_used']}")
+        # Show actual model used (important for auto-routing)
+        if result.get('actual_model'):
+            print(f"  Actual model: {result['actual_model']}")
+        if result.get('provider'):
+            print(f"  Provider: {result['provider']}")
         print(f"  Response:\n{result['content'][:300]}...")
         return True
 
