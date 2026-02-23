@@ -52,6 +52,9 @@ For each function, provide:
    - 6: System integration or complex state
 6. Test cases with input/expected pairs
 7. Implementation hints
+8. Fixtures (setup/teardown) for stateful functions
+
+IMPORTANT: For functions that operate on shared state (e.g., a function with no input that returns different values based on prior calls), you MUST include fixtures with setup code that establishes the required state before each test.
 
 Respond with valid JSON only:
 ```json
@@ -68,6 +71,22 @@ Respond with valid JSON only:
         {{"name": "empty", "input": "([], 0.1)", "expected": "0.0"}}
       ],
       "hints": ["Sum items first, then apply tax rate"]
+    }},
+    {{
+      "id": "feat-002",
+      "function_name": "get_total_value",
+      "signature": "() -> float",
+      "docstring": "Get total value of inventory",
+      "complexity": 3,
+      "test_cases": [
+        {{"name": "empty", "input": "()", "expected": "0.0"}},
+        {{"name": "with_items", "input": "()", "expected": "150.0"}}
+      ],
+      "fixtures": {{
+        "setup": "global inventory; inventory = {{}}\n# For with_items test: add_item('apple', 10, 15.0)",
+        "teardown": "inventory.clear()"
+      }},
+      "hints": ["Sum quantity * price for all items in inventory"]
     }}
   ]
 }}
@@ -77,6 +96,7 @@ Requirement:
 {requirement}
 
 Generate contracts for ALL functions needed to implement this requirement.
+For stateful functions, always include fixtures with setup code.
 '''
 
 

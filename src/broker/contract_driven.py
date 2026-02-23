@@ -121,6 +121,15 @@ class ContractValidator:
                 impl.error = f"Function '{contract.function_name}' not found in implementation"
                 return impl
 
+            # Run fixture setup once if present (for shared state)
+            if contract.fixtures and contract.fixtures.setup:
+                try:
+                    exec(contract.fixtures.setup, exec_globals)
+                except Exception as e:
+                    impl.status = ContractStatus.FAILED
+                    impl.error = f"Fixture setup error: {e}"
+                    return impl
+
             # Run each test case
             all_passed = True
             for tc in contract.test_cases:
@@ -142,6 +151,13 @@ class ContractValidator:
                 except Exception as e:
                     impl.test_results[tc.name] = False
                     all_passed = False
+
+            # Run fixture teardown if present
+            if contract.fixtures and contract.fixtures.teardown:
+                try:
+                    exec(contract.fixtures.teardown, exec_globals)
+                except Exception:
+                    pass  # Teardown errors are not fatal
 
             impl.status = ContractStatus.VALIDATED if all_passed else ContractStatus.FAILED
 
