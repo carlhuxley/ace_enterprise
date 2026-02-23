@@ -169,13 +169,21 @@ class ModuleTDDBuilder:
 
         # All functions built - run integration tests
         logger.info("Running integration tests...")
-        integration_results = self._run_integration_tests(
+        integration_results, integration_failures = self._run_integration_tests(
             contract=contract,
             module_code=module_code,
         )
 
-        all_integration_passed = all(integration_results.values())
+        all_integration_passed = all(integration_results.values()) if integration_results else False
         elapsed = time.time() - start_time
+
+        # Build error message if integration tests failed
+        error_msg = None
+        if not all_integration_passed:
+            if integration_failures:
+                error_msg = f"Integration tests failed: {'; '.join(integration_failures[:3])}"
+            else:
+                error_msg = "Integration tests failed (unknown reason)"
 
         # Emit audit event
         if self._audit:
@@ -203,6 +211,7 @@ class ModuleTDDBuilder:
             success=all_integration_passed,
             total_cycles=total_cycles,
             elapsed_seconds=elapsed,
+            error=error_msg,
         )
 
     def _build_function(
@@ -349,7 +358,7 @@ Fix the implementation:
         self,
         contract: ModuleContract,
         module_code: str,
-    ) -> dict[str, bool]:
+    ) -> tuple[dict[str, bool], list[str]]:
         """Run integration tests against the built module.
 
         Args:
@@ -357,10 +366,14 @@ Fix the implementation:
             module_code: Complete module implementation
 
         Returns:
-            Dict mapping test name to pass/fail
+            Tuple of (dict mapping test name to pass/fail, list of failure messages)
         """
         # Use the existing validate_module function which runs integration tests
         passed, failures = validate_module(contract, module_code)
+
+        # Log failures for debugging
+        if failures:
+            logger.warning(f"Integration test failures: {failures}")
 
         results = {}
         for test in contract.integration_tests:
@@ -368,7 +381,13 @@ Fix the implementation:
             test_failed = any(test.name in f for f in failures)
             results[test.name] = not test_failed
 
-        return results
+        # If there are failures that don't match any test name, mark all as failed
+        if failures and all(results.values()):
+            # Generic failure (syntax error, execution error, etc.)
+            for test in contract.integration_tests:
+                results[test.name] = False
+
+        return results, failures
 
 
 def create_tdd_builder_from_config(
