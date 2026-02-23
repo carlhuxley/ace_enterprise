@@ -128,7 +128,8 @@ def run_module_tdd_flow(requirement: str):
             print(f"\nFunction build results:")
             for fr in build_result.function_results:
                 status = "PASS" if fr.success else "FAIL"
-                print(f"  {fr.function_name}: {status} ({fr.tdd_cycles} cycles)")
+                model_info = f" [{fr.actual_model}]" if fr.actual_model else ""
+                print(f"  {fr.function_name}: {status} ({fr.tdd_cycles} cycles){model_info}")
 
             if build_result.success:
                 builder_model_used = name

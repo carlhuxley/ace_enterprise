@@ -40,6 +40,9 @@ class FunctionBuildResult:
     success: bool
     error: str | None = None
     patterns_learned: list[str] = field(default_factory=list)
+    # Track actual model used (important for auto-routing learning)
+    actual_model: str | None = None
+    provider: str | None = None
 
 
 @dataclass
@@ -149,6 +152,24 @@ class ModuleTDDBuilder:
 
             function_results.append(result)
             total_cycles += result.tdd_cycles
+
+            # Emit per-function audit event (captures actual model for learning)
+            if self._audit:
+                self._audit.emit_simple(
+                    event_type=AuditEventType.CYCLE_COMPLETED,
+                    actor_id=result.actual_model or self._model_id,  # Use actual model!
+                    payload={
+                        "contract_id": contract.id,
+                        "function_name": func.name,
+                        "complexity": contract.complexity,
+                        "success": result.success,
+                        "cycles": result.tdd_cycles,
+                        "requested_model": self._model_id,
+                        "actual_model": result.actual_model,
+                        "provider": result.provider,
+                    },
+                    session_id=session_id,
+                )
 
             if result.success:
                 # Append function to module
@@ -265,12 +286,19 @@ def {func.name}{func.signature}:
 Output ONLY the Python function code:
 """
 
+        actual_model = None
+        provider = None
+
         for attempt in range(1, self._max_attempts + 1):
             logger.info(f"  Attempt {attempt}/{self._max_attempts}...")
 
             try:
                 response = self._llm.generate(prompt)
                 code = self._extract_function_code(response["content"], func.name)
+
+                # Capture actual model used (for auto-routing learning)
+                actual_model = response.get("actual_model", self._llm.model)
+                provider = response.get("provider")
 
                 # Validate the function compiles and has correct signature
                 validation_error = self._validate_function(code, func)
@@ -290,6 +318,8 @@ Fix the implementation:
                     code=code,
                     tdd_cycles=attempt,
                     success=True,
+                    actual_model=actual_model,
+                    provider=provider,
                 )
 
             except Exception as e:
@@ -302,6 +332,8 @@ Fix the implementation:
             tdd_cycles=self._max_attempts,
             success=False,
             error=f"Failed after {self._max_attempts} attempts",
+            actual_model=actual_model,
+            provider=provider,
         )
 
     def _extract_function_code(self, response: str, function_name: str) -> str:
