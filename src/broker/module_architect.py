@@ -5,12 +5,19 @@ ModuleArchitect generates a single contract for an entire module
 with all functions and integration tests.
 
 This is better for stateful systems where functions are interdependent.
+
+Enhanced with codebase context awareness:
+- Understands existing functions and their signatures
+- Knows database schema (tables, columns)
+- Follows existing patterns and conventions
+- Tracks module dependencies
 """
 
 import json
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -18,6 +25,55 @@ from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# Context Models - Understanding the existing codebase
+# ============================================================================
+
+@dataclass
+class ExistingFunction:
+    """An existing function in the codebase."""
+    name: str
+    signature: str
+    docstring: str
+    module: str  # Which module it's in
+
+
+@dataclass
+class SchemaTable:
+    """Database table schema."""
+    name: str
+    columns: list[str]
+    primary_key: str = "id"
+
+
+@dataclass
+class CodebaseContext:
+    """Context about the existing codebase for the architect.
+
+    This helps the architect understand:
+    - What functions already exist (to call them, not duplicate)
+    - Database schema (to write correct queries)
+    - Patterns to follow (conventions, return types)
+    """
+    existing_functions: list[ExistingFunction] = field(default_factory=list)
+    schema: list[SchemaTable] = field(default_factory=list)
+    patterns: list[str] = field(default_factory=list)  # e.g., "Use get_db() for connections"
+    imports: list[str] = field(default_factory=list)  # Required imports
+
+
+@dataclass
+class ModuleDependencies:
+    """Dependencies between modules."""
+    depends_on: list[str] = field(default_factory=list)  # Functions this module calls
+    provides: list[str] = field(default_factory=list)    # Functions this module exports
+    tables_read: list[str] = field(default_factory=list)  # Tables read from
+    tables_write: list[str] = field(default_factory=list) # Tables written to
+
+
+# ============================================================================
+# Contract Models
+# ============================================================================
 
 @dataclass
 class FunctionSpec:
@@ -47,6 +103,8 @@ class ModuleContract:
     integration_tests: list[IntegrationTest]
     complexity: int  # Overall module complexity
     hints: list[str] = field(default_factory=list)
+    # NEW: Module connections
+    dependencies: ModuleDependencies = field(default_factory=ModuleDependencies)
 
 
 @dataclass
@@ -124,8 +182,77 @@ Generate a complete module contract with integration tests.
 '''
 
 
+# Context-aware prompt that understands existing codebase
+MODULE_ARCHITECT_CONTEXT_PROMPT = '''You are a software architect designing a Python module extension.
+
+## EXISTING CODEBASE CONTEXT
+
+{context_section}
+
+## YOUR TASK
+
+Design NEW functions that extend this codebase. You must:
+1. REUSE existing functions where appropriate (call them, don't reimplement)
+2. Follow the SAME patterns and conventions
+3. Use the CORRECT database schema
+4. Return data in the SAME format as existing functions
+
+## REQUIREMENT
+
+{requirement}
+
+## OUTPUT FORMAT
+
+Respond with valid JSON only:
+```json
+{{
+  "module": {{
+    "id": "feature-001",
+    "name": "feature_name",
+    "description": "What this feature does",
+    "complexity": 3,
+    "shared_state": "",
+    "dependencies": {{
+      "depends_on": ["get_db", "get_application"],
+      "provides": ["search_applications"],
+      "tables_read": ["applications"],
+      "tables_write": []
+    }},
+    "functions": [
+      {{
+        "name": "search_applications",
+        "signature": "(query: str) -> list[dict]",
+        "docstring": "Search applications by text query"
+      }}
+    ],
+    "integration_tests": [
+      {{
+        "name": "test_search_finds_match",
+        "setup": "init_db(); clear_db(); create_application('Acme Corp', 'Engineer')",
+        "steps": [
+          "results = search_applications('Acme')"
+        ],
+        "assertion": "len(results) == 1 and results[0]['name'] == 'Acme Corp'"
+      }}
+    ],
+    "hints": [
+      "Use LIKE query for text search",
+      "Return list of dicts matching get_application format"
+    ]
+  }}
+}}
+```
+
+Generate a module contract that INTEGRATES with the existing codebase.
+'''
+
+
 class ModuleArchitect:
-    """Generates module-level contracts for stateful systems."""
+    """Generates module-level contracts for stateful systems.
+
+    Enhanced with codebase context awareness for understanding
+    existing functions, schema, and patterns.
+    """
 
     def __init__(
         self,
@@ -141,22 +268,40 @@ class ModuleArchitect:
         self,
         requirement: str,
         session_id: str | None = None,
+        context: CodebaseContext | None = None,
     ) -> ModuleArchitectResult:
-        """Generate a module contract from a requirement."""
-        import hashlib
+        """Generate a module contract from a requirement.
+
+        Args:
+            requirement: Natural language description of what to build
+            session_id: Optional session ID for audit tracking
+            context: Optional codebase context (existing functions, schema, patterns)
+
+        Returns:
+            ModuleArchitectResult with the generated contract
+        """
         import time
 
         start_time = time.time()
 
         try:
-            prompt = MODULE_ARCHITECT_PROMPT.format(requirement=requirement)
+            # Use context-aware prompt if context is provided
+            if context:
+                context_section = self._format_context(context)
+                prompt = MODULE_ARCHITECT_CONTEXT_PROMPT.format(
+                    context_section=context_section,
+                    requirement=requirement,
+                )
+            else:
+                prompt = MODULE_ARCHITECT_PROMPT.format(requirement=requirement)
+
             result = self._llm.generate(prompt)
             response = result["content"]
 
             contract = self._parse_module(response)
             elapsed = time.time() - start_time
 
-            # Emit audit event
+            # Emit audit event with dependency info
             if self._audit:
                 self._audit.emit_simple(
                     event_type=AuditEventType.CONTRACT_GENERATED,
@@ -168,6 +313,12 @@ class ModuleArchitect:
                         "function_count": len(contract.functions),
                         "test_count": len(contract.integration_tests),
                         "complexity": contract.complexity,
+                        # NEW: Track module connections
+                        "depends_on": contract.dependencies.depends_on,
+                        "provides": contract.dependencies.provides,
+                        "tables_read": contract.dependencies.tables_read,
+                        "tables_write": contract.dependencies.tables_write,
+                        "has_context": context is not None,
                     },
                     session_id=session_id,
                 )
@@ -190,6 +341,37 @@ class ModuleArchitect:
                 success=False,
                 error=str(e),
             )
+
+    def _format_context(self, context: CodebaseContext) -> str:
+        """Format codebase context for the prompt."""
+        sections = []
+
+        # Existing functions
+        if context.existing_functions:
+            funcs = []
+            for f in context.existing_functions:
+                funcs.append(f"  - {f.name}{f.signature}: {f.docstring}")
+            sections.append("### Existing Functions (you can call these)\n" + "\n".join(funcs))
+
+        # Database schema
+        if context.schema:
+            tables = []
+            for t in context.schema:
+                cols = ", ".join(t.columns)
+                tables.append(f"  - {t.name}: {cols} (PK: {t.primary_key})")
+            sections.append("### Database Schema\n" + "\n".join(tables))
+
+        # Patterns
+        if context.patterns:
+            patterns = "\n".join(f"  - {p}" for p in context.patterns)
+            sections.append("### Patterns to Follow\n" + patterns)
+
+        # Imports
+        if context.imports:
+            imports = "\n".join(f"  - {i}" for i in context.imports)
+            sections.append("### Required Imports\n" + imports)
+
+        return "\n\n".join(sections) if sections else "No existing context provided."
 
     def _parse_module(self, response: str) -> ModuleContract:
         """Parse module contract from LLM response."""
@@ -226,6 +408,15 @@ class ModuleArchitect:
             for t in module.get("integration_tests", [])
         ]
 
+        # Parse dependencies (new)
+        deps_data = module.get("dependencies", {})
+        dependencies = ModuleDependencies(
+            depends_on=deps_data.get("depends_on", []),
+            provides=deps_data.get("provides", [f.name for f in functions]),  # Default to function names
+            tables_read=deps_data.get("tables_read", []),
+            tables_write=deps_data.get("tables_write", []),
+        )
+
         return ModuleContract(
             id=module.get("id", "module-001"),
             name=module.get("name", "module"),
@@ -235,6 +426,7 @@ class ModuleArchitect:
             integration_tests=tests,
             complexity=module.get("complexity", 3),
             hints=module.get("hints", []),
+            dependencies=dependencies,
         )
 
 
@@ -269,6 +461,130 @@ Hints:
 Respond with ONLY the Python code. Include the shared state and all functions.
 Do NOT include test code - just the implementation.
 '''
+
+
+def extract_context_from_file(file_path: str) -> CodebaseContext:
+    """Extract codebase context from an existing Python file.
+
+    Parses the file to find:
+    - Function definitions with signatures and docstrings
+    - SQL table references (for schema inference)
+    - Common patterns
+
+    Args:
+        file_path: Path to Python file to analyze
+
+    Returns:
+        CodebaseContext with extracted information
+    """
+    import ast
+
+    with open(file_path, 'r') as f:
+        source = f.read()
+
+    tree = ast.parse(source)
+    module_name = Path(file_path).stem
+
+    functions = []
+    tables = set()
+    patterns = []
+
+    for node in ast.walk(tree):
+        # Extract function definitions
+        if isinstance(node, ast.FunctionDef):
+            # Build signature from arguments
+            args = []
+            for arg in node.args.args:
+                arg_str = arg.arg
+                if arg.annotation:
+                    arg_str += f": {ast.unparse(arg.annotation)}"
+                args.append(arg_str)
+
+            # Get return type
+            returns = ""
+            if node.returns:
+                returns = f" -> {ast.unparse(node.returns)}"
+
+            signature = f"({', '.join(args)}){returns}"
+
+            # Get docstring
+            docstring = ast.get_docstring(node) or ""
+
+            functions.append(ExistingFunction(
+                name=node.name,
+                signature=signature,
+                docstring=docstring.split('\n')[0] if docstring else "",
+                module=module_name,
+            ))
+
+        # Extract SQL table references
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            sql = node.value.upper()
+            # Look for table references in SQL
+            for keyword in ['FROM ', 'INTO ', 'UPDATE ', 'JOIN ']:
+                if keyword in sql:
+                    # Simple extraction - find word after keyword
+                    idx = sql.find(keyword) + len(keyword)
+                    rest = sql[idx:].strip()
+                    table = rest.split()[0].strip('(').lower() if rest else None
+                    if table and table.isalnum():
+                        tables.add(table)
+
+    # Infer patterns from code
+    if 'get_db()' in source or 'get_db(' in source:
+        patterns.append("Use get_db() for database connections")
+    if 'cursor.fetchone()' in source:
+        patterns.append("Use fetchone() for single row queries")
+    if 'cursor.fetchall()' in source:
+        patterns.append("Use fetchall() for multiple row queries")
+    if '-> dict' in source or '-> dict |' in source:
+        patterns.append("Return dict for single records")
+    if '-> list[dict]' in source:
+        patterns.append("Return list[dict] for multiple records")
+
+    # Build schema from discovered tables (columns need manual specification)
+    schema = [SchemaTable(name=t, columns=["*"]) for t in tables]
+
+    return CodebaseContext(
+        existing_functions=functions,
+        schema=schema,
+        patterns=patterns,
+    )
+
+
+def extract_context_from_directory(dir_path: str, pattern: str = "*.py") -> CodebaseContext:
+    """Extract codebase context from all Python files in a directory.
+
+    Args:
+        dir_path: Directory path to scan
+        pattern: Glob pattern for files (default: *.py)
+
+    Returns:
+        Combined CodebaseContext from all files
+    """
+    from pathlib import Path
+
+    all_functions = []
+    all_tables = {}
+    all_patterns = set()
+
+    for py_file in Path(dir_path).glob(pattern):
+        if py_file.name.startswith('__'):
+            continue
+        try:
+            ctx = extract_context_from_file(str(py_file))
+            all_functions.extend(ctx.existing_functions)
+            for t in ctx.schema:
+                all_tables[t.name] = t
+            all_patterns.update(ctx.patterns)
+        except Exception as e:
+            logger.warning(f"Failed to parse {py_file}: {e}")
+
+    return CodebaseContext(
+        existing_functions=all_functions,
+        schema=list(all_tables.values()),
+        patterns=list(all_patterns),
+    )
 
 
 def validate_module(contract: ModuleContract, code: str) -> tuple[bool, list[str]]:
