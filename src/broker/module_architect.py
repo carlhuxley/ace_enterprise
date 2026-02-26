@@ -463,6 +463,161 @@ Do NOT include test code - just the implementation.
 '''
 
 
+# Common English words that are NOT table names
+_SQL_NOISE_WORDS = {
+    'select', 'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null',
+    'true', 'false', 'as', 'on', 'by', 'order', 'group', 'having',
+    'limit', 'offset', 'join', 'left', 'right', 'inner', 'outer',
+    'values', 'set', 'into', 'insert', 'update', 'delete', 'create',
+    'table', 'if', 'exists', 'primary', 'key', 'integer', 'text',
+    'real', 'blob', 'default', 'autoincrement', 'unique', 'index',
+    'the', 'a', 'an', 'to', 'of', 'for', 'with', 'should', 'be',
+    'this', 'that', 'it', 'when', 'then', 'else', 'end', 'case',
+    'count', 'sum', 'avg', 'min', 'max', 'like', 'between',
+    'asc', 'desc', 'distinct', 'all', 'any', 'some', 'each',
+    'now', 'current_timestamp', 'datetime', 'date', 'time',
+    'status', 'id', 'name', 'value', 'type', 'data', 'contract',
+    'implementation', 'function', 'module', 'test', 'result',
+    # SQLite internal tables
+    'sqlite_sequence', 'sqlite_master', 'sqlite_temp_master',
+    # Generic words
+    'database', 'schema', 'column', 'row', 'record', 'field',
+}
+
+
+def _extract_tables_from_sql(sql: str) -> set[str]:
+    """Extract table names from SQL string with improved accuracy.
+
+    Uses regex patterns to find tables after SQL keywords,
+    filters out noise words, and validates table name format.
+
+    Args:
+        sql: SQL string to parse
+
+    Returns:
+        Set of table names found
+    """
+    tables = set()
+    sql_upper = sql.upper()
+
+    # Pattern 1: CREATE TABLE [IF NOT EXISTS] table_name
+    create_match = re.search(
+        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?(\w+)["\']?',
+        sql_upper
+    )
+    if create_match:
+        table = create_match.group(1).lower()
+        if _is_valid_table_name(table):
+            tables.add(table)
+
+    # Pattern 2: FROM table_name or JOIN table_name
+    from_matches = re.findall(
+        r'(?:FROM|JOIN)\s+["\']?(\w+)["\']?',
+        sql_upper
+    )
+    for table in from_matches:
+        table = table.lower()
+        if _is_valid_table_name(table):
+            tables.add(table)
+
+    # Pattern 3: INSERT INTO table_name
+    insert_match = re.search(
+        r'INSERT\s+INTO\s+["\']?(\w+)["\']?',
+        sql_upper
+    )
+    if insert_match:
+        table = insert_match.group(1).lower()
+        if _is_valid_table_name(table):
+            tables.add(table)
+
+    # Pattern 4: UPDATE table_name
+    update_match = re.search(
+        r'UPDATE\s+["\']?(\w+)["\']?',
+        sql_upper
+    )
+    if update_match:
+        table = update_match.group(1).lower()
+        if _is_valid_table_name(table):
+            tables.add(table)
+
+    # Pattern 5: DELETE FROM table_name
+    delete_match = re.search(
+        r'DELETE\s+FROM\s+["\']?(\w+)["\']?',
+        sql_upper
+    )
+    if delete_match:
+        table = delete_match.group(1).lower()
+        if _is_valid_table_name(table):
+            tables.add(table)
+
+    return tables
+
+
+def _normalize_tables(tables: set[str]) -> set[str]:
+    """Normalize table names - prefer plural form, dedupe singular/plural.
+
+    Args:
+        tables: Set of table names
+
+    Returns:
+        Normalized set of table names
+    """
+    normalized = set()
+    table_list = sorted(tables)
+
+    for table in table_list:
+        # If we have both singular and plural, keep only plural
+        plural = table + 's'
+        singular = table.rstrip('s') if table.endswith('s') else None
+
+        if plural in tables:
+            # This is singular, plural exists - skip
+            continue
+        elif singular and singular in tables:
+            # This is plural, singular also exists - keep this one
+            normalized.add(table)
+        else:
+            # No singular/plural conflict
+            normalized.add(table)
+
+    return normalized
+
+
+def _is_valid_table_name(name: str) -> bool:
+    """Check if a string looks like a valid table name.
+
+    Valid table names:
+    - Are not SQL keywords or common noise words
+    - Are snake_case or simple identifiers
+    - Are at least 2 characters
+    - Don't start with numbers
+
+    Args:
+        name: Potential table name
+
+    Returns:
+        True if it looks like a valid table name
+    """
+    if not name or len(name) < 2:
+        return False
+
+    # Filter out noise words
+    if name.lower() in _SQL_NOISE_WORDS:
+        return False
+
+    # Must start with letter or underscore
+    if not (name[0].isalpha() or name[0] == '_'):
+        return False
+
+    # Must be alphanumeric with underscores (snake_case)
+    if not re.match(r'^[a-z_][a-z0-9_]*$', name.lower()):
+        return False
+
+    # Likely table names end with 's' (plural) or common suffixes
+    # But don't enforce this - just a heuristic
+    return True
+
+
 def extract_context_from_file(file_path: str) -> CodebaseContext:
     """Extract codebase context from an existing Python file.
 
@@ -519,16 +674,12 @@ def extract_context_from_file(file_path: str) -> CodebaseContext:
 
         # Extract SQL table references
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            sql = node.value.upper()
-            # Look for table references in SQL
-            for keyword in ['FROM ', 'INTO ', 'UPDATE ', 'JOIN ']:
-                if keyword in sql:
-                    # Simple extraction - find word after keyword
-                    idx = sql.find(keyword) + len(keyword)
-                    rest = sql[idx:].strip()
-                    table = rest.split()[0].strip('(').lower() if rest else None
-                    if table and table.isalnum():
-                        tables.add(table)
+            sql = node.value
+            # Only process strings that look like SQL
+            sql_upper = sql.upper()
+            if any(kw in sql_upper for kw in ['SELECT ', 'INSERT ', 'UPDATE ', 'DELETE ', 'CREATE TABLE']):
+                extracted = _extract_tables_from_sql(sql)
+                tables.update(extracted)
 
     # Infer patterns from code
     if 'get_db()' in source or 'get_db(' in source:
@@ -543,7 +694,9 @@ def extract_context_from_file(file_path: str) -> CodebaseContext:
         patterns.append("Return list[dict] for multiple records")
 
     # Build schema from discovered tables (columns need manual specification)
-    schema = [SchemaTable(name=t, columns=["*"]) for t in tables]
+    # Normalize to dedupe singular/plural (e.g., application vs applications)
+    normalized_tables = _normalize_tables(tables)
+    schema = [SchemaTable(name=t, columns=["*"]) for t in sorted(normalized_tables)]
 
     return CodebaseContext(
         existing_functions=functions,
@@ -565,6 +718,7 @@ def extract_context_from_directory(dir_path: str, pattern: str = "*.py") -> Code
     from pathlib import Path
 
     all_functions = []
+    all_table_names = set()
     all_tables = {}
     all_patterns = set()
 
@@ -575,14 +729,19 @@ def extract_context_from_directory(dir_path: str, pattern: str = "*.py") -> Code
             ctx = extract_context_from_file(str(py_file))
             all_functions.extend(ctx.existing_functions)
             for t in ctx.schema:
+                all_table_names.add(t.name)
                 all_tables[t.name] = t
             all_patterns.update(ctx.patterns)
         except Exception as e:
             logger.warning(f"Failed to parse {py_file}: {e}")
 
+    # Normalize tables across all files (dedupe singular/plural)
+    normalized_names = _normalize_tables(all_table_names)
+    normalized_schema = [all_tables[name] for name in sorted(normalized_names) if name in all_tables]
+
     return CodebaseContext(
         existing_functions=all_functions,
-        schema=list(all_tables.values()),
+        schema=normalized_schema,
         patterns=list(all_patterns),
     )
 
