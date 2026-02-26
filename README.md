@@ -180,6 +180,29 @@ Features:
 - High-frequency feedback enforcement
 - Full traceability: Gherkin → tests → implementation → decisions
 
+### Context-Aware ModuleArchitect
+
+Generates module-level contracts by understanding existing codebases:
+
+```python
+from src.broker.module_architect import extract_context_from_directory
+
+# Analyze existing code
+context = extract_context_from_directory("src/")
+
+# Context includes:
+# - Existing functions and signatures
+# - Database schema (tables, columns)
+# - Code patterns and conventions
+# - Module dependencies
+```
+
+Features:
+- AST-based function extraction
+- SQL table detection from code strings
+- Pattern inference (get_db(), return types)
+- Singular/plural table normalization
+
 ### Playbook Enforcer
 
 Enforces high-frequency feedback rules:
@@ -278,6 +301,9 @@ ace_enterprise/
 │   │   ├── autonomous_tdd_agent.py  # TDD with learning
 │   │   ├── redundancy_checker.py    # Test deduplication
 │   │   └── gherkin_extraction_agent.py
+│   ├── broker/                    # Capability broker components
+│   │   ├── module_architect.py      # Context-aware code generation
+│   │   └── module_tdd_builder.py    # Module-level TDD
 │   ├── audit/                     # Hash-chained audit system
 │   │   ├── store.py                 # Append-only storage
 │   │   ├── client.py                # Write-only client for agents
@@ -334,9 +360,12 @@ Task → Capability Broker (recommend by capability)
 - [x] Playbook enforcer (high-frequency feedback)
 - [x] Test redundancy detection
 - [x] Gherkin extraction (reverse engineering)
+- [x] Context-aware ModuleArchitect
+- [x] OpenRouter provider support (free model tiers)
+- [x] Tests for autonomous_tdd_agent (23 tests)
 
 ### In Progress
-- [ ] Tests for core modules (autonomous_tdd_agent, playbook_manager, ensemble)
+- [ ] Tests for playbook_manager, ensemble modules
 - [ ] Session logging visibility
 
 ### Planned: Capability Broker Modules
@@ -363,6 +392,11 @@ PROVIDER=togetherai
 TOGETHERAI_API_KEY=your_key
 MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
 
+# Or use OpenRouter (access to many models, including free tiers)
+PROVIDER=openrouter
+OPENROUTER_API_KEY=your_key
+MODEL=qwen/qwen-2.5-coder-32b-instruct  # or free models like qwen/qwen3-14b:free
+
 # Storage
 ACE_KNOWLEDGE_DIR=~/.ace
 DATABASE_URL=postgresql://user:pass@localhost/ace
@@ -370,6 +404,22 @@ DATABASE_URL=postgresql://user:pass@localhost/ace
 # Audit (separate database)
 AUDIT_DATABASE_URL=postgresql://audit:pass@localhost/ace_audit
 ```
+
+### OpenRouter Provider
+
+OpenRouter provides access to many models through a single API, including free tiers:
+
+```python
+from src.utils.llm_client import LLMClient
+
+# Use free models for development
+client = LLMClient(provider="openrouter", model="qwen/qwen3-14b:free")
+
+# Or paid models for production
+client = LLMClient(provider="openrouter", model="anthropic/claude-3.5-sonnet")
+```
+
+Free models available: `qwen/qwen3-14b:free`, `google/gemma-3-27b-it:free`, `mistralai/mistral-small-3.1-24b-instruct:free`
 
 ### Playbook Rules
 
