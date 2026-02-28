@@ -1,5 +1,28 @@
 # ACE: AI Coding Engine
 
+## Quick Start
+
+```bash
+# Install
+pip install ace-enterprise
+
+# Set up LLM provider (OpenRouter recommended for multi-model)
+export OPENROUTER_API_KEY=your_key
+
+# Generate a module from requirements
+ace architect "Build a rate limiter with sliding window"
+
+# Build it with TDD
+ace build rate_limiter.contract.yml
+```
+
+## Requirements
+
+- Python 3.11+
+- LLM API key (OpenRouter, Anthropic, or OpenAI)
+
+---
+
 **The problem:** AI writes plausible code, not working code.
 
 You can prompt Claude or GPT to "use TDD" and it will produce code that *looks* like TDD was followed. But without execution, there's no ground truth. The model says "this test would fail" - but would it?
@@ -452,7 +475,20 @@ Governance. Your devs are using AI to write code. ACE gives you: audit trails (w
 
 ## Status
 
-Active development. Core TDD loop working. Looking for feedback on the approach.
+**Alpha** - Working but evolving.
+
+- Core TDD loop: working
+- Playbook/patterns: working
+- MCP server: working
+- Multi-model routing: working
+- ML experiment tracking: working
+
+Currently a monolith (`pip install ace-enterprise`). Modular packages coming:
+```
+Future: pip install ace-core ace-tdd ace-playbook
+```
+
+Looking for feedback on the approach.
 
 ---
 
