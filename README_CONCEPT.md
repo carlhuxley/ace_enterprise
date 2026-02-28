@@ -276,7 +276,37 @@ Not locked to one tool. ACE becomes infrastructure other agents can use.
 
 ---
 
-## 5. Audit: Enterprise-Ready from Day One
+## 5. ML Experiment Monitoring: Playbook for Data Science
+
+The playbook approach extends to ML experimentation:
+
+```python
+# MLflow callback captures decisions
+ace_callback.log_decision(
+    question="Which optimizer to use?",
+    decision="Adam with lr=0.001",
+    rationale="Better convergence in pilot runs",
+    alternatives=["SGD", "AdamW"]
+)
+
+# Later: track outcome
+ace_callback.log_outcome(
+    outcome="successful",
+    learned_insight="Adam outperforms SGD for this architecture"
+)
+```
+
+**Same philosophy as code playbook:**
+- Don't just run experiments, capture what you learned
+- Decisions + rationale + outcomes
+- Cross-experiment patterns emerge over time
+- Next experiment benefits from previous knowledge
+
+Works with MLflow. Stores experiment knowledge alongside code patterns.
+
+---
+
+## 6. Audit: Enterprise-Ready from Day One
 
 Audit trail built into the architecture, not bolted on:
 
