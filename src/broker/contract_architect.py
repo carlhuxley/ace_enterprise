@@ -13,6 +13,7 @@ handle the implementation.
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 
@@ -314,6 +315,7 @@ def create_architect_from_config(
     model: str,
     base_url: str | None = None,
     audit_db_url: str | None = None,
+    enable_audit: bool = True,
 ) -> ContractArchitect:
     """Factory function to create an architect with common config.
 
@@ -321,7 +323,9 @@ def create_architect_from_config(
         provider: LLM provider (e.g., "openai", "anthropic", "together")
         model: Model name
         base_url: Optional base URL for API
-        audit_db_url: Optional audit database URL
+        audit_db_url: Optional audit database URL (defaults to AUDIT_DATABASE_URL
+            env var or .local/audit.db)
+        enable_audit: Enable audit logging (default True, respects AUDIT_DISABLED env)
 
     Returns:
         Configured ContractArchitect
@@ -329,8 +333,10 @@ def create_architect_from_config(
     llm_client = LLMClient(provider=provider, model=model, base_url=base_url)
 
     audit_client = None
-    if audit_db_url:
-        audit_client = LocalAuditClient(audit_db_url)
+    audit_disabled = os.getenv("AUDIT_DISABLED", "").lower() == "true"
+    if enable_audit and not audit_disabled:
+        db_url = audit_db_url or os.getenv("AUDIT_DATABASE_URL")
+        audit_client = LocalAuditClient(db_url)  # Uses .local/audit.db if None
 
     model_id = f"{provider}-{model}"
 

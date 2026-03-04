@@ -10,6 +10,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from src.audit.local_client import LocalAuditClient
+from src.audit.schemas import AuditEventType
+
 logger = logging.getLogger("ace-mcp.tools")
 
 
@@ -42,6 +45,9 @@ class ACETools:
         self._knowledge_service = None
         self._playbook_manager = None
         self._playbook_data = None
+
+        # Audit client for tracking MCP tool usage
+        self._audit = LocalAuditClient()
 
         # Load playbook from file if specified
         if playbook_file and playbook_file.exists():
@@ -302,6 +308,22 @@ class ACETools:
             top_k=args.get("top_k", 10),
         )
 
+        # Emit audit event
+        self._audit.emit_simple(
+            event_type=AuditEventType.RETRIEVAL_QUERY,
+            actor_id="mcp-client",
+            actor_type="agent",
+            payload={
+                "query": args["query"],
+                "top_k": args.get("top_k", 10),
+                "results_apply": len(response.apply),
+                "results_ask_first": len(response.ask_first),
+                "retrieval_time_ms": response.retrieval_time_ms,
+            },
+            playbook_id=self.playbook_id,
+            project_id=args.get("project_id"),
+        )
+
         # Format response
         return {
             "apply": [
@@ -346,9 +368,10 @@ class ACETools:
                 "domain": "domain_knowledge",
             }
 
+            knowledge_type = args.get("type", "pattern")
             bullet_data = BulletCreate(
                 content=args["content"],
-                section=section_map.get(args.get("type", "pattern"), "domain_knowledge"),
+                section=section_map.get(knowledge_type, "domain_knowledge"),
                 tags=args.get("tags", []),
                 created_by_type="human",
                 created_by_id=args.get("team_id"),
@@ -357,6 +380,21 @@ class ACETools:
 
             playbook_id = self.playbook_id or "default_playbook"
             bullet = manager.add_bullet(playbook_id, bullet_data)
+
+            # Emit audit event
+            self._audit.emit_simple(
+                event_type=AuditEventType.KNOWLEDGE_ADDED,
+                actor_id="mcp-client",
+                actor_type="human",
+                payload={
+                    "bullet_id": bullet.id,
+                    "content_length": len(args["content"]),
+                    "type": knowledge_type,
+                    "tags": args.get("tags", []),
+                    "team_id": args.get("team_id"),
+                },
+                playbook_id=playbook_id,
+            )
 
             return {
                 "success": True,
@@ -371,7 +409,21 @@ class ACETools:
         """Handle query tool call."""
         # Use file-based playbook if available (fast, no embedding needed)
         if self._playbook_data:
-            return self._query_file_playbook(args)
+            result = self._query_file_playbook(args)
+            # Emit audit event for file-based query
+            self._audit.emit_simple(
+                event_type=AuditEventType.RETRIEVAL_QUERY,
+                actor_id="mcp-client",
+                actor_type="agent",
+                payload={
+                    "query": args["query"],
+                    "top_k": args.get("top_k", 5),
+                    "results_count": result.get("count", 0),
+                    "source": "file",
+                },
+                playbook_id=str(self.playbook_file) if self.playbook_file else None,
+            )
+            return result
 
         # Fall back to knowledge service (requires embeddings)
         service = self._get_knowledge_service()
@@ -389,6 +441,21 @@ class ACETools:
 
         # Return all results without verdict filtering
         all_results = response.apply + response.ask_first
+
+        # Emit audit event
+        self._audit.emit_simple(
+            event_type=AuditEventType.RETRIEVAL_QUERY,
+            actor_id="mcp-client",
+            actor_type="agent",
+            payload={
+                "query": args["query"],
+                "top_k": args.get("top_k", 5),
+                "results_count": len(all_results),
+                "source": "knowledge_service",
+            },
+            playbook_id=self.playbook_id,
+        )
+
         return {
             "results": [
                 {
@@ -458,6 +525,19 @@ class ACETools:
 
             # Update feedback
             manager.update_bullet_feedback(playbook_id, bullet_id, feedback)
+
+            # Emit audit event
+            self._audit.emit_simple(
+                event_type=AuditEventType.PATTERN_FEEDBACK,
+                actor_id="mcp-client",
+                actor_type="human",
+                payload={
+                    "bullet_id": bullet_id,
+                    "feedback": feedback,
+                    "context": args.get("context"),
+                },
+                playbook_id=playbook_id,
+            )
 
             return {
                 "success": True,
