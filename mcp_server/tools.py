@@ -614,21 +614,102 @@ class ACETools:
         try:
             from pathlib import Path
 
-            from src.agents.autonomous_tdd_agent import AutonomousTDDAgent  # noqa: F401
+            from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
+            from src.agents.test_review_agent import TestReviewAgent
+            from src.config.settings import settings
+            from src.ensemble.learner import EnsembleLearner
 
-            project_path = Path(args["project_path"])
-            _src_dir = project_path / args.get("src_dir", "src")
-            _test_dir = project_path / args.get("test_dir", "tests")
+            # Parse paths
+            project_path = Path(args["project_path"]).resolve()
+            src_dir = project_path / args.get("src_dir", "src")
+            test_dir = project_path / args.get("test_dir", "tests")
 
-            # This is a simplified version - full implementation would
-            # set up the TDD agent properly
+            # Ensure directories exist
+            src_dir.mkdir(parents=True, exist_ok=True)
+            test_dir.mkdir(parents=True, exist_ok=True)
+
+            # Get model configuration from settings
+            provider = settings.default_llm_provider
+            if provider == "openai":
+                model = settings.openai_default_model
+            elif provider == "anthropic":
+                model = settings.anthropic_default_model
+            elif provider == "openrouter":
+                model = settings.openrouter_default_model
+            elif provider == "deepseek":
+                model = settings.deepseek_default_model
+            elif provider == "togetherai":
+                model = settings.togetherai_default_model
+            else:
+                model = settings.ollama_default_model
+
+            # Create ensemble learner with configured model
+            playbook_id = self.playbook_id or "mcp_tdd_playbook"
+            ensemble = EnsembleLearner(
+                models=[(provider, model)],
+                playbook_id=playbook_id,
+                enable_deliberation=False,  # Single model, no deliberation needed
+            )
+
+            # Create test reviewer
+            test_reviewer = TestReviewAgent(use_llm_analysis=False)
+
+            # Instantiate TDD agent
+            tdd_agent = AutonomousTDDAgent(
+                ensemble_learner=ensemble,
+                test_reviewer=test_reviewer,
+                project_root=project_path,
+                test_dir=test_dir,
+                src_dir=src_dir,
+                max_iterations=args.get("max_iterations", 10),
+                review_threshold=args.get("review_threshold", 0.7),
+            )
+
+            # Handle Gherkin directory if provided
+            gherkin_dir = None
+            if args.get("gherkin_dir"):
+                gherkin_dir = Path(args["gherkin_dir"])
+
+            # Build the feature
+            result = tdd_agent.build_feature(
+                requirement=args["feature"],
+                gherkin_dir=gherkin_dir,
+                project_root=project_path,
+                source_dir=src_dir,
+                test_dir=test_dir,
+            )
+
+            # Emit audit event
+            self._audit.emit_simple(
+                event_type=AuditEventType.CYCLE_COMPLETED,
+                actor_id="mcp-client",
+                actor_type="agent",
+                payload={
+                    "feature": args["feature"][:200],
+                    "cycles_executed": result.cycles_executed,
+                    "all_tests_passed": result.all_tests_passed,
+                    "bullets_learned": result.playbook_bullets_added,
+                    "total_time_seconds": result.total_time_seconds,
+                },
+                playbook_id=playbook_id,
+                project_id=str(project_path),
+            )
+
+            # Return serializable result
             return {
-                "status": "not_implemented",
-                "message": "TDD integration requires additional setup. Use 'ace build-feature' CLI instead.",
-                "feature": args["feature"][:100] + "...",
+                "success": True,
+                "requirement": result.requirement,
+                "test_files": [str(f) for f in result.test_files],
+                "implementation_files": [str(f) for f in result.implementation_files],
+                "cycles_executed": result.cycles_executed,
+                "all_tests_passed": result.all_tests_passed,
+                "playbook_bullets_added": result.playbook_bullets_added,
+                "total_time_seconds": result.total_time_seconds,
             }
+
         except Exception as e:
-            return {"error": str(e)}
+            logger.exception(f"build_feature failed: {e}")
+            return {"success": False, "error": str(e)}
 
     def _handle_list_providers(self, args: dict) -> dict:
         """Handle list_providers tool call."""
