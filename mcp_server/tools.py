@@ -218,6 +218,28 @@ class ACETools:
                     "properties": {},
                 },
             },
+            {
+                "name": "list_providers",
+                "description": (
+                    "List available LLM providers and their configuration. "
+                    "Returns which providers are configured and available for use."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "include_models": {
+                            "type": "boolean",
+                            "description": "Include default model for each provider",
+                            "default": True,
+                        },
+                        "check_availability": {
+                            "type": "boolean",
+                            "description": "Check if providers are actually reachable (slower)",
+                            "default": False,
+                        },
+                    },
+                },
+            },
         ]
 
         # Add TDD tools if enabled
@@ -277,6 +299,7 @@ class ACETools:
             "feedback": self._handle_feedback,
             "get_playbook_info": self._handle_get_playbook_info,
             "build_feature": self._handle_build_feature,
+            "list_providers": self._handle_list_providers,
         }
 
         handler = handlers.get(name)
@@ -606,3 +629,75 @@ class ACETools:
             }
         except Exception as e:
             return {"error": str(e)}
+
+    def _handle_list_providers(self, args: dict) -> dict:
+        """Handle list_providers tool call."""
+        from src.config.settings import settings
+        from src.utils.llm_client import LLMClient
+
+        include_models = args.get("include_models", True)
+        check_availability = args.get("check_availability", False)
+
+        # Define all supported providers and their config
+        providers_config = {
+            "ollama": {
+                "type": "local",
+                "description": "Local LLM inference via Ollama",
+                "configured": True,  # Always available locally
+                "default_model": settings.ollama_default_model if include_models else None,
+                "base_url": settings.ollama_base_url,
+            },
+            "openai": {
+                "type": "api",
+                "description": "OpenAI API (GPT models)",
+                "configured": bool(settings.openai_api_key),
+                "default_model": settings.openai_default_model if include_models else None,
+            },
+            "anthropic": {
+                "type": "api",
+                "description": "Anthropic API (Claude models)",
+                "configured": bool(settings.anthropic_api_key),
+                "default_model": settings.anthropic_default_model if include_models else None,
+            },
+            "deepseek": {
+                "type": "api",
+                "description": "DeepSeek API (MIT licensed models)",
+                "configured": bool(settings.deepseek_api_key),
+                "default_model": settings.deepseek_default_model if include_models else None,
+            },
+            "togetherai": {
+                "type": "api",
+                "description": "Together AI (open-source model hosting)",
+                "configured": bool(settings.togetherai_api_key),
+                "default_model": settings.togetherai_default_model if include_models else None,
+            },
+            "openrouter": {
+                "type": "api",
+                "description": "OpenRouter (unified API for many models, includes free tiers)",
+                "configured": bool(settings.openrouter_api_key),
+                "default_model": settings.openrouter_default_model if include_models else None,
+            },
+        }
+
+        # Check actual availability if requested
+        if check_availability:
+            for provider_name, config in providers_config.items():
+                if config["configured"]:
+                    try:
+                        client = LLMClient(provider=provider_name)
+                        config["available"] = client.check_availability()
+                    except Exception as e:
+                        config["available"] = False
+                        config["error"] = str(e)
+                else:
+                    config["available"] = False
+
+        # Get current default provider
+        default_provider = settings.default_llm_provider
+
+        return {
+            "default_provider": default_provider,
+            "providers": providers_config,
+            "configured_count": sum(1 for p in providers_config.values() if p["configured"]),
+            "total_count": len(providers_config),
+        }
