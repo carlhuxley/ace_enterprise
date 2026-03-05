@@ -10,6 +10,46 @@ import httpx
 
 from src.config.settings import settings
 
+# Cache for OpenRouter free models (populated on first use)
+_openrouter_free_models_cache: list[str] | None = None
+_openrouter_cache_time: float = 0
+_OPENROUTER_CACHE_TTL = 3600  # 1 hour cache TTL
+
+
+def _fetch_openrouter_free_models() -> list[str]:
+    """Fetch list of free models from OpenRouter API."""
+    global _openrouter_free_models_cache, _openrouter_cache_time
+
+    # Return cached result if still valid
+    if _openrouter_free_models_cache is not None:
+        if time.time() - _openrouter_cache_time < _OPENROUTER_CACHE_TTL:
+            return _openrouter_free_models_cache
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get("https://openrouter.ai/api/v1/models")
+            response.raise_for_status()
+            data = response.json()
+
+        free_models = []
+        for model in data.get("data", []):
+            pricing = model.get("pricing", {})
+            # Free models have prompt price of "0"
+            if pricing.get("prompt") == "0":
+                free_models.append(model["id"])
+
+        # Sort by context length (prefer larger context) if available
+        _openrouter_free_models_cache = free_models
+        _openrouter_cache_time = time.time()
+
+        logger.info(f"OpenRouter: cached {len(free_models)} free models")
+        return free_models
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch OpenRouter models: {e}")
+        # Return cached result even if expired, or empty list
+        return _openrouter_free_models_cache or []
+
 logger = logging.getLogger(__name__)
 
 
@@ -378,6 +418,13 @@ class LLMClient:
         if not settings.openrouter_api_key:
             raise ValueError("OpenRouter API key not configured")
 
+        # Build list of models to try (primary + fallbacks)
+        models_to_try = [self.model]
+        if self.model.endswith(":free"):
+            # Fetch available free models dynamically and add as fallbacks
+            free_models = _fetch_openrouter_free_models()
+            models_to_try.extend([m for m in free_models if m != self.model])
+
         # OpenRouter uses OpenAI-compatible API
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -392,35 +439,107 @@ class LLMClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens or 4096,  # OpenRouter requires explicit max_tokens
-        }
+        last_error = None
 
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-
-            # OpenRouter returns actual model used (important for auto-routing)
-            actual_model = data.get("model", self.model)
-
-            return {
-                "content": data["choices"][0]["message"]["content"],
-                "tokens_used": data.get("usage", {}).get("total_tokens", 0),
-                "actual_model": actual_model,  # The model that actually served the request
-                "provider": data.get("provider", "unknown"),
+        for model in models_to_try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens or 4096,  # OpenRouter requires explicit max_tokens
             }
 
-        except httpx.HTTPError as e:
-            logger.error(f"OpenRouter API error: {e}")
-            # Include response body for better debugging
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response: {e.response.text}")
-            raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+            # Retry logic with exponential backoff for rate limits
+            max_retries = 3
+            base_delay = 1.0  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    with httpx.Client(timeout=self.timeout) as client:
+                        response = client.post(url, headers=headers, json=payload)
+                        response.raise_for_status()
+                        data = response.json()
+
+                    # OpenRouter returns actual model used (important for auto-routing)
+                    actual_model = data.get("model", model)
+
+                    if model != self.model:
+                        logger.info(f"OpenRouter: using fallback model {model} (requested: {self.model})")
+
+                    return {
+                        "content": data["choices"][0]["message"]["content"],
+                        "tokens_used": data.get("usage", {}).get("total_tokens", 0),
+                        "actual_model": actual_model,  # The model that actually served the request
+                        "requested_model": self.model,  # The originally requested model
+                        "provider": data.get("provider", "unknown"),
+                    }
+
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    status_code = e.response.status_code
+
+                    # Handle rate limiting with retry
+                    if status_code == 429:
+                        if attempt < max_retries - 1:
+                            # Check for Retry-After header
+                            retry_after = e.response.headers.get("Retry-After")
+                            if retry_after:
+                                delay = float(retry_after)
+                            else:
+                                # Exponential backoff: 1s, 2s, 4s
+                                delay = base_delay * (2 ** attempt)
+
+                            logger.warning(
+                                f"OpenRouter rate limited for {model} (429), retrying in {delay}s "
+                                f"(attempt {attempt + 1}/{max_retries})"
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            # Max retries exhausted for this model, try next fallback
+                            logger.warning(f"OpenRouter: {model} rate limited after {max_retries} retries, trying fallback")
+                            break
+
+                    # Handle model not found - try next fallback
+                    elif status_code == 404:
+                        logger.warning(f"OpenRouter: model {model} not found (404), trying fallback")
+                        break
+
+                    # Handle server errors with retry
+                    elif status_code >= 500:
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(
+                                f"OpenRouter server error for {model} ({status_code}), retrying in {delay}s "
+                                f"(attempt {attempt + 1}/{max_retries})"
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            logger.warning(f"OpenRouter: {model} server errors after {max_retries} retries, trying fallback")
+                            break
+
+                    else:
+                        # Non-retryable HTTP error (4xx except 429 and 404)
+                        logger.error(f"OpenRouter API error for {model}: {e}")
+                        logger.error(f"Response: {e.response.text}")
+                        raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+
+                except httpx.TimeoutException as e:
+                    logger.error(f"OpenRouter timeout for {model}: {e}")
+                    last_error = e
+                    break  # Try next model
+
+                except httpx.HTTPError as e:
+                    logger.error(f"OpenRouter API error for {model}: {e}")
+                    last_error = e
+                    raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+
+        # All models exhausted
+        raise RuntimeError(
+            f"OpenRouter: all models rate limited or unavailable. "
+            f"Last error: {last_error}"
+        )
 
     def _get_default_model(self, model: str | None) -> str:
         """Get default model for provider."""
