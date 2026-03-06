@@ -10,6 +10,8 @@ import httpx
 
 from src.config.settings import settings
 
+logger = logging.getLogger(__name__)
+
 # Cache for OpenRouter free models (populated on first use)
 _openrouter_free_models_cache: list[str] | None = None
 _openrouter_cache_time: float = 0
@@ -49,8 +51,6 @@ def _fetch_openrouter_free_models() -> list[str]:
         logger.warning(f"Failed to fetch OpenRouter models: {e}")
         # Return cached result even if expired, or empty list
         return _openrouter_free_models_cache or []
-
-logger = logging.getLogger(__name__)
 
 
 class LLMClient:
