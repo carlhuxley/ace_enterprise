@@ -2289,7 +2289,7 @@ Output ONLY the JSON, no other text."""
         if provider in ["openai", "anthropic", "google", "cohere"]:
             raise ValueError(
                 f"Proprietary provider '{provider}' is not allowed. "
-                f"Use open-source providers: ollama, vllm, deepseek, togetherai"
+                f"Use open-source providers: ollama, vllm, deepseek, togetherai, openrouter"
             )
 
         # Open-source models with permissive licenses
@@ -2316,10 +2316,41 @@ Output ONLY the JSON, no other text."""
         if provider == "deepseek":
             return "mit"
 
+        # OpenRouter provider - routes to various models, check model name for license
+        if provider == "openrouter":
+            model_lower = model.lower()
+
+            # Block proprietary models accessed through openrouter
+            proprietary_prefixes = ["openai/", "anthropic/", "cohere/"]
+            if any(model_lower.startswith(prefix) for prefix in proprietary_prefixes):
+                raise ValueError(
+                    f"Proprietary model '{model}' via OpenRouter is not allowed. "
+                    f"Use open-source models: qwen/, meta-llama/, mistralai/, deepseek/, google/gemma"
+                )
+
+            # Apache 2.0 licensed models via OpenRouter
+            if any(name in model_lower for name in ["qwen", "mistral", "gemma"]):
+                return "apache-2.0"
+
+            # MIT licensed models via OpenRouter
+            if "deepseek" in model_lower:
+                return "mit"
+
+            # Llama models via OpenRouter
+            if "llama" in model_lower or "meta-llama" in model_lower:
+                return "llama-3.1-community"
+
+            # OpenRouter auto-routing (openrouter/free routes to free open-source models)
+            if model_lower.startswith("openrouter/"):
+                return "open-source-unknown"
+
+            # Default for other OpenRouter models - assume open source
+            return "open-source-unknown"
+
         # Unknown provider - raise error for safety
         raise ValueError(
             f"Unknown provider '{provider}'. "
-            f"Allowed providers: ollama, vllm, deepseek, togetherai"
+            f"Allowed providers: ollama, vllm, deepseek, togetherai, openrouter"
         )
 
     def _collect_test_files(self) -> list[Path]:
