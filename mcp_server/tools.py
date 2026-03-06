@@ -271,6 +271,10 @@ class ACETools:
                             "type": "string",
                             "description": "Test directory (default: tests/)",
                         },
+                        "model": {
+                            "type": "string",
+                            "description": "LLM model to use (must be open-source). Examples: qwen/qwen3-coder:free, meta-llama/llama-3.3-70b-instruct:free",
+                        },
                     },
                     "required": ["feature", "project_path"],
                 },
@@ -628,20 +632,29 @@ class ACETools:
             src_dir.mkdir(parents=True, exist_ok=True)
             test_dir.mkdir(parents=True, exist_ok=True)
 
-            # Get model configuration from settings
-            provider = settings.default_llm_provider
-            if provider == "openai":
-                model = settings.openai_default_model
-            elif provider == "anthropic":
-                model = settings.anthropic_default_model
-            elif provider == "openrouter":
-                model = settings.openrouter_default_model
-            elif provider == "deepseek":
-                model = settings.deepseek_default_model
-            elif provider == "togetherai":
-                model = settings.togetherai_default_model
+            # Get model configuration - use provided model or fall back to settings
+            if args.get("model"):
+                # Model specified - assume openrouter for model paths like "qwen/qwen3-coder:free"
+                model = args["model"]
+                if "/" in model:
+                    provider = "openrouter"
+                else:
+                    provider = settings.default_llm_provider
             else:
-                model = settings.ollama_default_model
+                # Use default from settings
+                provider = settings.default_llm_provider
+                if provider == "openai":
+                    model = settings.openai_default_model
+                elif provider == "anthropic":
+                    model = settings.anthropic_default_model
+                elif provider == "openrouter":
+                    model = settings.openrouter_default_model
+                elif provider == "deepseek":
+                    model = settings.deepseek_default_model
+                elif provider == "togetherai":
+                    model = settings.togetherai_default_model
+                else:
+                    model = settings.ollama_default_model
 
             # Create ensemble learner with configured model
             playbook_id = self.playbook_id or "mcp_tdd_playbook"
