@@ -466,8 +466,14 @@ class LLMClient:
                     if model != self.model:
                         logger.info(f"OpenRouter: using fallback model {model} (requested: {self.model})")
 
+                    # Extract content, handling potential None
+                    content = data["choices"][0]["message"]["content"]
+                    if content is None:
+                        logger.warning(f"OpenRouter returned None content for {model}, trying fallback")
+                        break  # Try next model
+
                     return {
-                        "content": data["choices"][0]["message"]["content"],
+                        "content": content,
                         "tokens_used": data.get("usage", {}).get("total_tokens", 0),
                         "actual_model": actual_model,  # The model that actually served the request
                         "requested_model": self.model,  # The originally requested model
