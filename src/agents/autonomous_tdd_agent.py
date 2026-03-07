@@ -754,8 +754,9 @@ Output EITHER:
                     model_provider=self.llm_client.provider,
                     license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
                 )
-                self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-                logger.info("      Stored redundancy pattern")
+                if self.playbook_manager is not None:
+                    self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
+                    logger.info("      Stored redundancy pattern")
 
             # Refine test to make it more specific/strict
             logger.info("  🔧 REFINING: Strengthening test to make it fail...")
@@ -840,8 +841,9 @@ Output EITHER:
                         model_provider=self.llm_client.provider,
                         license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
                     )
-                    self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-                    logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
+                    if self.playbook_manager is not None:
+                        self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
+                        logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
 
                     # If test correction is suggested, APPLY IT automatically
                     if failure_analysis.get("test_correction"):
@@ -1434,6 +1436,10 @@ Output 1-3 bullet points, one per line.""",
         Returns:
             Formatted string to inject into prompts
         """
+        # Skip if no playbook manager (file mode)
+        if self.playbook_manager is None:
+            return ""
+
         # Get primary playbook (agent's own domain expertise)
         primary_playbook = self.playbook_manager.get_playbook(self.playbook_id)
         if not primary_playbook:

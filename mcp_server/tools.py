@@ -657,12 +657,21 @@ class ACETools:
                     model = settings.ollama_default_model
 
             # Create ensemble learner with configured model
+            # Use a dummy playbook_id for file mode - learning will be skipped
             playbook_id = self.playbook_id or "mcp_tdd_playbook"
+
+            # Check if we're in file mode (no database)
+            file_mode = self.playbook_file is not None and self.playbook_id is None
+
             ensemble = EnsembleLearner(
                 models=[(provider, model)],
                 playbook_id=playbook_id,
                 enable_deliberation=False,  # Single model, no deliberation needed
             )
+
+            # In file mode, replace the playbook manager with a no-op to avoid DB errors
+            if file_mode:
+                ensemble.playbook_manager = None
 
             # Create test reviewer
             test_reviewer = TestReviewAgent(use_llm_analysis=False)
