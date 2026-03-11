@@ -23,7 +23,7 @@ class ACETools:
     Primary tools (CGR³ focused):
         - get_guidance: Context-aware knowledge retrieval
         - learn: Add knowledge to playbook
-        - query: Simple semantic search
+        - query: Semantic search (uses local embeddings)
         - feedback: Mark patterns helpful/harmful
 
     Secondary tools:
@@ -45,6 +45,8 @@ class ACETools:
         self._knowledge_service = None
         self._playbook_manager = None
         self._playbook_data = None
+        self._embedding_service = None
+        self._playbook_embeddings = None  # Cached embeddings for file-mode
 
         # Audit client for tracking MCP tool usage
         self._audit = LocalAuditClient()
