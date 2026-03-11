@@ -141,17 +141,28 @@ PROPRIETARY_MODELS = frozenset({
 
 
 def detect_supplier(model_name: str | None, provider: str | None = None) -> Supplier:
-    """Detect the supplier/owner of a model."""
-    candidates = []
-    if provider:
-        candidates.append(provider.lower().strip())
-    if model_name:
-        candidates.append(model_name.lower().strip())
+    """Detect the supplier/owner of a model.
 
-    for candidate in candidates:
+    Checks model name first (more specific), then provider.
+    Note: "ollama" is a runtime, not a supplier - it hosts various models.
+    """
+    # Check model name first (more specific signal)
+    if model_name:
+        model_lower = model_name.lower().strip()
         for supplier, patterns in SUPPLIER_PATTERNS.items():
             for pattern in patterns:
-                if pattern in candidate or candidate.startswith(pattern):
+                if pattern in model_lower or model_lower.startswith(pattern):
+                    return supplier
+
+    # Check provider (but skip generic runtimes like ollama)
+    if provider:
+        provider_lower = provider.lower().strip()
+        # Ollama is a runtime that hosts various suppliers' models
+        if provider_lower in {"ollama", "lmstudio", "localai", "vllm", "text-generation-inference"}:
+            return Supplier.UNKNOWN
+        for supplier, patterns in SUPPLIER_PATTERNS.items():
+            for pattern in patterns:
+                if pattern in provider_lower or provider_lower.startswith(pattern):
                     return supplier
 
     return Supplier.UNKNOWN
