@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     embedding_device: Literal["cpu", "cuda", "mps"] = "cpu"
     embedding_batch_size: int = 32
 
+    # Playbook Storage
+    playbook_storage: Literal["file", "postgres"] = "file"
+    playbook_storage_path: str = "data/playbooks"  # For file-based storage
+
     # ACE Core Configuration - Retrieval
     retrieval_top_k: int = 20
     retrieval_similarity_threshold: float = 0.7

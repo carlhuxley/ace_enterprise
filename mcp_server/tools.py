@@ -78,11 +78,21 @@ class ACETools:
         return self._knowledge_service
 
     def _get_playbook_manager(self):
-        """Lazy-load the playbook manager."""
+        """Lazy-load the playbook manager based on storage configuration."""
         if self._playbook_manager is None:
             try:
-                from src.playbook.manager import PlaybookManager
-                self._playbook_manager = PlaybookManager()
+                from src.config.settings import settings
+
+                if settings.playbook_storage == "postgres":
+                    from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+                    self._playbook_manager = PostgresPlaybookAdapter()
+                    logger.info("Using PostgreSQL playbook storage")
+                else:
+                    from src.playbook.manager import PlaybookManager
+                    self._playbook_manager = PlaybookManager(
+                        storage_path=settings.playbook_storage_path
+                    )
+                    logger.info(f"Using file-based playbook storage: {settings.playbook_storage_path}")
             except ImportError as e:
                 logger.warning(f"Playbook manager not available: {e}")
         return self._playbook_manager
