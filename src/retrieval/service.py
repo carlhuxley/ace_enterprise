@@ -78,6 +78,8 @@ class InstitutionalKnowledgeService:
         domain: str | None = None,
         top_k: int = 10,
         include_cross_playbook: bool = True,
+        min_confidence: float = 0.5,
+        project_id: str | None = None,
     ) -> KnowledgeResponse:
         """
         Get institutional knowledge guidance for a query.
@@ -91,15 +93,20 @@ class InstitutionalKnowledgeService:
             domain: Filter by domain (e.g., "tdd", "ml", "architecture")
             top_k: Maximum results to return
             include_cross_playbook: Whether to include patterns from other playbooks
+            min_confidence: Minimum confidence_score threshold (default 0.5).
+                           Patterns below this threshold are not surfaced.
+            project_id: Filter to patterns applicable to this project.
 
         Returns:
             KnowledgeResponse with categorized patterns and clarifying questions
         """
-        # Get bullets to search
+        # Get bullets to search (with confidence and project filtering)
         bullets = self._get_bullets(
             playbook_id=playbook_id or self.default_playbook_id,
             domain=domain,
             include_cross_playbook=include_cross_playbook,
+            min_confidence=min_confidence,
+            project_id=project_id,
         )
 
         if not bullets:
@@ -187,14 +194,18 @@ class InstitutionalKnowledgeService:
         playbook_id: str | None,
         domain: str | None,
         include_cross_playbook: bool,
+        min_confidence: float = 0.5,
+        project_id: str | None = None,
     ) -> list[Bullet]:
         """
-        Get bullets from playbook(s).
+        Get bullets from playbook(s) with confidence and context filtering.
 
         Args:
             playbook_id: Primary playbook ID
             domain: Filter by domain
             include_cross_playbook: Include other playbooks
+            min_confidence: Minimum confidence_score threshold
+            project_id: Filter to patterns applicable to this project
 
         Returns:
             List of bullets to search
@@ -220,12 +231,27 @@ class InstitutionalKnowledgeService:
                 for section_bullets in pb.sections.values():
                     bullets.extend(section_bullets)
 
+        # Filter by confidence threshold
+        bullets = [
+            b for b in bullets
+            if getattr(b, 'confidence_score', 0.5) >= min_confidence
+        ]
+
         # Filter by domain if specified
         if domain:
             bullets = [
                 b for b in bullets
-                if domain in (b.tags or []) or
-                   domain in (getattr(b, 'applicable_domains', None) or [])
+                if not getattr(b, 'applicable_domains', None)
+                or domain in (b.applicable_domains or [])
+                or domain in (b.tags or [])
+            ]
+
+        # Filter by project if specified
+        if project_id:
+            bullets = [
+                b for b in bullets
+                if not getattr(b, 'project_ids', None)
+                or project_id in (b.project_ids or [])
             ]
 
         return bullets

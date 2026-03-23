@@ -752,7 +752,11 @@ Output EITHER:
                     tags=["test_redundancy", "anti_pattern", "tdd"],
                     created_by_model=self.llm_client.model,
                     model_provider=self.llm_client.provider,
-                    license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
+                    license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model),
+                    # Low initial confidence - needs validation via feedback
+                    confidence_score=0.3,
+                    applicable_domains=["tdd"],
+                    project_ids=[str(self.project_root)],
                 )
                 if self.playbook_manager is not None:
                     self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
@@ -839,7 +843,11 @@ Output EITHER:
                         tags=failure_analysis["tags"],
                         created_by_model=self.llm_client.model,
                         model_provider=self.llm_client.provider,
-                        license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model)
+                        license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model),
+                        # Low initial confidence - needs validation via feedback
+                        confidence_score=0.3,
+                        applicable_domains=["tdd"],
+                        project_ids=[str(self.project_root)],
                     )
                     if self.playbook_manager is not None:
                         self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
@@ -1423,15 +1431,28 @@ Output 1-3 bullet points, one per line.""",
         # Return approved bullets only
         return result.approved_bullets
 
-    def _get_playbook_guidance(self, query: str, top_k: int = 5) -> str:
+    def _get_playbook_guidance(
+        self,
+        query: str,
+        top_k: int = 5,
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
+    ) -> str:
         """
-        Retrieve relevant playbook bullets using T-shaped retrieval:
+        Retrieve relevant playbook bullets using T-shaped retrieval with confidence gating.
+
         - Primary: Agent's own playbook (deep domain expertise)
         - Secondary: All other playbooks (broad cross-domain knowledge)
+        - Only returns bullets above confidence threshold
+        - Filters by domain and project if specified
 
         Args:
             query: Query to find relevant patterns
             top_k: Number of bullets to retrieve
+            min_confidence: Minimum confidence_score threshold (default 0.5)
+            domain: Filter to patterns applicable to this domain
+            project_id: Filter to patterns applicable to this project
 
         Returns:
             Formatted string to inject into prompts
@@ -1467,13 +1488,16 @@ Output 1-3 bullet points, one per line.""",
             if playbook_bullets:
                 secondary_bullets_by_playbook[pb.playbook_id] = playbook_bullets
 
-        # Cross-playbook retrieval (T-shaped: deep + broad)
+        # Cross-playbook retrieval with confidence gating (T-shaped: deep + broad)
         relevant_scored = self.bullet_retriever.retrieve_cross_model(
             query=query,
             primary_bullets=primary_bullets,
             secondary_bullets_by_playbook=secondary_bullets_by_playbook,
             primary_playbook_id=self.playbook_id,
             secondary_weight=0.5,  # Secondary bullets get 50% weight
+            min_confidence=min_confidence,
+            domain=domain,
+            project_id=project_id,
         )
 
         if not relevant_scored:

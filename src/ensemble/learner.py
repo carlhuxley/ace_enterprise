@@ -996,6 +996,8 @@ Your reconsidered vote:"""
                 continue
 
             # Convert back to BulletCreate format WITH provenance
+            # Ensemble-validated bullets get higher initial confidence (0.6)
+            # since they were approved through deliberation
             bullet_data = BulletCreate(
                 content=bullet.content,
                 section=bullet.section.value,
@@ -1003,6 +1005,8 @@ Your reconsidered vote:"""
                 created_by_model=model_name,
                 model_provider=provider,
                 license_type=license_type,
+                confidence_score=0.6,  # Higher than single-model learning (0.3)
+                applicable_domains=["tdd"],  # From TDD agent context
             )
 
             try:

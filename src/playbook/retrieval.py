@@ -51,6 +51,9 @@ class BulletRetriever:
         query_embedding: list[float] | None = None,
         filter_section: str | None = None,
         min_helpful_ratio: float | None = None,
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
     ) -> list[tuple[Bullet, float]]:
         """
         Retrieve most relevant bullets for a query.
@@ -66,12 +69,37 @@ class BulletRetriever:
             query_embedding: Pre-computed query embedding (optional)
             filter_section: Only retrieve from specific section (optional)
             min_helpful_ratio: Minimum helpful/(helpful+harmful) ratio (optional)
+            min_confidence: Minimum confidence_score threshold (default 0.5)
+            domain: Only retrieve bullets applicable to this domain (optional)
+            project_id: Only retrieve bullets applicable to this project (optional)
 
         Returns:
             List of (bullet, score) tuples, sorted by relevance
         """
         if not bullets:
             return []
+
+        # Filter by confidence threshold
+        bullets = [
+            b for b in bullets
+            if getattr(b, 'confidence_score', 0.5) >= min_confidence
+        ]
+
+        # Filter by domain if specified
+        if domain:
+            bullets = [
+                b for b in bullets
+                if not getattr(b, 'applicable_domains', None)
+                or domain in (b.applicable_domains or [])
+            ]
+
+        # Filter by project if specified
+        if project_id:
+            bullets = [
+                b for b in bullets
+                if not getattr(b, 'project_ids', None)
+                or project_id in (b.project_ids or [])
+            ]
 
         # Filter by section if requested
         if filter_section:
@@ -122,6 +150,9 @@ class BulletRetriever:
         primary_playbook_id: str,
         query_embedding: list[float] | None = None,
         secondary_weight: float = 0.5,
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
     ) -> list[tuple[Bullet, float, str]]:
         """
         Retrieve bullets with cross-model learning support.
@@ -136,10 +167,27 @@ class BulletRetriever:
             primary_playbook_id: ID of the primary playbook (for source tracking)
             query_embedding: Pre-computed query embedding (optional)
             secondary_weight: Weight multiplier for secondary playbook bullets (0-1)
+            min_confidence: Minimum confidence_score threshold (default 0.5)
+            domain: Only retrieve bullets applicable to this domain (optional)
+            project_id: Only retrieve bullets applicable to this project (optional)
 
         Returns:
             List of (bullet, score, source_playbook_id) tuples, sorted by relevance
         """
+        # Apply context filters to primary bullets
+        primary_bullets = self._filter_by_context(
+            primary_bullets, min_confidence, domain, project_id
+        )
+
+        # Apply context filters to secondary bullets
+        for playbook_id in list(secondary_bullets_by_playbook.keys()):
+            secondary_bullets_by_playbook[playbook_id] = self._filter_by_context(
+                secondary_bullets_by_playbook[playbook_id],
+                min_confidence,
+                domain,
+                project_id,
+            )
+
         scored_bullets = []
 
         # Score primary bullets (full weight)
@@ -299,6 +347,51 @@ class BulletRetriever:
         if total == 0:
             return 0.5  # Neutral for bullets with no feedback
         return bullet.helpful_count / total
+
+    @staticmethod
+    def _filter_by_context(
+        bullets: list[Bullet],
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
+    ) -> list[Bullet]:
+        """
+        Filter bullets by confidence threshold and context.
+
+        Args:
+            bullets: List of bullets to filter
+            min_confidence: Minimum confidence_score threshold
+            domain: Only include bullets applicable to this domain
+            project_id: Only include bullets applicable to this project
+
+        Returns:
+            Filtered list of bullets
+        """
+        filtered = bullets
+
+        # Filter by confidence threshold
+        filtered = [
+            b for b in filtered
+            if getattr(b, 'confidence_score', 0.5) >= min_confidence
+        ]
+
+        # Filter by domain if specified
+        if domain:
+            filtered = [
+                b for b in filtered
+                if not getattr(b, 'applicable_domains', None)
+                or domain in (b.applicable_domains or [])
+            ]
+
+        # Filter by project if specified
+        if project_id:
+            filtered = [
+                b for b in filtered
+                if not getattr(b, 'project_ids', None)
+                or project_id in (b.project_ids or [])
+            ]
+
+        return filtered
 
     def get_section_distribution(
         self,

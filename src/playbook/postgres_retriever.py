@@ -52,6 +52,9 @@ class PostgresBulletRetriever:
         filter_section: str | None = None,
         min_helpful_ratio: float | None = None,
         top_k: int | None = None,
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
     ) -> list[tuple[Bullet, float]]:
         """
         Retrieve most relevant bullets using PostgreSQL vector search.
@@ -62,6 +65,9 @@ class PostgresBulletRetriever:
             filter_section: Only retrieve from specific section (optional)
             min_helpful_ratio: Minimum helpful/(helpful+harmful) ratio (optional)
             top_k: Override default top_k
+            min_confidence: Minimum confidence_score threshold (default 0.5)
+            domain: Only retrieve bullets applicable to this domain (optional)
+            project_id: Only retrieve bullets applicable to this project (optional)
 
         Returns:
             List of (bullet, score) tuples, sorted by relevance
@@ -73,6 +79,31 @@ class PostgresBulletRetriever:
             top_k=top_k or self.top_k,
             similarity_threshold=self.similarity_threshold,
         )
+
+        # Filter by confidence threshold
+        results = [
+            (bullet, score)
+            for bullet, score in results
+            if getattr(bullet, 'confidence_score', 0.5) >= min_confidence
+        ]
+
+        # Filter by domain if specified
+        if domain:
+            results = [
+                (bullet, score)
+                for bullet, score in results
+                if not getattr(bullet, 'applicable_domains', None)
+                or domain in (bullet.applicable_domains or [])
+            ]
+
+        # Filter by project if specified
+        if project_id:
+            results = [
+                (bullet, score)
+                for bullet, score in results
+                if not getattr(bullet, 'project_ids', None)
+                or project_id in (bullet.project_ids or [])
+            ]
 
         # Filter by section if requested
         if filter_section:

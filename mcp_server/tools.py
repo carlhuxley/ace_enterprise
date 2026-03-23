@@ -96,7 +96,8 @@ class ACETools:
                     "Get institutional knowledge guidance for a coding task. "
                     "Returns patterns with verdicts: APPLY (safe to use), "
                     "ASK_FIRST (needs clarification), or SKIP (don't use). "
-                    "Use this before writing code to learn team patterns."
+                    "Use this before writing code to learn team patterns. "
+                    "Only returns patterns above the confidence threshold that match your context."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -115,11 +116,16 @@ class ACETools:
                         },
                         "project_id": {
                             "type": "string",
-                            "description": "Current project identifier",
+                            "description": "Current project identifier. Filters to patterns applicable to this project.",
                         },
                         "domain": {
                             "type": "string",
-                            "description": "Domain filter (e.g., 'tdd', 'ml', 'architecture')",
+                            "description": "Domain filter (e.g., 'tdd', 'ml', 'architecture'). Filters to patterns applicable to this domain.",
+                        },
+                        "min_confidence": {
+                            "type": "number",
+                            "description": "Minimum confidence threshold (0.0-1.0). Default 0.5 filters out unvalidated patterns.",
+                            "default": 0.5,
                         },
                     },
                     "required": ["query"],
@@ -129,7 +135,9 @@ class ACETools:
                 "name": "learn",
                 "description": (
                     "Add knowledge to the institutional playbook. "
-                    "Use this to capture patterns, decisions, or lessons learned."
+                    "Use this to capture patterns, decisions, or lessons learned. "
+                    "New patterns start with low confidence and are surfaced in retrieval "
+                    "after validation via feedback."
                 ),
                 "inputSchema": {
                     "type": "object",
@@ -155,8 +163,17 @@ class ACETools:
                         },
                         "confidence": {
                             "type": "number",
-                            "description": "Confidence score (0.0-1.0)",
-                            "default": 0.7,
+                            "description": "Initial confidence score (0.0-1.0). New patterns should start low (0.3) and build via feedback.",
+                            "default": 0.3,
+                        },
+                        "domains": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Applicable domains (e.g., ['healthcare', 'python-tdd']). If empty, applies to all domains.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project this pattern applies to. If empty, applies to all projects.",
                         },
                     },
                     "required": ["content"],
@@ -330,11 +347,14 @@ class ACETools:
             domain=args.get("domain"),
         )
 
-        # Get guidance
+        # Get guidance with confidence gating and context filtering
         response = service.get_guidance(
             query=args["query"],
             context=context,
             top_k=args.get("top_k", 10),
+            min_confidence=args.get("min_confidence", 0.5),
+            domain=args.get("domain"),
+            project_id=args.get("project_id"),
         )
 
         # Emit audit event
@@ -345,6 +365,8 @@ class ACETools:
             payload={
                 "query": args["query"],
                 "top_k": args.get("top_k", 10),
+                "min_confidence": args.get("min_confidence", 0.5),
+                "domain": args.get("domain"),
                 "results_apply": len(response.apply),
                 "results_ask_first": len(response.ask_first),
                 "retrieval_time_ms": response.retrieval_time_ms,
@@ -398,13 +420,23 @@ class ACETools:
             }
 
             knowledge_type = args.get("type", "pattern")
+
+            # Build project_ids list if project_id provided
+            project_ids = None
+            if args.get("project_id"):
+                project_ids = [args["project_id"]]
+
             bullet_data = BulletCreate(
                 content=args["content"],
                 section=section_map.get(knowledge_type, "domain_knowledge"),
                 tags=args.get("tags", []),
                 created_by_type="human",
                 created_by_id=args.get("team_id"),
-                confidence_score=args.get("confidence", 0.7),
+                team_id=args.get("team_id"),
+                # Contextual retrieval fields
+                confidence_score=args.get("confidence", 0.3),  # Low initial confidence
+                applicable_domains=args.get("domains"),
+                project_ids=project_ids,
             )
 
             playbook_id = self.playbook_id or "default_playbook"

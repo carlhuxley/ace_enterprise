@@ -143,7 +143,7 @@ class PlaybookManager:
         except Exception as e:
             logger.warning(f"Failed to generate embedding for bullet {bullet_id}: {e}")
 
-        # Create bullet with model provenance
+        # Create bullet with model provenance and context
         now = datetime.utcnow()
         bullet = Bullet(
             id=bullet_id,
@@ -158,6 +158,11 @@ class PlaybookManager:
             created_by_model=bullet_data.created_by_model,
             model_provider=bullet_data.model_provider,
             license_type=bullet_data.license_type,
+            # Contextual retrieval fields
+            confidence_score=bullet_data.confidence_score,
+            applicable_domains=bullet_data.applicable_domains,
+            project_ids=bullet_data.project_ids,
+            team_id=bullet_data.team_id,
         )
 
         # Add to playbook
@@ -245,7 +250,12 @@ class PlaybookManager:
         feedback: str,
     ) -> None:
         """
-        Update bullet helpful/harmful counts based on feedback.
+        Update bullet helpful/harmful counts and adjust confidence_score based on feedback.
+
+        Confidence adjustment:
+        - helpful: confidence increases asymptotically toward 1.0 (+10% of remaining gap)
+        - harmful: confidence decreases by 0.15 (faster decay for bad patterns)
+        - neutral: no confidence change
 
         Args:
             playbook_id: Playbook ID
@@ -264,13 +274,28 @@ class PlaybookManager:
         if not bullet:
             raise ValueError(f"Bullet {bullet_id} not found in playbook {playbook_id}")
 
-        # Update counts
+        # Get current confidence (default 0.5 for bullets without it)
+        current_confidence = getattr(bullet, 'confidence_score', 0.5)
+
+        # Update counts and confidence
         if feedback == "helpful":
             bullet.helpful_count += 1
+            # Increase confidence asymptotically toward 1.0
+            # Each helpful feedback closes 10% of the gap to 1.0
+            bullet.confidence_score = min(
+                1.0,
+                current_confidence + (1.0 - current_confidence) * 0.1
+            )
         elif feedback == "harmful":
             bullet.harmful_count += 1
+            # Decrease confidence more aggressively
+            # Harmful patterns should decay faster than helpful ones grow
+            bullet.confidence_score = max(
+                0.0,
+                current_confidence - 0.15
+            )
         elif feedback == "neutral":
-            pass  # No change
+            pass  # No change to confidence
         else:
             raise ValueError(f"Invalid feedback: {feedback}")
 
@@ -278,7 +303,10 @@ class PlaybookManager:
         bullet.last_used = datetime.utcnow()
         playbook.updated_at = datetime.utcnow()
 
-        logger.debug(f"Updated feedback for bullet {bullet_id}: {feedback}")
+        logger.debug(
+            f"Updated feedback for bullet {bullet_id}: {feedback} "
+            f"(confidence: {current_confidence:.2f} -> {bullet.confidence_score:.2f})"
+        )
 
         # Auto-save to disk
         self._save_playbook(playbook_id)
@@ -569,6 +597,11 @@ class PlaybookManager:
                     "created_by_model": b.created_by_model,
                     "model_provider": b.model_provider,
                     "license_type": b.license_type,
+                    # Contextual retrieval fields
+                    "confidence_score": getattr(b, 'confidence_score', 0.5),
+                    "applicable_domains": getattr(b, 'applicable_domains', None),
+                    "project_ids": getattr(b, 'project_ids', None),
+                    "team_id": getattr(b, 'team_id', None),
                 }
                 for b in bullets
             ]
@@ -616,6 +649,11 @@ class PlaybookManager:
                         created_at=datetime.fromisoformat(b_data["created_at"]),
                         last_used=datetime.fromisoformat(b_data["last_used"]) if b_data["last_used"] else None,
                         embedding=b_data.get("embedding"),
+                        # Contextual retrieval fields
+                        confidence_score=b_data.get("confidence_score", 0.5),
+                        applicable_domains=b_data.get("applicable_domains"),
+                        project_ids=b_data.get("project_ids"),
+                        team_id=b_data.get("team_id"),
                     )
                     bullets.append(bullet)
 
