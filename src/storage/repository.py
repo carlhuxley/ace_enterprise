@@ -105,6 +105,11 @@ class PlaybookRepository:
             return playbook
         return self.create_playbook(playbook_id, version, domain, base_model)
 
+    def list_playbooks(self) -> list[PlaybookModel]:
+        """List all playbooks."""
+        with self.get_session() as session:
+            return session.query(PlaybookModel).all()
+
     # ========================================================================
     # Bullet Operations
     # ========================================================================

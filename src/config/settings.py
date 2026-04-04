@@ -2,17 +2,24 @@
 ACE Enterprise Configuration Settings
 """
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# ACE's root directory (where settings.py lives -> src/config -> src -> ace_enterprise)
+ACE_ROOT = Path(__file__).parent.parent.parent
+
+# Load .env from ACE's directory, not the current working directory
+ACE_ENV_FILE = ACE_ROOT / ".env"
+
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
+    """Application settings loaded from ACE's .env file, not the project's"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ACE_ENV_FILE) if ACE_ENV_FILE.exists() else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="allow",
@@ -157,6 +164,24 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Check if running in production mode"""
         return self.env == "production"
+
+    @property
+    def default_provider(self) -> str:
+        """Alias for default_llm_provider for backward compatibility"""
+        return self.default_llm_provider
+
+    @property
+    def default_model_id(self) -> str:
+        """Get the default model ID based on the default provider"""
+        provider_model_map = {
+            "ollama": self.ollama_default_model,
+            "deepseek": self.deepseek_default_model,
+            "togetherai": self.togetherai_default_model,
+            "openrouter": self.openrouter_default_model,
+            "openai": self.openai_default_model,
+            "anthropic": self.anthropic_default_model,
+        }
+        return provider_model_map.get(self.default_llm_provider, self.ollama_default_model)
 
 
 @lru_cache

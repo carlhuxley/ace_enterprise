@@ -25,6 +25,7 @@ from src.playbook.postgres_retriever import PostgresBulletRetriever
 from src.storage.schemas import PlaybookCreate
 from src.agents.test_review_agent import TestReviewAgent
 from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
+from src.ensemble.learner import EnsembleLearner
 from src.utils.llm_client import LLMClient
 from src.config.settings import settings
 
@@ -134,17 +135,27 @@ def cmd_build_feature(args):
     # PostgreSQL Playbook Adapter
     playbook_adapter = PostgresPlaybookAdapter()
 
-    # Get or create playbook
-    playbook_name = f"{project_info.name.lower().replace('-', '_')}_playbook"
-    existing_playbooks = [pb_id for pb_id in playbook_adapter.list_playbooks()
-                          if project_info.name.lower() in pb_id.lower()]
+    # Get or create playbook - reuse existing one for same domain
+    target_domain = config.project_domain or "general"
 
-    if existing_playbooks:
-        playbook = playbook_adapter.get_playbook(existing_playbooks[0])
-        print(f"   Using existing playbook: {playbook.playbook_id}")
+    # Find existing playbook for this domain (with bullets preferred)
+    existing_playbook = None
+    best_bullet_count = -1
+
+    for pb_model in playbook_adapter.repo.list_playbooks():
+        if pb_model.domain == target_domain:
+            bullet_count = len(playbook_adapter.repo.get_bullets_by_playbook(pb_model.playbook_id))
+            # Prefer playbook with most learned bullets
+            if bullet_count > best_bullet_count:
+                best_bullet_count = bullet_count
+                existing_playbook = pb_model
+
+    if existing_playbook:
+        playbook = playbook_adapter.get_playbook(existing_playbook.playbook_id)
+        print(f"   Using existing playbook: {playbook.playbook_id} ({best_bullet_count} bullets)")
     else:
         playbook_create = PlaybookCreate(
-            domain=config.project_domain or "general",
+            domain=target_domain,
             base_model=settings.default_model_id
         )
         playbook = playbook_adapter.create_playbook(playbook_create)
@@ -155,16 +166,27 @@ def cmd_build_feature(args):
         provider=settings.default_provider,
         model=settings.default_model_id
     )
+    print(f"   Initialized LLM client: {settings.default_provider}/{settings.default_model_id}")
 
     # Test reviewer
     test_reviewer = TestReviewAgent(llm_client=llm_client)
 
+    # EnsembleLearner (required by AutonomousTDDAgent)
+    ensemble_learner = EnsembleLearner(
+        models=[(settings.default_provider, settings.default_model_id, None)],
+        playbook_id=playbook.playbook_id,
+    )
+    # Override with PostgreSQL playbook manager
+    ensemble_learner.playbook_manager = playbook_adapter
+
     # TDD Agent with PostgreSQL backend
     tdd_agent = AutonomousTDDAgent(
-        playbook=playbook,
-        llm_client=llm_client,
+        ensemble_learner=ensemble_learner,
         test_reviewer=test_reviewer,
-        playbook_manager=playbook_adapter  # Use PostgreSQL adapter
+        project_root=project_info.root,
+        test_dir=project_info.test_dir,
+        src_dir=project_info.src_dir,
+        max_iterations=20,
     )
 
     # Override with PostgreSQL bullet retriever
@@ -187,12 +209,14 @@ def cmd_build_feature(args):
         temp_gherkin_dir = Path(tempfile.mkdtemp(prefix="ace_gherkin_"))
         shutil.copy(feature_file, temp_gherkin_dir / feature_file.name)
 
+        # Read gherkin content as requirement
+        gherkin_content = feature_file.read_text()
+        requirement = f"Implement the following Gherkin feature:\n\n{gherkin_content}"
+
         # Build feature - output to project directories
         tdd_agent.build_feature(
+            requirement=requirement,
             gherkin_dir=temp_gherkin_dir,
-            project_root=project_info.root,  # Use real project root
-            source_dir=project_info.src_dir,  # Use real source dir
-            test_dir=project_info.test_dir,   # Use real test dir
         )
 
         # Clean up temp directory
@@ -212,11 +236,12 @@ def cmd_build_feature(args):
 
             # Get patterns learned from playbook
             patterns_learned = []
-            if playbook.sections.get("strategies_and_hard_rules"):
-                patterns_learned = [
-                    bullet["content"]
-                    for bullet in playbook.sections["strategies_and_hard_rules"][-3:]  # Last 3
-                ]
+            if playbook and hasattr(playbook, 'sections') and playbook.sections:
+                if playbook.sections.get("strategies_and_hard_rules"):
+                    patterns_learned = [
+                        bullet["content"]
+                        for bullet in playbook.sections["strategies_and_hard_rules"][-3:]  # Last 3
+                    ]
 
             # Generate ADR
             adr = generate_adr_from_tdd_result(

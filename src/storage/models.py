@@ -168,8 +168,7 @@ class BulletModel(Base):
         Index("ix_bullets_playbook_section", "playbook_id", "section"),
         Index("ix_bullets_helpful_count", "helpful_count"),
         # CGR³ indexes for context-aware retrieval
-        Index("ix_bullets_team", "team_id"),
-        Index("ix_bullets_created_by_type", "created_by_type"),
+        # Note: team_id and created_by_type indexes created by index=True on columns
         Index("ix_bullets_temporal", "valid_from", "valid_until"),
         Index("ix_bullets_confidence", "confidence_score"),
     )
@@ -267,7 +266,7 @@ class ExperimentLogModel(Base):
 
     __table_args__ = (
         Index("ix_experiment_logs_timestamp_result", "timestamp", "result"),
-        Index("ix_experiment_logs_playbook_version", "playbook_version"),
+        # Note: playbook_version index is already created by index=True on the column
     )
 
 
@@ -362,7 +361,8 @@ class PerformanceMetricModel(Base):
     error_frequency: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
     bullet_utilization: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
 
-    __table_args__ = (Index("ix_performance_metrics_timestamp", "timestamp"),)
+    # Note: timestamp and playbook_version indexes are created by index=True on columns
+    __table_args__: tuple = ()
 
 
 # ============================================================================
@@ -401,7 +401,7 @@ class RegressionAlertModel(Base):
     # Additional details
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    __table_args__ = (Index("ix_regression_alerts_resolved", "resolved", "detected_at"),)
+    __table_args__ = (Index("ix_regression_alerts_resolved_detected", "resolved", "detected_at"),)
 
 
 # ============================================================================

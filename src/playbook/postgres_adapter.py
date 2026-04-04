@@ -51,7 +51,26 @@ class PostgresPlaybookAdapter:
         # Bullet counter for ID generation
         self._bullet_counter: int = 0
 
+        # Cache for _playbooks property (for compatibility with PlaybookManager interface)
+        self._playbooks_cache: dict[str, Playbook] = {}
+
         logger.info("PostgresPlaybookAdapter initialized with PostgreSQL backend")
+
+    @property
+    def _playbooks(self) -> dict[str, Playbook]:
+        """
+        Compatibility property for code that accesses PlaybookManager._playbooks.
+        Returns all playbooks from PostgreSQL as a dict.
+        """
+        # Refresh cache from database
+        playbook_models = self.repo.list_playbooks()
+        result = {}
+        for pm in playbook_models:
+            # Convert to Playbook object if not already cached
+            if pm.playbook_id not in self._playbooks_cache:
+                self._playbooks_cache[pm.playbook_id] = self.get_playbook(pm.playbook_id)
+            result[pm.playbook_id] = self._playbooks_cache[pm.playbook_id]
+        return result
 
     def create_playbook(self, create_data: PlaybookCreate) -> Playbook:
         """

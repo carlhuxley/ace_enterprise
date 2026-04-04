@@ -163,6 +163,85 @@ class PostgresBulletRetriever:
             min_helpful_ratio=min_helpful_ratio,
         )
 
+    def retrieve_cross_model(
+        self,
+        query: str,
+        primary_bullets: list[Bullet],
+        secondary_bullets_by_playbook: dict[str, list[Bullet]],
+        primary_playbook_id: str,
+        query_embedding: list[float] | None = None,
+        secondary_weight: float = 0.5,
+        min_confidence: float = 0.5,
+        domain: str | None = None,
+        project_id: str | None = None,
+    ) -> list[tuple[Bullet, float, str]]:
+        """
+        Retrieve bullets with cross-model learning support using PostgreSQL.
+
+        Uses PostgreSQL's multi-playbook similarity search for efficient
+        cross-domain knowledge retrieval.
+
+        Args:
+            query: Query text
+            primary_bullets: Ignored (we use DB directly)
+            secondary_bullets_by_playbook: Ignored (we use DB directly)
+            primary_playbook_id: ID of the primary playbook
+            query_embedding: Pre-computed query embedding (optional)
+            secondary_weight: Weight multiplier for secondary playbook bullets
+            min_confidence: Minimum confidence_score threshold
+            domain: Only retrieve bullets applicable to this domain
+            project_id: Only retrieve bullets applicable to this project
+
+        Returns:
+            List of (bullet, score, source_playbook_id) tuples
+        """
+        # Use PostgreSQL semantic search for all playbooks
+        results = self.adapter.semantic_search(
+            query=query,
+            playbook_id=None,  # Search all playbooks
+            top_k=self.top_k * 2,  # Get more to allow for filtering
+            similarity_threshold=self.similarity_threshold,
+        )
+
+        # Apply confidence filter
+        results = [
+            (bullet, score)
+            for bullet, score in results
+            if getattr(bullet, 'confidence_score', 0.5) >= min_confidence
+        ]
+
+        # Apply domain filter
+        if domain:
+            results = [
+                (bullet, score)
+                for bullet, score in results
+                if not getattr(bullet, 'applicable_domains', None)
+                or domain in (bullet.applicable_domains or [])
+            ]
+
+        # Apply project filter
+        if project_id:
+            results = [
+                (bullet, score)
+                for bullet, score in results
+                if not getattr(bullet, 'project_ids', None)
+                or project_id in (bullet.project_ids or [])
+            ]
+
+        # Convert to cross-model format with source playbook tracking
+        # Apply secondary weight to non-primary playbooks
+        cross_model_results = []
+        for bullet, score in results:
+            source_playbook_id = getattr(bullet, 'playbook_id', primary_playbook_id)
+            # Apply secondary weight if not from primary playbook
+            if source_playbook_id != primary_playbook_id:
+                score = score * secondary_weight
+            cross_model_results.append((bullet, score, source_playbook_id))
+
+        # Sort by score and return top_k
+        cross_model_results.sort(key=lambda x: x[1], reverse=True)
+        return cross_model_results[:self.top_k]
+
     def _helpful_ratio(self, bullet: Bullet) -> float:
         """Calculate helpful ratio for a bullet."""
         total = bullet.helpful_count + bullet.harmful_count
