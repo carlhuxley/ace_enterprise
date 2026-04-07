@@ -11,6 +11,7 @@ Builds features completely autonomously using Test-Driven Development:
 
 Key principle: Methodical over vibe coding.
 """
+
 import ast
 import logging
 import subprocess
@@ -22,6 +23,12 @@ from src.agents.redundancy_checker import (
     ExistingTest,
     ProposedTest,
     RedundancyPreChecker,
+)
+from src.agents.project_aware_tdd import (
+    ProjectArchitecture,
+    ProjectStructure,
+    CodeReuseDetector,
+    TDDTAgent,
 )
 from src.agents.test_review_agent import TestReviewAgent
 from src.audit.local_client import LocalAuditClient
@@ -150,6 +157,7 @@ class AutonomousTDDAgent:
 
         # Playbook retrieval for injecting learned patterns
         from src.playbook.retrieval import BulletRetriever
+
         self.bullet_retriever = BulletRetriever()
         # Use ensemble's playbook manager to see newly learned bullets
         self.playbook_manager = ensemble_learner.playbook_manager
@@ -171,6 +179,12 @@ class AutonomousTDDAgent:
         # Initialize audit client for event tracking
         self.audit_client = LocalAuditClient()
         self._agent_id = f"tdd-agent-{id(self)}"
+
+        # Feature-level constraints for project-aware TDD
+        self._feature_requirement: str | None = None
+        self._explicit_class_name: str | None = None
+        self._explicit_file_path: str | None = None
+        self._project_structure = ProjectStructure()
 
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -205,13 +219,72 @@ class AutonomousTDDAgent:
             project_id=str(self.project_root),
         )
 
+    def _determine_impl_path(self, impl_file: str, description: str) -> Path:
+        """
+        Determine correct implementation file path based on feature-level requirement.
+
+        Uses project-aware TDD to place files in appropriate subdirectories.
+        Prioritizes explicit constraints from Gherkin Background.
+
+        Args:
+            impl_file: Suggested filename from LLM (ignored if explicit constraint exists)
+            description: Test description (for fallback only)
+
+        Returns:
+            Path to implementation file in correct subdirectory
+        """
+        # Check for explicit constraints first - use constraint's filename, not LLM's
+        if self._explicit_file_path:
+            explicit_path = Path(self._explicit_file_path)
+            # Use the filename from the explicit constraint
+            filename = explicit_path.name
+            logger.info(f"📍 Using explicit file path constraint: {self._explicit_file_path}")
+
+            # Ensure the path includes a src/ component
+            if str(explicit_path).startswith("src/"):
+                # Remove src/ prefix to get relative path within src
+                relative_path = (
+                    explicit_path.relative_to("src")
+                    if "src" in explicit_path.parts
+                    else explicit_path
+                )
+                target_folder = self.src_dir / relative_path.parent
+            else:
+                # If explicit path doesn't have src/, treat it as relative to src
+                target_folder = self.src_dir / explicit_path.parent
+            target_folder.mkdir(parents=True, exist_ok=True)
+            result_path = target_folder / filename
+            return result_path
+
+        # No explicit constraint - use LLM's suggested filename
+        filename = Path(impl_file).name
+
+        # Use feature requirement for placement via project structure
+        if self._feature_requirement:
+            placement_requirement = self._feature_requirement
+        else:
+            placement_requirement = description
+
+        target_folder_name = self._project_structure.determine_file_placement(placement_requirement)
+
+        # Build the full path
+        if target_folder_name.startswith("src/"):
+            # Target is a subdirectory like src/broker - use it directly
+            impl_dir = self.project_root / target_folder_name
+        else:
+            # Target is just "src" - use the configured src_dir
+            impl_dir = self.src_dir
+
+        impl_dir.mkdir(parents=True, exist_ok=True)
+        return impl_dir / filename
+
     def build_feature(
         self,
         requirement: str,
         gherkin_dir: Path | None = None,
         project_root: Path | None = None,
         source_dir: Path | None = None,
-        test_dir: Path | None = None
+        test_dir: Path | None = None,
     ) -> TDDResult:
         """
         Build complete feature autonomously using TDD.
@@ -233,6 +306,7 @@ class AutonomousTDDAgent:
             TDDResult with all generated files and metrics
         """
         import time
+
         start_time = time.time()
 
         # Use provided directories or fall back to instance defaults
@@ -251,16 +325,35 @@ class AutonomousTDDAgent:
         gherkin_content = None
         gherkin_scenarios = None
         if gherkin_dir:
-            feature_file = list(gherkin_dir.glob("*.feature"))[0] if list(gherkin_dir.glob("*.feature")) else None
+            feature_file = (
+                list(gherkin_dir.glob("*.feature"))[0]
+                if list(gherkin_dir.glob("*.feature"))
+                else None
+            )
             if feature_file:
                 gherkin_content = self._read_gherkin_scenarios(feature_file)
                 gherkin_scenarios = self._parse_gherkin_scenarios(gherkin_content)
-                logger.info(f"\n💡 Using GHERKIN-DRIVEN planning ({len(gherkin_scenarios)} scenarios)")
+                logger.info(
+                    f"\n💡 Using GHERKIN-DRIVEN planning ({len(gherkin_scenarios)} scenarios)"
+                )
                 logger.info(f"📋 Acceptance tests from: {feature_file.name}")
+
+                # Extract explicit class/file constraints from Gherkin Background
+                tdd_agent = TDDTAgent()
+                constraints = tdd_agent.extract_explicit_constraints(gherkin_content)
+                if constraints:
+                    self._explicit_class_name = constraints.get("class_name")
+                    self._explicit_file_path = constraints.get("file_path")
+                    logger.info(
+                        f"🎯 Extracted explicit constraints: class={self._explicit_class_name}, path={self._explicit_file_path}"
+                    )
             else:
                 logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
         else:
             logger.info("\n💡 Using EMERGENT test planning (each cycle informs the next)")
+
+        # Store feature requirement for placement decisions
+        self._feature_requirement = requirement
 
         # Execute TDD cycles with emergent planning
         results = []
@@ -270,13 +363,13 @@ class AutonomousTDDAgent:
             # Determine next test based on current state
             logger.info(f"\n{'─' * 80}")
             logger.info(f"[Cycle {cycle_number}] Determining next test...")
-            logger.info('─' * 80)
+            logger.info("─" * 80)
 
             increment = self._determine_next_increment(
                 requirement,
                 cycle_number,
                 gherkin_context=gherkin_content,
-                gherkin_scenarios=gherkin_scenarios
+                gherkin_scenarios=gherkin_scenarios,
             )
 
             # Check if requirement is satisfied
@@ -311,7 +404,7 @@ class AutonomousTDDAgent:
         # Step 3: Final validation
         logger.info(f"\n{'─' * 80}")
         logger.info("[Final Validation] Running all tests...")
-        logger.info('─' * 80)
+        logger.info("─" * 80)
 
         final_result = self._run_tests()
         if not final_result.all_passed:
@@ -328,7 +421,9 @@ class AutonomousTDDAgent:
         logger.info("\n" + "=" * 80)
         logger.info("✅ FEATURE COMPLETE!")
         logger.info("=" * 80)
-        logger.info(f"  • Cycles executed: {len(results)} ({completed_count} completed, {skipped_count} skipped)")
+        logger.info(
+            f"  • Cycles executed: {len(results)} ({completed_count} completed, {skipped_count} skipped)"
+        )
         logger.info(f"  • Tests created: {final_result.test_count}")
         logger.info(f"  • Playbook bullets learned: {total_bullets}")
         logger.info(f"  • Time: {elapsed:.1f}s")
@@ -341,7 +436,7 @@ class AutonomousTDDAgent:
             cycles_executed=len(results),
             all_tests_passed=True,
             playbook_bullets_added=total_bullets,
-            total_time_seconds=elapsed
+            total_time_seconds=elapsed,
         )
 
     def _plan_increments(self, requirement: str) -> list[TestIncrement]:
@@ -359,10 +454,26 @@ class AutonomousTDDAgent:
         # For MVP, use simple planning (single model)
         # TODO: Implement ensemble-based planning in Phase 2
 
+        # Build constraint section for prompt
+        constraint_section = ""
+        if self._explicit_class_name or self._explicit_file_path:
+            constraint_section = "\n**🎯 CRITICAL CONSTRAINTS FROM FEATURE REQUIREMENT:**\n"
+            if self._explicit_file_path:
+                constraint_section += (
+                    f"- Implementation file MUST be placed at: {self._explicit_file_path}\n"
+                )
+            if self._explicit_class_name:
+                constraint_section += (
+                    f"- You MUST create a class named: {self._explicit_class_name}\n"
+                )
+            constraint_section += (
+                "**These constraints are non-negotiable - follow them exactly.**\n"
+            )
+
         prompt = f"""You are planning incremental tests for TDD (Test-Driven Development).
 
 **Requirement**: {requirement}
-
+{constraint_section}
 **Task**: Break this requirement into a sequence of small, incremental tests.
 
 **Guidelines**:
@@ -401,16 +512,18 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
             test_name, description, test_file, impl_file = parts
 
-            # Ensure paths are under test_dir and src_dir
+            # Ensure paths are under test_dir and use smart placement for impl
             test_path = self.test_dir / Path(test_file).name
-            impl_path = self.src_dir / Path(impl_file).name
+            impl_path = self._determine_impl_path(impl_file, description)
 
-            increments.append(TestIncrement(
-                test_name=test_name,
-                description=description,
-                test_file=test_path,
-                implementation_file=impl_path
-            ))
+            increments.append(
+                TestIncrement(
+                    test_name=test_name,
+                    description=description,
+                    test_file=test_path,
+                    implementation_file=impl_path,
+                )
+            )
 
         if not increments:
             logger.warning("No increments parsed from LLM response")
@@ -438,11 +551,11 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
                 summaries.append(f"\n{test_file_name}:")
                 for func in functions:
                     # Extract what the test checks from the code
-                    code = func['code']
+                    code = func["code"]
                     # Look for assert statements to understand what's being tested
-                    assert_lines = [line.strip() for line in code.split('\n') if 'assert' in line]
+                    assert_lines = [line.strip() for line in code.split("\n") if "assert" in line]
                     if assert_lines:
-                        checks = ' | '.join(assert_lines[:2])  # First 2 assertions
+                        checks = " | ".join(assert_lines[:2])  # First 2 assertions
                         summaries.append(f"  - {func['name']}: {checks}")
                     else:
                         summaries.append(f"  - {func['name']}")
@@ -460,22 +573,24 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
                     import re
 
                     # Find class definitions
-                    classes = re.findall(r'class\s+(\w+)', content)
+                    classes = re.findall(r"class\s+(\w+)", content)
 
                     # Find instance attributes (self.xxx =)
-                    attributes = re.findall(r'self\.(\w+)\s*=', content)
+                    attributes = re.findall(r"self\.(\w+)\s*=", content)
 
                     # Find method definitions
-                    methods = re.findall(r'def\s+(\w+)\s*\(', content)
+                    methods = re.findall(r"def\s+(\w+)\s*\(", content)
 
                     summaries.append(f"\n{impl_file.name}:")
                     if classes:
                         summaries.append(f"  - Classes: {', '.join(set(classes))}")
                     if attributes:
-                        summaries.append(f"  - Attributes: {', '.join(f'self.{a}' for a in set(attributes))}")
+                        summaries.append(
+                            f"  - Attributes: {', '.join(f'self.{a}' for a in set(attributes))}"
+                        )
                     if methods:
                         # Filter out __init__ and private methods for brevity
-                        public_methods = [m for m in set(methods) if not m.startswith('_')]
+                        public_methods = [m for m in set(methods) if not m.startswith("_")]
                         if public_methods:
                             summaries.append(f"  - Methods: {', '.join(public_methods)}")
         else:
@@ -488,16 +603,20 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
         existing_tests = []
         for test_file_key, functions in self.test_functions.items():
             for func in functions:
-                code = func['code']
-                assertions = [line.strip() for line in code.split('\n') if 'assert' in line.lower()]
-                existing_tests.append(ExistingTest(
-                    name=func['name'],
-                    assertions=assertions,
-                    file_path=test_file_key
-                ))
+                code = func["code"]
+                assertions = [line.strip() for line in code.split("\n") if "assert" in line.lower()]
+                existing_tests.append(
+                    ExistingTest(name=func["name"], assertions=assertions, file_path=test_file_key)
+                )
         return existing_tests
 
-    def _determine_next_increment(self, requirement: str, cycle_number: int, gherkin_context: str | None = None, gherkin_scenarios: list[dict] | None = None) -> TestIncrement | None:
+    def _determine_next_increment(
+        self,
+        requirement: str,
+        cycle_number: int,
+        gherkin_context: str | None = None,
+        gherkin_scenarios: list[dict] | None = None,
+    ) -> TestIncrement | None:
         """
         Determine the next test increment based on current implementation state.
 
@@ -523,8 +642,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         # Retrieve learned redundancy patterns from playbook
         redundancy_patterns = self._get_playbook_guidance(
-            query="test redundancy anti-patterns avoid",
-            top_k=3
+            query="test redundancy anti-patterns avoid", top_k=3
         )
 
         # Build context about what exists
@@ -551,7 +669,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             scenarios_summary = []
             for idx, scenario in enumerate(gherkin_scenarios, 1):
                 scenario_text = f"{idx}. **{scenario['name']}**\n"
-                for step in scenario['steps']:
+                for step in scenario["steps"]:
                     scenario_text += f"   {step['type']}: {step['text']}\n"
                 scenarios_summary.append(scenario_text)
 
@@ -562,7 +680,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 ```
 
 **Parsed Scenarios ({len(gherkin_scenarios)} total):**
-{''.join(scenarios_summary)}
+{"".join(scenarios_summary)}
 
 **CRITICAL - Generate Unit Tests from Gherkin:**
 Each Gherkin scenario defines a business capability. Your task is to derive unit tests that:
@@ -603,7 +721,20 @@ Scenario: User grants application access
 **🧠 LEARNED REDUNDANCY PATTERNS (from past failures):**
 {redundancy_patterns if redundancy_patterns.strip() else "No redundancy patterns learned yet."}
 
-⚠️  **CRITICAL - AVOID REDUNDANT TESTS**: The next test you choose MUST:
+⚡ **IMPORTANT - FILE AND CLASS PLACEMENT CONSTRAINTS**:"""
+
+        # Add explicit constraints if they exist
+        if self._explicit_class_name or self._explicit_file_path:
+            prompt += "\n"
+            if self._explicit_file_path:
+                prompt += f"- Implementation file MUST be placed at: `{self._explicit_file_path}`\n"
+            if self._explicit_class_name:
+                prompt += f"- You MUST create a class named: `{self._explicit_class_name}`\n"
+            prompt += "**These constraints are non-negotiable - follow them exactly.**\n\n"
+        else:
+            prompt += "\nNo explicit placement constraints specified.\n\n"
+
+        prompt += f"""⚠️  **CRITICAL - AVOID REDUNDANT TESTS**: The next test you choose MUST:
 1. Test NEW behavior not already covered by tests OR implementation above
 2. FAIL with the current implementation (for RED phase)
 3. NOT test attributes/methods that already exist in the implementation
@@ -662,7 +793,11 @@ Output EITHER:
             return None
 
         # Parse response
-        lines = [line.strip() for line in response.split("\n") if "|" in line and not line.startswith("#")]
+        lines = [
+            line.strip()
+            for line in response.split("\n")
+            if "|" in line and not line.startswith("#")
+        ]
         if not lines:
             logger.warning(f"Could not parse next increment from: {response}")
             return None
@@ -675,15 +810,15 @@ Output EITHER:
 
         test_name, description, test_file, impl_file = parts
 
-        # Ensure paths are under test_dir and src_dir
+        # Ensure paths are under test_dir and use smart placement for impl
         test_path = self.test_dir / Path(test_file).name
-        impl_path = self.src_dir / Path(impl_file).name
+        impl_path = self._determine_impl_path(impl_file, description)
 
         return TestIncrement(
             test_name=test_name,
             description=description,
             test_file=test_path,
-            implementation_file=impl_path
+            implementation_file=impl_path,
         )
 
     def _tdd_cycle(self, increment: TestIncrement, cycle_number: int) -> CycleResult:
@@ -699,14 +834,13 @@ Output EITHER:
         """
         # PRE-CHECK: Detect redundancy BEFORE writing test code
         existing_tests = self._build_existing_tests_list()
-        proposed = ProposedTest(
-            name=increment.test_name,
-            description=increment.description
-        )
+        proposed = ProposedTest(name=increment.test_name, description=increment.description)
         redundancy_result = self.redundancy_checker.check(existing_tests, proposed)
 
         if redundancy_result.is_redundant:
-            logger.info(f"  ⏭️  PRE-CHECK: Skipping redundant test (confidence: {redundancy_result.confidence:.0%})")
+            logger.info(
+                f"  ⏭️  PRE-CHECK: Skipping redundant test (confidence: {redundancy_result.confidence:.0%})"
+            )
             logger.info(f"      Reason: {redundancy_result.reason}")
 
             # Return skipped cycle without writing any code
@@ -720,7 +854,7 @@ Output EITHER:
                 learned_bullets=[],
                 cycle_number=cycle_number,
                 skipped=True,
-                skip_reason=f"Pre-check redundancy: {redundancy_result.reason}"
+                skip_reason=f"Pre-check redundancy: {redundancy_result.reason}",
             )
 
         # RED: Write failing test
@@ -737,7 +871,9 @@ Output EITHER:
         while not red_result.failed and refinement_attempt < MAX_RED_REFINEMENTS:
             refinement_attempt += 1
 
-            logger.info(f"  ⚠️  Test passed unexpectedly (attempt {refinement_attempt}/{MAX_RED_REFINEMENTS})")
+            logger.info(
+                f"  ⚠️  Test passed unexpectedly (attempt {refinement_attempt}/{MAX_RED_REFINEMENTS})"
+            )
             logger.info("  🧠 LEARN: Analyzing redundancy pattern...")
 
             # Analyze why test is redundant
@@ -746,13 +882,16 @@ Output EITHER:
             # Store bullet in playbook for future learning (only on first refinement)
             if refinement_attempt == 1:
                 from src.storage.schemas import BulletCreate
+
                 bullet_data = BulletCreate(
                     content=redundancy_bullet,
                     section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
                     tags=["test_redundancy", "anti_pattern", "tdd"],
                     created_by_model=self.llm_client.model,
                     model_provider=self.llm_client.provider,
-                    license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model),
+                    license_type=self._get_license_type(
+                        self.llm_client.provider, self.llm_client.model
+                    ),
                     # Low initial confidence - needs validation via feedback
                     confidence_score=0.3,
                     applicable_domains=["tdd"],
@@ -768,7 +907,7 @@ Output EITHER:
                 increment=increment,
                 test_code=test_code,
                 redundancy_analysis=redundancy_bullet,
-                attempt=refinement_attempt
+                attempt=refinement_attempt,
             )
 
             # Update test code and test_functions array
@@ -778,8 +917,8 @@ Output EITHER:
             # Update the stored test function
             if test_file_key in self.test_functions:
                 for func_data in self.test_functions[test_file_key]:
-                    if func_data['name'] == increment.test_name:
-                        func_data['code'] = refined_test_code
+                    if func_data["name"] == increment.test_name:
+                        func_data["code"] = refined_test_code
                         break
 
             # Reassemble test file with refined test
@@ -809,7 +948,7 @@ Output EITHER:
                 learned_bullets=[],
                 cycle_number=cycle_number,
                 skipped=True,
-                skip_reason=skip_reason
+                skip_reason=skip_reason,
             )
 
         logger.info("  ⚙️  Running tests... FAILED (expected)")
@@ -822,28 +961,33 @@ Output EITHER:
 
         for attempt in range(1, MAX_GREEN_RETRIES + 1):
             if attempt > 1:
-                logger.info(f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)...")
+                logger.info(
+                    f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)..."
+                )
 
                 # LEARN from previous failure BEFORE next attempt
-                logger.info(f"  🧠 LEARN: Analyzing attempt {attempt-1} failure...")
+                logger.info(f"  🧠 LEARN: Analyzing attempt {attempt - 1} failure...")
                 failure_analysis = self._analyze_green_failure(
                     increment=increment,
                     test_code=test_code,
                     impl_code=previous_impl_code,
                     error=green_result.error,
-                    attempts=attempt - 1
+                    attempts=attempt - 1,
                 )
 
                 if failure_analysis:
                     # Store bullet in playbook NOW - available for next attempt!
                     from src.storage.schemas import BulletCreate
+
                     bullet_data = BulletCreate(
                         content=failure_analysis["bullet"],
                         section="troubleshooting",  # Technical gotchas go in troubleshooting
                         tags=failure_analysis["tags"],
                         created_by_model=self.llm_client.model,
                         model_provider=self.llm_client.provider,
-                        license_type=self._get_license_type(self.llm_client.provider, self.llm_client.model),
+                        license_type=self._get_license_type(
+                            self.llm_client.provider, self.llm_client.model
+                        ),
                         # Low initial confidence - needs validation via feedback
                         confidence_score=0.3,
                         applicable_domains=["tdd"],
@@ -862,17 +1006,23 @@ Output EITHER:
                             increment.test_name,
                             test_code,
                             failure_analysis["test_correction"],
-                            cycle_number
+                            cycle_number,
                         )
                         if corrected:
                             test_code = increment.test_file.read_text()  # Reload corrected test
                             logger.info("      ✓ Test corrected and reloaded")
                         else:
-                            logger.warning("      ⚠️  Test correction failed, continuing with original test")
+                            logger.warning(
+                                "      ⚠️  Test correction failed, continuing with original test"
+                            )
 
-            impl_code = self._write_minimal_code(increment, red_result, previous_failure=green_result, attempt=attempt)
+            impl_code = self._write_minimal_code(
+                increment, red_result, previous_failure=green_result, attempt=attempt
+            )
             previous_impl_code = impl_code  # Save for learning if this attempt fails
-            logger.info(f"      Created: {increment.implementation_file.relative_to(self.project_root)}")
+            logger.info(
+                f"      Created: {increment.implementation_file.relative_to(self.project_root)}"
+            )
 
             # ATDD: No triangulation enforcement - allow comprehensive implementations
             # (Triangulation validation removed - conflicts with contract-based testing)
@@ -930,11 +1080,11 @@ Output EITHER:
                     {
                         "content": bullet.content,
                         "section": bullet.section,
-                        "tags": bullet.tags or []
+                        "tags": bullet.tags or [],
                     }
                     for bullet in learned_bullets
                 ],
-                playbook_id=self.playbook_id
+                playbook_id=self.playbook_id,
             )
             logger.info("      ✓ Cycle logged successfully")
         except Exception as e:
@@ -948,7 +1098,7 @@ Output EITHER:
             green_result=green_result,
             refactored=refactored,
             learned_bullets=learned_bullets,
-            cycle_number=cycle_number
+            cycle_number=cycle_number,
         )
 
     def _write_test(self, increment: TestIncrement, cycle_number: int) -> str:
@@ -968,12 +1118,13 @@ Output EITHER:
 
         # Get existing test functions for context (but don't modify file directly)
         existing_functions = self.test_functions.get(test_file_key, [])
-        existing_code = "\n\n".join([f['code'] for f in existing_functions]) if existing_functions else ""
+        existing_code = (
+            "\n\n".join([f["code"] for f in existing_functions]) if existing_functions else ""
+        )
 
         # Get learned patterns from playbook
         playbook_guidance = self._get_playbook_guidance(
-            query=f"TDD test writing {increment.test_name} {increment.description}",
-            top_k=3
+            query=f"TDD test writing {increment.test_name} {increment.description}", top_k=3
         )
 
         prompt = f"""You are writing a test following TDD (Test-Driven Development).
@@ -1103,18 +1254,22 @@ def test_add_returns_sum():
         if test_file_key not in self.test_functions:
             self.test_functions[test_file_key] = []
 
-        self.test_functions[test_file_key].append({
-            'cycle': cycle_number,
-            'name': increment.test_name,
-            'code': test_function
-        })
+        self.test_functions[test_file_key].append(
+            {"cycle": cycle_number, "name": increment.test_name, "code": test_function}
+        )
 
         # Assemble complete file from all stored functions
         self._assemble_test_file(increment.test_file, increment.implementation_file)
 
         return test_function
 
-    def _write_minimal_code(self, increment: TestIncrement, test_result: TestResult, previous_failure: TestResult = None, attempt: int = 1) -> str:
+    def _write_minimal_code(
+        self,
+        increment: TestIncrement,
+        test_result: TestResult,
+        previous_failure: TestResult = None,
+        attempt: int = 1,
+    ) -> str:
         """
         Write minimal code to make test pass (GREEN phase).
 
@@ -1137,8 +1292,7 @@ def test_add_returns_sum():
 
         # Get learned patterns from playbook
         playbook_guidance = self._get_playbook_guidance(
-            query=f"ATDD implementation {increment.test_name}",
-            top_k=3
+            query=f"ATDD implementation {increment.test_name}", top_k=3
         )
 
         prompt = f"""You are following ATDD (Acceptance Test-Driven Development): write code to satisfy the test contract.
@@ -1152,8 +1306,16 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 - Use appropriate algorithms, data structures, and libraries
 - Write code you'd be proud to deploy to production
 
-**⚠️ ATTEMPT {attempt}/3** {'- 🚨 THIS IS YOUR FINAL ATTEMPT! 🚨' if attempt == 3 else f'- You have {4-attempt} attempt{"s" if 4-attempt > 1 else ""} remaining if this fails'}
-{'🚨 CRITICAL: The cycle will FAIL if this implementation does not pass the test. There are NO more retries after this.' if attempt == 3 else '⚠️ IMPORTANT: Get this right the FIRST time. While you have retries, each failed attempt wastes time and resources.'}
+**⚠️ ATTEMPT {attempt}/3** {
+            "- 🚨 THIS IS YOUR FINAL ATTEMPT! 🚨"
+            if attempt == 3
+            else f"- You have {4 - attempt} attempt{"s" if 4 - attempt > 1 else ""} remaining if this fails"
+        }
+{
+            "🚨 CRITICAL: The cycle will FAIL if this implementation does not pass the test. There are NO more retries after this."
+            if attempt == 3
+            else "⚠️ IMPORTANT: Get this right the FIRST time. While you have retries, each failed attempt wastes time and resources."
+        }
 
 **CRITICAL**: You are writing an IMPLEMENTATION file, NOT a test file.
 - This is: {self.src_dir.name}/{increment.implementation_file.name}
@@ -1175,15 +1337,19 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 ```python
 {existing_code if existing_code else "# Empty file - create what's needed"}
 ```
-{"" if not previous_failure else f'''
-**Previous implementation error** (attempt {attempt-1} failed):
+{
+            ""
+            if not previous_failure
+            else f'''
+**Previous implementation error** (attempt {attempt - 1} failed):
 ```
 {previous_failure.error or previous_failure.output}
 ```
 
 **What went wrong**: The implementation you provided didn't satisfy the test assertion.
 **Action needed**: {'CAREFULLY review the error above and the test requirements below.' if attempt == 3 else 'Fix the implementation to make the test pass. Pay close attention to the error message above.'}
-'''}
+'''
+        }
 
 **PRE-FLIGHT CHECKLIST** (verify before writing code):
 1. ✓ Read the test code above - what class/function names does it use?
@@ -1352,10 +1518,7 @@ class OAuth:
         return implementation_file.read_text()
 
     def _ensemble_learn(
-        self,
-        test_code: str,
-        impl_code: str,
-        increment: TestIncrement
+        self, test_code: str, impl_code: str, increment: TestIncrement
     ) -> list[ConsensusBullet]:
         """
         Ensemble extracts and votes on patterns from TDD cycle.
@@ -1372,7 +1535,9 @@ class OAuth:
         test_review = self.test_reviewer.review_test_file(increment.test_file)
 
         if test_review.overall_score < self.review_threshold:
-            logger.warning(f"  ⚠️  Test quality low ({test_review.overall_score:.0%}), skipping learning")
+            logger.warning(
+                f"  ⚠️  Test quality low ({test_review.overall_score:.0%}), skipping learning"
+            )
             return []
 
         # Use standard ACE learning flow
@@ -1413,13 +1578,13 @@ Output 1-3 bullet points, one per line.""",
                 "test_name": increment.test_name,
                 "test_file": str(increment.test_file),
                 "impl_file": str(increment.implementation_file),
-            }
+            },
         )
 
         feedback = EnvironmentFeedback(
             result="SUCCESS",
             actual="Tests passed",
-            test_report={"test_quality": test_review.overall_score}
+            test_report={"test_quality": test_review.overall_score},
         )
 
         # Run ensemble learning (single model auto-approves)
@@ -1470,7 +1635,9 @@ Output 1-3 bullet points, one per line.""",
         for section_name, section_bullets in primary_playbook.sections.items():
             primary_bullets.extend(section_bullets)
 
-        logger.info(f"🔍 DEBUG: Primary playbook {self.playbook_id} has {len(primary_bullets)} bullets in memory")
+        logger.info(
+            f"🔍 DEBUG: Primary playbook {self.playbook_id} has {len(primary_bullets)} bullets in memory"
+        )
 
         # Get all other playbooks for cross-domain knowledge
         secondary_bullets_by_playbook = {}
@@ -1513,10 +1680,9 @@ Output 1-3 bullet points, one per line.""",
         )
 
         # Format for prompt (take top_k)
-        bullets_text = "\n".join([
-            f"- {bullet.content}"
-            for bullet, score, source in relevant_scored[:top_k]
-        ])
+        bullets_text = "\n".join(
+            [f"- {bullet.content}" for bullet, score, source in relevant_scored[:top_k]]
+        )
 
         return f"""**Learned Patterns** (from previous experience):
 {bullets_text}
@@ -1532,6 +1698,7 @@ Output 1-3 bullet points, one per line.""",
         try:
             # Set PYTHONPATH to include project root so imports work
             import os
+
             env = os.environ.copy()
             env["PYTHONPATH"] = str(self.project_root)
 
@@ -1541,7 +1708,7 @@ Output 1-3 bullet points, one per line.""",
                 text=True,
                 cwd=self.project_root,
                 env=env,
-                timeout=30
+                timeout=30,
             )
 
             output = result.stdout + result.stderr
@@ -1561,7 +1728,7 @@ Output 1-3 bullet points, one per line.""",
                 lines = output.split("\n")
                 for i, line in enumerate(lines):
                     if "FAILED" in line or "ERROR" in line:
-                        error = "\n".join(lines[i:i+10])
+                        error = "\n".join(lines[i : i + 10])
                         break
 
             return TestResult(
@@ -1570,22 +1737,16 @@ Output 1-3 bullet points, one per line.""",
                 output=output,
                 error=error,
                 test_count=test_count,
-                failed_count=failed_count
+                failed_count=failed_count,
             )
 
         except subprocess.TimeoutExpired:
             return TestResult(
-                passed=False,
-                failed=True,
-                output="",
-                error="Test execution timed out (30s)"
+                passed=False, failed=True, output="", error="Test execution timed out (30s)"
             )
         except Exception as e:
             return TestResult(
-                passed=False,
-                failed=True,
-                output="",
-                error=f"Test execution failed: {e}"
+                passed=False, failed=True, output="", error=f"Test execution failed: {e}"
             )
 
     def _count_functions(self, code: str) -> int:
@@ -1616,25 +1777,49 @@ Output 1-3 bullet points, one per line.""",
             Method name being tested (e.g., generate_authorization_url) or __init__ for constructor tests
         """
         # Remove 'test_' prefix
-        if not test_name.startswith('test_'):
+        if not test_name.startswith("test_"):
             return test_name  # Fallback
 
         without_prefix = test_name[5:]  # Remove 'test_'
 
         # Check for constructor tests
-        if any(pattern in without_prefix for pattern in ['can_be_created', 'can_be_instantiated', 'constructor', 'accepts_optional']):
+        if any(
+            pattern in without_prefix
+            for pattern in [
+                "can_be_created",
+                "can_be_instantiated",
+                "constructor",
+                "accepts_optional",
+            ]
+        ):
             return "__init__"
 
         # Find common action verbs that indicate where the method name ends
-        verbs = ['returns', 'contains', 'accepts', 'sends', 'makes', 'gets', 'sets', 'validates',
-                 'has', 'is', 'should', 'includes', 'uses', 'calls', 'raises', 'handles']
+        verbs = [
+            "returns",
+            "contains",
+            "accepts",
+            "sends",
+            "makes",
+            "gets",
+            "sets",
+            "validates",
+            "has",
+            "is",
+            "should",
+            "includes",
+            "uses",
+            "calls",
+            "raises",
+            "handles",
+        ]
 
-        parts = without_prefix.split('_')
+        parts = without_prefix.split("_")
 
         # Find the first verb and everything before it is the method name
         for i, part in enumerate(parts):
             if part in verbs:
-                method = '_'.join(parts[:i])
+                method = "_".join(parts[:i])
                 return method if method else parts[0]
 
         # If no verb found, assume first part is method name
@@ -1673,7 +1858,7 @@ Output 1-3 bullet points, one per line.""",
                     assertion_count += 1
                 # Count mock assertions (assert_called, assert_called_once, etc.)
                 elif isinstance(node, ast.Attribute):
-                    if node.attr.startswith('assert_'):
+                    if node.attr.startswith("assert_"):
                         assertion_count += 1
 
             # Allow up to 2 assertions (some tests need 2 closely related checks)
@@ -1724,7 +1909,9 @@ def test_url_contains_state():
             logger.warning(f"Failed to validate test quality: {e}")
             return True, ""  # Skip validation on error
 
-    def _validate_hardcode_implementation(self, impl_code: str, method_name: str) -> tuple[bool, str]:
+    def _validate_hardcode_implementation(
+        self, impl_code: str, method_name: str
+    ) -> tuple[bool, str]:
         """
         Validate that implementation uses HARDCODED literals (no logic) for first test.
 
@@ -1754,18 +1941,26 @@ def test_url_contains_state():
             for node in ast.walk(target_func):
                 # F-strings (JoinedStr)
                 if isinstance(node, ast.JoinedStr):
-                    violations.append("f-string formatting (f\"...\")")
+                    violations.append('f-string formatting (f"...")')
 
                 # .format() calls
                 elif isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Attribute) and node.func.attr == 'format':
+                    if isinstance(node.func, ast.Attribute) and node.func.attr == "format":
                         violations.append(".format() method")
                     # urlencode, quote, etc.
                     if isinstance(node.func, ast.Name):
-                        if node.func.id in ['urlencode', 'quote', 'quote_plus', 'dumps', 'loads']:
+                        if node.func.id in ["urlencode", "quote", "quote_plus", "dumps", "loads"]:
                             violations.append(f"{node.func.id}() library call")
                     elif isinstance(node.func, ast.Attribute):
-                        if node.func.attr in ['urlencode', 'quote', 'quote_plus', 'dumps', 'loads', 'encode', 'decode']:
+                        if node.func.attr in [
+                            "urlencode",
+                            "quote",
+                            "quote_plus",
+                            "dumps",
+                            "loads",
+                            "encode",
+                            "decode",
+                        ]:
                             violations.append(f".{node.func.attr}() method")
 
                 # Loops
@@ -1794,7 +1989,7 @@ Your implementation uses logic patterns, but this is the FIRST test for this met
 You MUST return a HARDCODED literal value.
 
 **Violations found:**
-{chr(10).join('- ' + v for v in violations)}
+{chr(10).join("- " + v for v in violations)}
 
 **❌ FORBIDDEN - Remove these:**
 - String formatting: f"..." or .format()
@@ -1914,7 +2109,7 @@ from src.{module_name} import *
 """
 
         # Combine all test functions in cycle order
-        test_bodies = "\n\n".join([f['code'] for f in functions])
+        test_bodies = "\n\n".join([f["code"] for f in functions])
 
         # Write complete file
         full_content = header + test_bodies
@@ -1980,7 +2175,7 @@ Output ONLY the JSON, no other text."""
         import re
 
         # Extract JSON if wrapped in markdown
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
         if json_match:
             response = json_match.group(1)
 
@@ -1988,19 +2183,19 @@ Output ONLY the JSON, no other text."""
             pattern = json.loads(response)
 
             # Create semantic bullet
-            bullet = f"""**REDUNDANCY ANTI-PATTERN: {pattern['pattern_name']}**
+            bullet = f"""**REDUNDANCY ANTI-PATTERN: {pattern["pattern_name"]}**
 
-**Context:** {pattern['context']}
+**Context:** {pattern["context"]}
 
-**Why Redundant:** {pattern['redundancy_type']}
+**Why Redundant:** {pattern["redundancy_type"]}
 
-**Underlying Concept:** {pattern['underlying_concept']}
+**Underlying Concept:** {pattern["underlying_concept"]}
 
-**How to Avoid:** {pattern['how_to_avoid']}
+**How to Avoid:** {pattern["how_to_avoid"]}
 
 **Examples:**
-- ❌ Bad: {pattern['example_bad']}
-- ✅ Good: {pattern['example_good']}
+- ❌ Bad: {pattern["example_bad"]}
+- ✅ Good: {pattern["example_good"]}
 
 **Category:** Test Redundancy Detection
 **Learned From:** {increment.test_name} (passed unexpectedly in RED phase)
@@ -2021,11 +2216,7 @@ Output ONLY the JSON, no other text."""
 """
 
     def _refine_test_to_fail(
-        self,
-        increment: TestIncrement,
-        test_code: str,
-        redundancy_analysis: str,
-        attempt: int
+        self, increment: TestIncrement, test_code: str, redundancy_analysis: str, attempt: int
     ) -> str:
         """Refine a test that passed unexpectedly to make it actually test new behavior.
 
@@ -2050,7 +2241,7 @@ Output ONLY the JSON, no other text."""
         # Get existing tests for context
         test_file_key = str(increment.test_file)
         existing_functions = self.test_functions.get(test_file_key, [])
-        existing_test_names = [f['name'] for f in existing_functions]
+        existing_test_names = [f["name"] for f in existing_functions]
 
         prompt = f"""You are refining a TDD test that passed unexpectedly in the RED phase.
 
@@ -2072,7 +2263,7 @@ This means the test is redundant - the behavior already exists.
 ```
 
 **Existing tests:**
-{', '.join(existing_test_names) if existing_test_names else "None - this is the first test"}
+{", ".join(existing_test_names) if existing_test_names else "None - this is the first test"}
 
 **Your Task ({attempt}/3 refinement attempts):**
 Refine the test to make it MORE SPECIFIC and STRICTER so it actually FAILS and drives out new behavior.
@@ -2112,12 +2303,7 @@ Refine the test to make it MORE SPECIFIC and STRICTER so it actually FAILS and d
         return refined_code
 
     def _analyze_green_failure(
-        self,
-        increment: TestIncrement,
-        test_code: str,
-        impl_code: str,
-        error: str,
-        attempts: int
+        self, increment: TestIncrement, test_code: str, impl_code: str, error: str, attempts: int
     ) -> dict | None:
         """Analyze GREEN failures to detect test quality issues and extract learning.
 
@@ -2191,7 +2377,7 @@ Output ONLY the JSON, no other text."""
             import re
 
             # Extract JSON if wrapped in markdown
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
             if json_match:
                 response = json_match.group(1)
 
@@ -2202,26 +2388,28 @@ Output ONLY the JSON, no other text."""
                 return None
 
             # Create semantic knowledge bullet
-            bullet = f"""**{analysis['technical_domain'].upper().replace('_', ' ')} - TEST QUALITY INSIGHT**
+            bullet = f"""**{analysis["technical_domain"].upper().replace("_", " ")} - TEST QUALITY INSIGHT**
 
-**Issue Detected:** {analysis['issue_type'].replace('_', ' ').title()}
+**Issue Detected:** {analysis["issue_type"].replace("_", " ").title()}
 
-**Knowledge:** {analysis['knowledge_summary']}
+**Knowledge:** {analysis["knowledge_summary"]}
 
 **Explanation:**
-{analysis['explanation']}
+{analysis["explanation"]}
 
-**Test Status:** {'⚠️ Test assertion appears incorrect' if analysis.get('test_is_wrong') else '✓ Test is correct, implementation needs work'}
+**Test Status:** {"⚠️ Test assertion appears incorrect" if analysis.get("test_is_wrong") else "✓ Test is correct, implementation needs work"}
 
 **Learned From:** {increment.test_name} (failed after {attempts} GREEN attempts)
 
-**When This Applies:** Future tests in {analysis['technical_domain']} domain
+**When This Applies:** Future tests in {analysis["technical_domain"]} domain
 """
 
             result = {
                 "bullet": bullet,
-                "tags": analysis.get("tags", [analysis["technical_domain"], "test_quality", "learned_from_failure"]),
-                "summary": analysis["knowledge_summary"]
+                "tags": analysis.get(
+                    "tags", [analysis["technical_domain"], "test_quality", "learned_from_failure"]
+                ),
+                "summary": analysis["knowledge_summary"],
             }
 
             if analysis.get("test_is_wrong") and analysis.get("test_correction"):
@@ -2233,8 +2421,15 @@ Output ONLY the JSON, no other text."""
             logger.warning(f"Failed to analyze GREEN failure: {e}")
             return None
 
-    def _apply_test_correction(self, test_file: Path, implementation_file: Path, test_name: str,
-                              current_test_code: str, correction_description: str, cycle_number: int) -> bool:
+    def _apply_test_correction(
+        self,
+        test_file: Path,
+        implementation_file: Path,
+        test_name: str,
+        current_test_code: str,
+        correction_description: str,
+        cycle_number: int,
+    ) -> bool:
         """Apply suggested test correction to fix malformed test.
 
         Args:
@@ -2275,7 +2470,8 @@ Output ONLY the JSON, no other text."""
 
             # Extract code from markdown if present
             import re
-            code_match = re.search(r'```(?:python)?\s*\n(.*?)\n```', corrected_code, re.DOTALL)
+
+            code_match = re.search(r"```(?:python)?\s*\n(.*?)\n```", corrected_code, re.DOTALL)
             if code_match:
                 corrected_code = code_match.group(1)
 
@@ -2286,8 +2482,8 @@ Output ONLY the JSON, no other text."""
                 if test_file_key in self.test_functions:
                     # Find and update the corrected test function
                     for func_data in self.test_functions[test_file_key]:
-                        if func_data['name'] == test_name:
-                            func_data['code'] = corrected_code
+                        if func_data["name"] == test_name:
+                            func_data["code"] = corrected_code
                             break
 
                 # Reassemble the complete test file with imports
@@ -2406,7 +2602,7 @@ Output ONLY the JSON, no other text."""
                 capture_output=True,
                 text=True,
                 timeout=60,
-                cwd=str(self.project_root.parent)
+                cwd=str(self.project_root.parent),
             )
 
             # Parse plain text output
@@ -2416,7 +2612,9 @@ Output ONLY the JSON, no other text."""
             output = result.stdout + result.stderr
 
             # Find scenarios summary line
-            scenario_pattern = r'(\d+)\s+scenarios?\s+passed(?:,\s*(\d+)\s+failed)?(?:,\s*(\d+)\s+skipped)?'
+            scenario_pattern = (
+                r"(\d+)\s+scenarios?\s+passed(?:,\s*(\d+)\s+failed)?(?:,\s*(\d+)\s+skipped)?"
+            )
             match = re.search(scenario_pattern, output)
 
             if match:
@@ -2427,9 +2625,9 @@ Output ONLY the JSON, no other text."""
             else:
                 # Try alternate format: "0 features passed, 1 failed"
                 # Also check for "X scenarios passed, Y failed"
-                passed_match = re.search(r'(\d+)\s+scenarios?\s+passed', output)
-                failed_match = re.search(r'(\d+)\s+scenarios?\s+failed', output)
-                skipped_match = re.search(r'(\d+)\s+scenarios?\s+skipped', output)
+                passed_match = re.search(r"(\d+)\s+scenarios?\s+passed", output)
+                failed_match = re.search(r"(\d+)\s+scenarios?\s+failed", output)
+                skipped_match = re.search(r"(\d+)\s+scenarios?\s+skipped", output)
 
                 if passed_match or failed_match or skipped_match:
                     passed_scenarios = int(passed_match.group(1)) if passed_match else 0
@@ -2444,7 +2642,7 @@ Output ONLY the JSON, no other text."""
                         "passed": 0,
                         "failed": 0,
                         "all_passed": False,
-                        "details": "Could not parse behave output"
+                        "details": "Could not parse behave output",
                     }
 
             return {
@@ -2452,27 +2650,15 @@ Output ONLY the JSON, no other text."""
                 "passed": passed_scenarios,
                 "failed": failed_scenarios,
                 "all_passed": (failed_scenarios == 0 and total_scenarios > 0),
-                "details": f"{passed_scenarios}/{total_scenarios} scenarios passing"
+                "details": f"{passed_scenarios}/{total_scenarios} scenarios passing",
             }
 
         except subprocess.TimeoutExpired:
             logger.error("Acceptance tests timed out")
-            return {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "all_passed": False,
-                "details": "Timeout"
-            }
+            return {"total": 0, "passed": 0, "failed": 0, "all_passed": False, "details": "Timeout"}
         except Exception as e:
             logger.error(f"Error running acceptance tests: {e}")
-            return {
-                "total": 0,
-                "passed": 0,
-                "failed": 0,
-                "all_passed": False,
-                "details": str(e)
-            }
+            return {"total": 0, "passed": 0, "failed": 0, "all_passed": False, "details": str(e)}
 
     def _read_gherkin_scenarios(self, gherkin_file: Path) -> str:
         """Read Gherkin file and extract scenarios for context.
@@ -2544,47 +2730,48 @@ Output ONLY the JSON, no other text."""
         current_scenario = None
         current_step_type = None
 
-        for line in gherkin_content.split('\n'):
+        for line in gherkin_content.split("\n"):
             line = line.strip()
 
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
 
             # Detect scenario
-            if line.startswith('Scenario:'):
+            if line.startswith("Scenario:"):
                 if current_scenario:
                     scenarios.append(current_scenario)
-                current_scenario = {
-                    'name': line.replace('Scenario:', '').strip(),
-                    'steps': []
-                }
+                current_scenario = {"name": line.replace("Scenario:", "").strip(), "steps": []}
                 current_step_type = None
 
             # Detect Given/When/Then/And/But
             elif current_scenario:
-                if line.startswith('Given '):
-                    current_step_type = 'Given'
-                    step_text = line.replace('Given ', '').strip()
-                    current_scenario['steps'].append({'type': 'Given', 'text': step_text})
-                elif line.startswith('When '):
-                    current_step_type = 'When'
-                    step_text = line.replace('When ', '').strip()
-                    current_scenario['steps'].append({'type': 'When', 'text': step_text})
-                elif line.startswith('Then '):
-                    current_step_type = 'Then'
-                    step_text = line.replace('Then ', '').strip()
-                    current_scenario['steps'].append({'type': 'Then', 'text': step_text})
-                elif line.startswith('And '):
+                if line.startswith("Given "):
+                    current_step_type = "Given"
+                    step_text = line.replace("Given ", "").strip()
+                    current_scenario["steps"].append({"type": "Given", "text": step_text})
+                elif line.startswith("When "):
+                    current_step_type = "When"
+                    step_text = line.replace("When ", "").strip()
+                    current_scenario["steps"].append({"type": "When", "text": step_text})
+                elif line.startswith("Then "):
+                    current_step_type = "Then"
+                    step_text = line.replace("Then ", "").strip()
+                    current_scenario["steps"].append({"type": "Then", "text": step_text})
+                elif line.startswith("And "):
                     # "And" continues the previous step type
                     if current_step_type:
-                        step_text = line.replace('And ', '').strip()
-                        current_scenario['steps'].append({'type': current_step_type, 'text': step_text})
-                elif line.startswith('But '):
+                        step_text = line.replace("And ", "").strip()
+                        current_scenario["steps"].append(
+                            {"type": current_step_type, "text": step_text}
+                        )
+                elif line.startswith("But "):
                     # "But" also continues the previous step type
                     if current_step_type:
-                        step_text = line.replace('But ', '').strip()
-                        current_scenario['steps'].append({'type': current_step_type, 'text': step_text})
+                        step_text = line.replace("But ", "").strip()
+                        current_scenario["steps"].append(
+                            {"type": current_step_type, "text": step_text}
+                        )
 
         # Add the last scenario
         if current_scenario:
