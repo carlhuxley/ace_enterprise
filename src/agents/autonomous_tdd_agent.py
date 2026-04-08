@@ -30,6 +30,11 @@ from src.agents.project_aware_tdd import (
     CodeReuseDetector,
     TDDTAgent,
 )
+from src.agents.tdd_failure_recorder import (
+    TDDFailureRecorder,
+    FailureContext,
+    InterventionRecord,
+)
 from src.agents.test_review_agent import TestReviewAgent
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -185,6 +190,13 @@ class AutonomousTDDAgent:
         self._explicit_class_name: str | None = None
         self._explicit_file_path: str | None = None
         self._project_structure = ProjectStructure()
+
+        # Initialize failure recorder for self-healing
+        self.failure_recorder = TDDFailureRecorder(
+            experiment_logger=self.experiment_logger,
+            playbook_manager=self.playbook_manager,
+            playbook_id=self.playbook_id,
+        )
 
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -408,6 +420,19 @@ class AutonomousTDDAgent:
 
         final_result = self._run_tests()
         if not final_result.all_passed:
+            # Record feature-level failure for self-healing
+            failure_context = FailureContext(
+                feature_requirement=self._feature_requirement or feature_requirement,
+                cycle_number=len(results),
+                error_message=f"Final validation failed: {final_result.failed_count} tests failing",
+                error_type="FeatureIncomplete",
+                model=self.llm_client.model,
+                provider=self.llm_client.provider,
+            )
+            self.failure_recorder.record_failure(
+                failure_context,
+                suggested_fix="Review all cycle implementations for regressions",
+            )
             raise RuntimeError(f"Feature incomplete: {final_result.failed_count} tests failing")
 
         logger.info(f"  ✅ All tests passing ({final_result.test_count} tests)")
@@ -1035,6 +1060,24 @@ Output EITHER:
                 logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
 
         if not green_result.all_passed:
+            # Record failure for self-healing before raising
+            failure_context = FailureContext(
+                feature_requirement=self._feature_requirement or increment.description,
+                cycle_number=cycle_number,
+                error_message=green_result.error,
+                error_type="GreenPhaseFailure",
+                test_file=str(increment.test_file),
+                impl_file=str(increment.implementation_file),
+                explicit_class_name=self._explicit_class_name,
+                explicit_file_path=self._explicit_file_path,
+                model=self.llm_client.model,
+                provider=self.llm_client.provider,
+            )
+            self.failure_recorder.record_failure(
+                failure_context,
+                suggested_fix=f"Review test expectations and implementation for cycle {cycle_number}",
+            )
+
             raise RuntimeError(
                 f"Tests must pass after implementation (GREEN phase). "
                 f"Still failing after {MAX_GREEN_RETRIES} attempts: {green_result.error}"
