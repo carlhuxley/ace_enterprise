@@ -1139,7 +1139,7 @@ Example: "Then the URL should contain the client_id parameter" → ONE assertion
 **Project Structure**:
 - Tests in: {self.test_dir.name}/
 - Implementation in: {self.src_dir.name}/
-- Imports automatically included: `pytest`, `Mock`, `patch`, `MagicMock`, and `from src.{increment.implementation_file.stem} import *`
+- Imports automatically included: `pytest`, `Mock`, `patch`, `MagicMock`, and the implementation module
 - You can use `patch()`, `Mock()`, `MagicMock()` directly without importing them
 
 **Test to write**: {increment.test_name}
@@ -2080,6 +2080,39 @@ then add logic in the NEXT test when you need to handle different values.
         # Assume entire response is code
         return llm_response.strip()
 
+    def _get_module_path(self, file_path: Path) -> str:
+        """
+        Convert file path to Python module path.
+        
+        e.g., /path/to/src/playbook/markdown_importer.py -> src.playbook.markdown_importer
+        
+        Uses _explicit_file_path if set, otherwise derives from file_path.
+        
+        Args:
+            file_path: Path to the Python file
+            
+        Returns:
+            Dotted module path string
+        """
+        # If explicit constraint is set, use it
+        if self._explicit_file_path:
+            # Convert path like "src/playbook/foo.py" to "src.playbook.foo"
+            return self._explicit_file_path.replace("/", ".").replace(".py", "")
+        
+        # Otherwise derive from file_path
+        # Find 'src' in path parts and build module from there
+        parts = file_path.parts
+        try:
+            src_idx = parts.index("src")
+            # Take from 'src' onwards, remove .py extension from last part
+            module_parts = list(parts[src_idx:])
+            module_parts[-1] = module_parts[-1].replace(".py", "")
+            return ".".join(module_parts)
+        except ValueError:
+            # 'src' not in path, fall back to just the stem
+            logger.warning(f"Could not find 'src' in path {file_path}, using stem")
+            return f"src.{file_path.stem}"
+
     def _assemble_test_file(self, test_file: Path, implementation_file: Path):
         """
         Assemble complete test file from stored test functions.
@@ -2099,12 +2132,15 @@ then add logic in the NEXT test when you need to handle different values.
             # No functions yet, file will be created on first test write
             return
 
-        # Build file header
+        # Build module path from implementation file
+        # e.g., /path/to/src/playbook/markdown_importer.py -> src.playbook.markdown_importer
+        module_path = self._get_module_path(implementation_file)
         module_name = implementation_file.stem
+        
         header = f"""# Test file for {module_name}
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.{module_name} import *
+from {module_path} import *
 
 """
 
