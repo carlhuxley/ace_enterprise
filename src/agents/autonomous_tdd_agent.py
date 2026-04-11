@@ -35,6 +35,7 @@ from src.agents.tdd_failure_recorder import (
     FailureContext,
     InterventionRecord,
 )
+from src.agents.tdd_lesson_injector import TDDLessonInjector
 from src.agents.test_review_agent import TestReviewAgent
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -197,6 +198,9 @@ class AutonomousTDDAgent:
             playbook_manager=self.playbook_manager,
             playbook_id=self.playbook_id,
         )
+
+        # Initialize TDD lesson injector
+        self._tdd_lesson_injector = TDDLessonInjector()
 
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -635,6 +639,17 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
                 )
         return existing_tests
 
+    def _get_tdd_lessons(self, phase: str) -> str:
+        """Return formatted TDD lessons for the given phase.
+
+        Args:
+            phase: One of 'red', 'green', or 'planning'
+
+        Returns:
+            Formatted markdown string containing relevant TDD lessons
+        """
+        return self._tdd_lesson_injector.get_lessons_for_phase(phase)
+
     def _determine_next_increment(
         self,
         requirement: str,
@@ -742,6 +757,8 @@ Scenario: User grants application access
 {gherkin_section}
 
 {test_summaries}
+
+{self._get_tdd_lessons("planning")}
 
 **🧠 LEARNED REDUNDANCY PATTERNS (from past failures):**
 {redundancy_patterns if redundancy_patterns.strip() else "No redundancy patterns learned yet."}
@@ -1128,6 +1145,10 @@ Output EITHER:
                     for bullet in learned_bullets
                 ],
                 playbook_id=self.playbook_id,
+                # Model attribution for production quality analysis
+                actual_model=self.llm_client.model,
+                requested_model=self.llm_client.model,
+                provider=self.llm_client.provider,
             )
             logger.info("      ✓ Cycle logged successfully")
         except Exception as e:
@@ -1173,6 +1194,8 @@ Output EITHER:
         prompt = f"""You are writing a test following TDD (Test-Driven Development).
 
 {playbook_guidance}
+
+{self._get_tdd_lessons("red")}
 
 🎯 **CRITICAL - Single Behavior Test:**
 This test should verify EXACTLY ONE observable behavior.
@@ -1342,6 +1365,8 @@ def test_add_returns_sum():
 
 {playbook_guidance}
 
+{self._get_tdd_lessons("green")}
+
 **🎯 ATDD APPROACH - Contract-Based Implementation:**
 Write comprehensive, production-quality code that satisfies the test's contract (behavior specification).
 - Focus on making the test PASS with correct, maintainable code
@@ -1352,7 +1377,7 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 **⚠️ ATTEMPT {attempt}/3** {
             "- 🚨 THIS IS YOUR FINAL ATTEMPT! 🚨"
             if attempt == 3
-            else f"- You have {4 - attempt} attempt{"s" if 4 - attempt > 1 else ""} remaining if this fails"
+            else f"- You have {4 - attempt} attempt{'s' if 4 - attempt > 1 else ''} remaining if this fails"
         }
 {
             "🚨 CRITICAL: The cycle will FAIL if this implementation does not pass the test. There are NO more retries after this."
@@ -1390,7 +1415,7 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 ```
 
 **What went wrong**: The implementation you provided didn't satisfy the test assertion.
-**Action needed**: {'CAREFULLY review the error above and the test requirements below.' if attempt == 3 else 'Fix the implementation to make the test pass. Pay close attention to the error message above.'}
+**Action needed**: {"CAREFULLY review the error above and the test requirements below." if attempt == 3 else "Fix the implementation to make the test pass. Pay close attention to the error message above."}
 '''
         }
 
@@ -2126,14 +2151,14 @@ then add logic in the NEXT test when you need to handle different values.
     def _get_module_path(self, file_path: Path) -> str:
         """
         Convert file path to Python module path.
-        
+
         e.g., /path/to/src/playbook/markdown_importer.py -> src.playbook.markdown_importer
-        
+
         Uses _explicit_file_path if set, otherwise derives from file_path.
-        
+
         Args:
             file_path: Path to the Python file
-            
+
         Returns:
             Dotted module path string
         """
@@ -2141,7 +2166,7 @@ then add logic in the NEXT test when you need to handle different values.
         if self._explicit_file_path:
             # Convert path like "src/playbook/foo.py" to "src.playbook.foo"
             return self._explicit_file_path.replace("/", ".").replace(".py", "")
-        
+
         # Otherwise derive from file_path
         # Find 'src' in path parts and build module from there
         parts = file_path.parts
@@ -2179,7 +2204,7 @@ then add logic in the NEXT test when you need to handle different values.
         # e.g., /path/to/src/playbook/markdown_importer.py -> src.playbook.markdown_importer
         module_path = self._get_module_path(implementation_file)
         module_name = implementation_file.stem
-        
+
         header = f"""# Test file for {module_name}
 import pytest
 from unittest.mock import Mock, patch, MagicMock
