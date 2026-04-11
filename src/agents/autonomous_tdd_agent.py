@@ -43,6 +43,7 @@ from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import ConsensusBullet
 from src.storage.experiment_logger import ExperimentLogger
 from src.utils.llm_client import LLMClient
+from src.utils.import_validator import ImportValidator
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,9 @@ class AutonomousTDDAgent:
 
         # Initialize TDD lesson injector
         self._tdd_lesson_injector = TDDLessonInjector()
+
+        # Initialize import validator for fixing LLM-generated import paths
+        self._import_validator = ImportValidator(project_root)
 
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -1548,6 +1552,16 @@ class OAuth:
 
         # Extract code
         impl_code = self._extract_code(response)
+
+        # Validate and fix import paths
+        try:
+            impl_code, corrections = self._import_validator.validate_and_fix(impl_code)
+            if corrections:
+                logger.info(f"Fixed {len(corrections)} import path(s) in generated code")
+                for old_imp, new_imp in corrections:
+                    logger.info(f"  {old_imp} -> {new_imp}")
+        except Exception as e:
+            logger.warning(f"Import validation failed: {e}")
 
         # Write to file
         increment.implementation_file.write_text(impl_code)
