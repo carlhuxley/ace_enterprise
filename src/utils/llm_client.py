@@ -478,6 +478,7 @@ class LLMClient:
                         "actual_model": actual_model,  # The model that actually served the request
                         "requested_model": self.model,  # The originally requested model
                         "provider": data.get("provider", "unknown"),
+                        "cost_usd": data.get("usage", {}).get("cost"),  # OpenRouter includes cost
                     }
 
                 except httpx.HTTPStatusError as e:

@@ -108,6 +108,19 @@ class ExperimentLogger:
         green_output: str,
         learned_bullets: list[dict[str, Any]],
         playbook_id: str,
+        # Model attribution fields (optional for backward compatibility)
+        actual_model: str | None = None,
+        requested_model: str | None = None,
+        provider: str | None = None,
+        latency_ms: float | None = None,
+        tokens_used: int | None = None,
+        cost_usd: float | None = None,
+        # Failure analysis fields (new)
+        failure_category: str | None = None,
+        failure_root_cause: str | None = None,
+        failure_lesson: str | None = None,
+        retry_count: int = 0,
+        human_intervention: bool = False,
     ) -> ExperimentLogModel:
         """
         Log a TDD cycle (specialized wrapper for TDD experiments).
@@ -124,6 +137,17 @@ class ExperimentLogger:
             green_output: Output from GREEN phase
             learned_bullets: Bullets learned from this cycle
             playbook_id: Associated playbook ID
+            actual_model: The model that actually served the request (OpenRouter)
+            requested_model: The model that was requested
+            provider: LLM provider (e.g., "openrouter", "ollama")
+            latency_ms: Total latency in milliseconds
+            tokens_used: Total tokens consumed
+            cost_usd: Cost in USD (from OpenRouter)
+            failure_category: Category of failure (test_design, implementation, mocking, etc.)
+            failure_root_cause: Analysis of why the failure occurred
+            failure_lesson: Lesson learned / anti-pattern to avoid
+            retry_count: Number of retry attempts before success or giving up
+            human_intervention: Whether human had to step in to fix
 
         Returns:
             Created experiment log
@@ -140,6 +164,26 @@ class ExperimentLogger:
         else:
             result = "ERROR"
 
+        # Build generator_data with model attribution
+        generator_data = {
+            "test_code": test_code,
+            "implementation_code": implementation_code,
+        }
+
+        # Add model attribution if provided
+        if actual_model is not None:
+            generator_data["actual_model"] = actual_model
+        if requested_model is not None:
+            generator_data["requested_model"] = requested_model
+        if provider is not None:
+            generator_data["provider"] = provider
+        if latency_ms is not None:
+            generator_data["latency_ms"] = latency_ms
+        if tokens_used is not None:
+            generator_data["tokens_used"] = tokens_used
+        if cost_usd is not None:
+            generator_data["cost_usd"] = cost_usd
+
         return self.log_experiment(
             experiment_id=experiment_id,
             task_data={
@@ -149,10 +193,7 @@ class ExperimentLogger:
                 "test_name": test_name,
                 "playbook_id": playbook_id,
             },
-            generator_data={
-                "test_code": test_code,
-                "implementation_code": implementation_code,
-            },
+            generator_data=generator_data,
             environment_data={
                 "red_phase": {
                     "passed": red_passed,
@@ -168,10 +209,18 @@ class ExperimentLogger:
                 "red_failed_correctly": not red_passed,
                 "green_succeeded": green_passed,
                 "proper_tdd_cycle": green_passed and not red_passed,
+                "retry_count": retry_count,
+                "human_intervention": human_intervention,
+                # Failure analysis (populated when cycle fails)
+                "failure_category": failure_category,
+                "failure_root_cause": failure_root_cause,
+                "failure_lesson": failure_lesson,
             },
             curator_data={
                 "bullets_learned": learned_bullets,
                 "bullet_count": len(learned_bullets),
+                # If there's a lesson, it should become a playbook bullet
+                "tdd_lesson": failure_lesson,
             },
             playbook_updated=len(learned_bullets) > 0,
         )
@@ -304,3 +353,73 @@ class ExperimentLogger:
                 "playbook_updates": playbook_updates,
                 "update_rate": playbook_updates / total if total > 0 else 0.0,
             }
+
+    def get_tdd_lessons(self, limit: int = 20) -> list[dict[str, Any]]:
+        """
+        Retrieve TDD lessons learned from failed cycles.
+
+        These lessons can be injected into future TDD prompts to avoid
+        repeating the same mistakes.
+
+        Args:
+            limit: Maximum number of lessons to retrieve
+
+        Returns:
+            List of lesson dictionaries with category, root_cause, and lesson
+        """
+        from sqlalchemy import desc, text
+
+        lessons = []
+
+        with self.repo.get_session() as session:
+            # Query failed TDD cycles that have failure analysis
+            results = session.execute(
+                text("""
+                    SELECT
+                        task_data->>'test_name' as test_name,
+                        reflector_data->>'failure_category' as category,
+                        reflector_data->>'failure_root_cause' as root_cause,
+                        reflector_data->>'failure_lesson' as lesson,
+                        reflector_data->>'retry_count' as retry_count,
+                        reflector_data->>'human_intervention' as human_intervention,
+                        timestamp
+                    FROM experiment_logs
+                    WHERE task_data->>'type' = 'tdd_cycle'
+                      AND result IN ('FAILED', 'ERROR')
+                      AND reflector_data->>'failure_lesson' IS NOT NULL
+                    ORDER BY timestamp DESC
+                    LIMIT :limit
+                """),
+                {"limit": limit}
+            ).fetchall()
+
+            for row in results:
+                lessons.append({
+                    "test_name": row[0],
+                    "category": row[1],
+                    "root_cause": row[2],
+                    "lesson": row[3],
+                    "retry_count": row[4],
+                    "human_intervention": row[5] == "true",
+                    "timestamp": row[6],
+                })
+
+        logger.info(f"Retrieved {len(lessons)} TDD lessons")
+        return lessons
+
+    def get_tdd_anti_patterns(self) -> list[str]:
+        """
+        Get a list of TDD anti-patterns to avoid, derived from lessons.
+
+        Returns:
+            List of anti-pattern descriptions for prompt injection
+        """
+        lessons = self.get_tdd_lessons(limit=50)
+
+        # Deduplicate and extract unique lessons
+        unique_lessons = set()
+        for lesson in lessons:
+            if lesson.get("lesson"):
+                unique_lessons.add(lesson["lesson"])
+
+        return list(unique_lessons)
