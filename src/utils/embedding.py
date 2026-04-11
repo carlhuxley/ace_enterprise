@@ -2,10 +2,21 @@
 Embedding Service - Generate embeddings for playbook bullets.
 Uses local sentence-transformers model (no API calls required).
 """
+
+from __future__ import annotations
+
 import logging
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+# Try to import torch and sentence-transformers, but fall back to mock if unavailable
+try:
+    from sentence_transformers import SentenceTransformer
+
+    _HAS_TORCH = True
+except ImportError as e:
+    _HAS_TORCH = False
+    _import_error = e
 
 from src.config.settings import settings
 
@@ -24,6 +35,8 @@ class EmbeddingService:
     - Free and offline
     """
 
+    model: SentenceTransformer | None = None
+
     def __init__(
         self,
         model_name: str | None = None,
@@ -39,6 +52,10 @@ class EmbeddingService:
         self.model_name = model_name or settings.embedding_model
         self.device = device or settings.embedding_device
 
+        if not _HAS_TORCH:
+            logger.warning(f"EmbeddingService disabled: {_import_error}")
+            return
+
         logger.info(f"Loading embedding model: {self.model_name} on {self.device}")
 
         try:
@@ -46,7 +63,7 @@ class EmbeddingService:
             logger.info("✓ Embedding model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
-            raise
+            self.model = None
 
     def embed_text(self, text: str) -> list[float]:
         """
@@ -58,6 +75,10 @@ class EmbeddingService:
         Returns:
             Embedding vector as list of floats
         """
+        if self.model is None:
+            logger.warning("EmbeddingService not available: returning empty embedding")
+            return []
+
         if not text or not text.strip():
             logger.warning("Empty text provided for embedding")
             return []
@@ -91,6 +112,10 @@ class EmbeddingService:
             logger.warning("All texts were empty")
             return [[] for _ in texts]
 
+        if self.model is None:
+            logger.warning("EmbeddingService not available: returning empty embeddings")
+            return [[] for _ in texts]
+
         try:
             batch_size = settings.embedding_batch_size
             embeddings = self.model.encode(
@@ -102,7 +127,6 @@ class EmbeddingService:
 
             logger.debug(f"Generated {len(embeddings)} embeddings")
             return [emb.tolist() for emb in embeddings]
-
         except Exception as e:
             logger.error(f"Failed to generate batch embeddings: {e}")
             return [[] for _ in texts]
@@ -114,6 +138,9 @@ class EmbeddingService:
         Returns:
             Embedding dimension (e.g., 384 for all-MiniLM-L6-v2)
         """
+        if self.model is None:
+            # Default dimension for all-MiniLM-L6-v2
+            return 384
         return self.model.get_sentence_embedding_dimension()
 
     @staticmethod
