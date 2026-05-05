@@ -26,6 +26,7 @@ from src.contracts.module_architect import (
     ModuleContract,
     validate_module,
 )
+from src.utils.code_extraction import extract_code
 from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -339,19 +340,12 @@ Fix the implementation:
 
     def _extract_function_code(self, response: str, function_name: str) -> str:
         """Extract function code from LLM response."""
-        # Try to extract from code blocks
-        if "```python" in response:
-            code = response.split("```python")[1]
-            if "```" in code:
-                code = code.split("```")[0]
-            return code.strip()
-        elif "```" in response:
-            code = response.split("```")[1]
-            if "```" in code:
-                code = code.split("```")[0]
-            return code.strip()
+        stripped = extract_code(response)
+        # extract_code returns the full response unchanged when no fences are
+        # present; in that case fall back to walking lines for the named def.
+        if stripped != response.strip():
+            return stripped
 
-        # Look for function definition
         lines = response.strip().split("\n")
         func_lines = []
         in_func = False
@@ -361,7 +355,6 @@ Fix the implementation:
                 in_func = True
             if in_func:
                 func_lines.append(line)
-                # Detect end of function (blank line or new def)
                 if func_lines and line.strip() and not line.startswith(" ") and not line.startswith("\t"):
                     if not line.startswith("def"):
                         break

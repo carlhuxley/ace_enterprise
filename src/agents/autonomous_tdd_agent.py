@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.utils.code_extraction import extract_code
 from src.agents.redundancy_checker import (
     ExistingTest,
     ProposedTest,
@@ -1295,7 +1296,7 @@ def test_add_returns_sum():
             response = response_dict["content"]
 
             # Extract code from response
-            test_function = self._extract_code(response)
+            test_function = extract_code(response)
 
             # Validate: ensure only ONE function was generated
             function_count = self._count_functions(test_function)
@@ -1541,7 +1542,7 @@ class OAuth:
             type="code_generation",
         )
         gen_output = self.generator.execute(task, self.playbook_id)
-        impl_code = self._extract_code(gen_output.solution)
+        impl_code = extract_code(gen_output.solution)
 
         # Validate and fix import paths
         try:
@@ -2122,36 +2123,6 @@ then add logic in the NEXT test when you need to handle different values.
             logger.warning(f"Failed to extract function '{function_name}': {e}")
             return code
 
-    def _extract_code(self, llm_response: str) -> str:
-        """
-        Extract Python code from LLM response.
-
-        Handles various formats:
-        - Markdown code blocks (```python)
-        - Plain code
-
-        Args:
-            llm_response: LLM output
-
-        Returns:
-            Extracted code
-        """
-        # Try to extract from markdown code block
-        if "```python" in llm_response:
-            start = llm_response.find("```python") + len("```python")
-            end = llm_response.find("```", start)
-            if end != -1:
-                return llm_response[start:end].strip()
-
-        if "```" in llm_response:
-            start = llm_response.find("```") + 3
-            end = llm_response.find("```", start)
-            if end != -1:
-                return llm_response[start:end].strip()
-
-        # Assume entire response is code
-        return llm_response.strip()
-
     def _get_module_path(self, file_path: Path) -> str:
         """
         Convert file path to Python module path.
@@ -2406,7 +2377,7 @@ Refine the test to make it MORE SPECIFIC and STRICTER so it actually FAILS and d
 **Output the complete refined test function:**"""
 
         response_dict = self.llm_client.generate(prompt)
-        refined_code = self._extract_code(response_dict["content"])
+        refined_code = extract_code(response_dict["content"])
 
         return refined_code
 
