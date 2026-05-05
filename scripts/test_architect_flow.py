@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
 from src.audit.store import AuditStore
-from src.broker.contract_architect import create_architect_from_config
-from src.broker.contract_driven import ContractValidator
+from src.contracts.contract_architect import create_architect_from_config
+from src.contracts.contract_driven import ContractValidator
 from src.broker.performance_aggregator import PerformanceAggregator
 from src.utils.llm_client import LLMClient
 

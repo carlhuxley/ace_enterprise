@@ -20,7 +20,7 @@ from pathlib import Path
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
-from src.broker.module_architect import (
+from src.contracts.module_architect import (
     FunctionSpec,
     IntegrationTest,
     ModuleContract,

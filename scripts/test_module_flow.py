@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
-from src.broker.module_architect import (
+from src.contracts.module_architect import (
     ModuleArchitect,
     generate_module_prompt,
     validate_module,

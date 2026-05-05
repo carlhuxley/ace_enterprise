@@ -24,7 +24,7 @@ class TestDecomposerBasics:
 
     def test_decomposes_simple_requirement(self):
         """Should decompose simple requirement into single contract."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -51,7 +51,7 @@ class TestDecomposerBasics:
 
     def test_decomposes_complex_requirement_into_multiple(self):
         """Should decompose complex requirement into multiple contracts."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -112,7 +112,7 @@ class TestContractGeneration:
 
     def test_generates_valid_signature(self):
         """Should generate valid Python function signature."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -139,7 +139,7 @@ class TestContractGeneration:
 
     def test_generates_test_cases(self):
         """Should generate at least one test case per contract."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -166,7 +166,7 @@ class TestContractGeneration:
 
     def test_estimates_complexity(self):
         """Should estimate complexity level (1-6)."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -194,7 +194,7 @@ class TestContractValidation:
 
     def test_validates_generated_contracts(self):
         """Should validate all generated contracts."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -222,7 +222,7 @@ class TestContractValidation:
 
     def test_rejects_invalid_llm_output(self):
         """Should raise error if LLM output is invalid."""
-        from src.broker.contract_decomposer import ContractDecomposer, DecompositionError
+        from src.contracts.contract_decomposer import ContractDecomposer, DecompositionError
 
         decomposer = ContractDecomposer()
 
@@ -243,7 +243,7 @@ class TestDecomposerWithLLM:
 
     def test_builds_correct_prompt(self):
         """Should build correct prompt for LLM."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -270,7 +270,7 @@ class TestDecomposerWithLLM:
 
     def test_parses_json_from_llm_response(self):
         """Should parse JSON contracts from LLM response."""
-        from src.broker.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_decomposer import ContractDecomposer
 
         decomposer = ContractDecomposer()
 
@@ -304,8 +304,8 @@ class TestDecomposerToYAML:
 
     def test_converts_to_yaml_format(self):
         """Should convert contracts to YAML-compatible format."""
-        from src.broker.contract_decomposer import ContractDecomposer
-        from src.broker.contract_schema import save_contracts
+        from src.contracts.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_schema import save_contracts
         import tempfile
         from pathlib import Path
 

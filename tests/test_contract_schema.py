@@ -19,7 +19,7 @@ class TestContractSchemaLoading:
 
     def test_loads_contract_from_yaml_string(self):
         """Should parse contract from YAML."""
-        from src.broker.contract_schema import ContractSpec, load_contracts
+        from src.contracts.contract_schema import ContractSpec, load_contracts
 
         yaml_content = """
 contracts:
@@ -41,7 +41,7 @@ contracts:
 
     def test_loads_multiple_contracts(self):
         """Should load multiple contracts from one file."""
-        from src.broker.contract_schema import load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -76,7 +76,7 @@ class TestContractSpecFields:
 
     def test_has_required_fields(self):
         """ContractSpec should have all required fields."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="test-001",
@@ -98,7 +98,7 @@ class TestContractSpecFields:
 
     def test_optional_hints(self):
         """Should support optional hints field."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="test-001",
@@ -114,7 +114,7 @@ class TestContractSpecFields:
 
     def test_default_hints_empty(self):
         """Hints should default to empty list."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="test-001",
@@ -133,7 +133,7 @@ class TestContractFixtures:
 
     def test_supports_fixtures_field(self):
         """Should support optional fixtures field."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
 
         fixtures = FixtureSpec(
             setup="init_db()",
@@ -156,7 +156,7 @@ class TestContractFixtures:
 
     def test_fixtures_default_none(self):
         """Fixtures should default to None."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="test-001",
@@ -171,7 +171,7 @@ class TestContractFixtures:
 
     def test_loads_fixtures_from_yaml(self):
         """Should load fixtures from YAML."""
-        from src.broker.contract_schema import load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -196,7 +196,7 @@ contracts:
 
     def test_fixtures_converts_to_interface_contract(self):
         """Fixtures should be included in InterfaceContract."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
 
         spec = ContractSpec(
             id="fix-001",
@@ -220,8 +220,8 @@ class TestContractToInterfaceContract:
 
     def test_converts_to_interface_contract(self):
         """Should convert to InterfaceContract for TDD execution."""
-        from src.broker.contract_schema import ContractSpec, TestCaseSpec
-        from src.broker.contract_driven import InterfaceContract
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
+        from src.contracts.contract_driven import InterfaceContract
 
         spec = ContractSpec(
             id="conv-001",
@@ -250,7 +250,7 @@ class TestContractValidation:
 
     def test_rejects_missing_function_name(self):
         """Should reject contract without function_name."""
-        from src.broker.contract_schema import load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -265,7 +265,7 @@ contracts:
 
     def test_rejects_empty_test_cases(self):
         """Should reject contract with no test cases."""
-        from src.broker.contract_schema import load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -281,7 +281,7 @@ contracts:
 
     def test_rejects_invalid_complexity(self):
         """Should reject complexity outside 1-6 range."""
-        from src.broker.contract_schema import load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -304,7 +304,7 @@ class TestLoadFromFile:
 
     def test_load_from_file(self, tmp_path):
         """Should load contracts from file path."""
-        from src.broker.contract_schema import load_contracts_from_file
+        from src.contracts.contract_schema import load_contracts_from_file
 
         contract_file = tmp_path / "contracts.yml"
         contract_file.write_text("""

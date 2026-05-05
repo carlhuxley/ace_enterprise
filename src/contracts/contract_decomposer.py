@@ -18,7 +18,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from src.broker.contract_schema import ContractSpec, TestCaseSpec
+from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
 logger = logging.getLogger(__name__)
 
