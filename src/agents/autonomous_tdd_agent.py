@@ -39,9 +39,12 @@ from src.agents.tdd_lesson_injector import TDDLessonInjector
 from src.agents.test_review_agent import TestReviewAgent
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
+from src.core.curator.module import Curator
+from src.core.generator.module import Generator
 from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import ConsensusBullet
 from src.storage.experiment_logger import ExperimentLogger
+from src.storage.schemas import CuratorOutput, DeltaBullet, TaskInput
 from src.utils.llm_client import LLMClient
 from src.utils.import_validator import ImportValidator
 
@@ -205,6 +208,11 @@ class AutonomousTDDAgent:
 
         # Initialize import validator for fixing LLM-generated import paths
         self._import_validator = ImportValidator(project_root)
+
+        # ACE pipeline for GREEN phase: Generator retrieves playbook bullets during
+        # generation; Curator enforces deduplication and token budgets on learned bullets.
+        self.generator = Generator(self.playbook_manager, self.llm_client)
+        self.curator = Curator(self.playbook_manager, self.llm_client)
 
         logger.info("AutonomousTDDAgent initialized")
         logger.info(f"  Project root: {project_root}")
@@ -1021,27 +1029,19 @@ Output EITHER:
                     attempts=attempt - 1,
                 )
 
-                if failure_analysis:
-                    # Store bullet in playbook NOW - available for next attempt!
-                    from src.storage.schemas import BulletCreate
-
-                    bullet_data = BulletCreate(
-                        content=failure_analysis["bullet"],
-                        section="troubleshooting",  # Technical gotchas go in troubleshooting
-                        tags=failure_analysis["tags"],
-                        created_by_model=self.llm_client.model,
-                        model_provider=self.llm_client.provider,
-                        license_type=self._get_license_type(
-                            self.llm_client.provider, self.llm_client.model
-                        ),
-                        # Low initial confidence - needs validation via feedback
-                        confidence_score=0.3,
-                        applicable_domains=["tdd"],
-                        project_ids=[str(self.project_root)],
+                if failure_analysis and self.playbook_manager is not None:
+                    # Route through Curator so redundancy checking and token
+                    # budget enforcement apply, rather than bypassing via add_bullet().
+                    curator_output = CuratorOutput(
+                        delta_bullets=[DeltaBullet(
+                            section="troubleshooting",
+                            content=failure_analysis["bullet"],
+                            tags=failure_analysis["tags"],
+                        )],
+                        reasoning=failure_analysis["summary"],
                     )
-                    if self.playbook_manager is not None:
-                        self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-                        logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
+                    self.curator.apply_updates(self.playbook_id, curator_output)
+                    logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
 
                     # If test correction is suggested, APPLY IT automatically
                     if failure_analysis.get("test_correction"):
@@ -1360,16 +1360,7 @@ def test_add_returns_sum():
         # Read test code
         test_code = increment.test_file.read_text()
 
-        # Get learned patterns from playbook
-        playbook_guidance = self._get_playbook_guidance(
-            query=f"ATDD implementation {increment.test_name}", top_k=3
-        )
-
         prompt = f"""You are following ATDD (Acceptance Test-Driven Development): write code to satisfy the test contract.
-
-{playbook_guidance}
-
-{self._get_tdd_lessons("green")}
 
 **🎯 ATDD APPROACH - Contract-Based Implementation:**
 Write comprehensive, production-quality code that satisfies the test's contract (behavior specification).
@@ -1547,11 +1538,13 @@ class OAuth:
 **Output**: Complete implementation file content (production code only, no test code).
 """
 
-        response_dict = self.llm_client.generate(prompt)
-        response = response_dict["content"]
-
-        # Extract code
-        impl_code = self._extract_code(response)
+        task = TaskInput(
+            id=f"green_{increment.test_name}_{attempt:03d}",
+            query=prompt,
+            type="code_generation",
+        )
+        gen_output = self.generator.execute(task, self.playbook_id)
+        impl_code = self._extract_code(gen_output.solution)
 
         # Validate and fix import paths
         try:
@@ -1625,7 +1618,7 @@ class OAuth:
         # Use standard ACE learning flow
         import uuid
 
-        from src.storage.schemas import EnvironmentFeedback, TaskInput
+        from src.storage.schemas import EnvironmentFeedback
 
         task = TaskInput(
             id=str(uuid.uuid4()),
