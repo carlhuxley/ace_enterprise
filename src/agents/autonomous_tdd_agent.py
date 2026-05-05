@@ -25,10 +25,8 @@ from src.agents.redundancy_checker import (
     RedundancyPreChecker,
 )
 from src.agents.project_aware_tdd import (
-    ProjectArchitecture,
     ProjectStructure,
-    CodeReuseDetector,
-    TDDTAgent,
+    extract_explicit_constraints,
 )
 from src.agents.tdd_failure_recorder import (
     TDDFailureRecorder,
@@ -367,8 +365,7 @@ class AutonomousTDDAgent:
                 logger.info(f"📋 Acceptance tests from: {feature_file.name}")
 
                 # Extract explicit class/file constraints from Gherkin Background
-                tdd_agent = TDDTAgent()
-                constraints = tdd_agent.extract_explicit_constraints(gherkin_content)
+                constraints = extract_explicit_constraints(gherkin_content)
                 if constraints:
                     self._explicit_class_name = constraints.get("class_name")
                     self._explicit_file_path = constraints.get("file_path")

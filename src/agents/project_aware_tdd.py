@@ -153,105 +153,59 @@ class CodeReuseDetector:
         return suggestions
 
 
-class TDDTAgent:
-    """TDD Agent with project awareness capabilities."""
+def extract_explicit_constraints(gherkin_content: str) -> dict[str, str]:
+    """Extract explicit class name and file path from Gherkin Background.
 
-    def __init__(self):
-        self.project_architecture = ProjectArchitecture()
-        self.code_reuse_detector = CodeReuseDetector()
+    Parses statements like:
+    "a new DynamicModelRouter class to be created in src/broker/dynamic_model_router.py"
 
-    def start_feature_build(self):
-        """Start a feature build by loading project architecture."""
-        self.project_architecture.get_architecture()
+    Args:
+        gherkin_content: Full Gherkin feature file content
 
-    def determine_file_locations(self, feature_requirement: str) -> dict[str, str]:
-        """
-        Determine where implementation and test files should be placed.
+    Returns:
+        Dictionary with 'class_name' and 'file_path' if found, empty dict otherwise
+    """
+    import re
 
-        Args:
-            feature_requirement: Description of the feature to build
+    lines = gherkin_content.split("\n")
+    in_background = False
+    background_lines = []
 
-        Returns:
-            Dictionary with 'implementation' and 'test' paths
-        """
-        structure = self.project_architecture.get_structure()
-        impl_folder = structure.determine_file_placement(feature_requirement)
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("background:"):
+            in_background = True
+            continue
+        if in_background:
+            if stripped.startswith("Scenario:") or stripped.startswith("Scenario Outline:"):
+                break
+            if stripped:
+                background_lines.append(stripped)
 
-        return {
-            "implementation": impl_folder,
-            "test": "tests",
-        }
+    background_text = " ".join(background_lines)
 
-    def get_reuse_suggestions(self, feature_requirement: str) -> list[str]:
-        """
-        Get suggestions for code to reuse.
+    # Pattern 1: "a new <ClassName> class to be created in <path>"
+    match = re.search(
+        r"a\s+new\s+(\w+)\s+class\s+to\s+be\s+created\s+in\s+([\w/_.-]+)",
+        background_text, re.IGNORECASE,
+    )
+    if match:
+        return {"class_name": match.group(1), "file_path": match.group(2)}
 
-        Args:
-            feature_requirement: Description of the feature to build
+    # Pattern 2: "create a <ClassName> in <path>"
+    match = re.search(
+        r"create\s+a\s+(\w+)\s+in\s+([\w/_.-]+)",
+        background_text, re.IGNORECASE,
+    )
+    if match:
+        return {"class_name": match.group(1), "file_path": match.group(2)}
 
-        Returns:
-            List of import statements to include
-        """
-        return self.code_reuse_detector.suggest_imports(feature_requirement)
+    # Pattern 3: "<ClassName> should be placed in <path>"
+    match = re.search(
+        r"(\w+)\s+should\s+be\s+placed\s+in\s+([\w/_.-]+)",
+        background_text, re.IGNORECASE,
+    )
+    if match:
+        return {"class_name": match.group(1), "file_path": match.group(2)}
 
-    def extract_explicit_constraints(self, gherkin_content: str) -> dict[str, str]:
-        """
-        Extract explicit class name and file path from Gherkin Background.
-
-        Parses statements like:
-        "a new DynamicModelRouter class to be created in src/broker/dynamic_model_router.py"
-
-        Args:
-            gherkin_content: Full Gherkin feature file content
-
-        Returns:
-            Dictionary with 'class_name' and 'file_path' if found, empty dict otherwise
-        """
-        constraints = {}
-
-        # Look for Background section
-        lines = gherkin_content.split("\n")
-        in_background = False
-        background_lines = []
-
-        for line in lines:
-            stripped = line.strip()
-            if stripped.lower().startswith("background:"):
-                in_background = True
-                continue
-            if in_background:
-                if stripped.startswith("Scenario:") or stripped.startswith("Scenario Outline:"):
-                    break
-                if stripped:
-                    background_lines.append(stripped)
-
-        # Keep original text to preserve class name casing
-        background_text_original = " ".join(background_lines)
-
-        import re
-
-        # Pattern 1: "a new <ClassName> class to be created in <path>"
-        pattern1 = r"a\s+new\s+(\w+)\s+class\s+to\s+be\s+created\s+in\s+([\w/_.-]+)"
-        match = re.search(pattern1, background_text_original, re.IGNORECASE)
-        if match:
-            constraints["class_name"] = match.group(1)
-            constraints["file_path"] = match.group(2)
-            return constraints
-
-        # Pattern 2: "create a <ClassName> in <path>"
-        pattern2 = r"create\s+a\s+(\w+)\s+in\s+([\w/_.-]+)"
-        match = re.search(pattern2, background_text_original, re.IGNORECASE)
-        if match:
-            constraints["class_name"] = match.group(1)
-            constraints["file_path"] = match.group(2)
-            return constraints
-
-        # Pattern 3: "<ClassName> should be placed in <path>"
-        pattern3 = r"(\w+)\s+should\s+be\s+placed\s+in\s+([\w/_.-]+)"
-        match = re.search(pattern3, background_text_original, re.IGNORECASE)
-        if match:
-            constraints["class_name"] = match.group(1)
-            constraints["file_path"] = match.group(2)
-            return constraints
-
-        return constraints
+    return {}
