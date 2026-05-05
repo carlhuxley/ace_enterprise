@@ -12,7 +12,7 @@ Tests all scenarios from the Gherkin feature file:
 import pytest
 from datetime import datetime, timedelta
 
-from src.broker.model_attribution import (
+from src.benchmark.model_attribution import (
     ModelAttributionTracker,
     TaskCompletion,
     ModelMetrics,

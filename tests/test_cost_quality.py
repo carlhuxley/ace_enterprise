@@ -1,5 +1,5 @@
 import pytest
-from src.broker.cost_quality_analyzer import CostQualityAnalyzer
+from src.analytics.cost_quality_analyzer import CostQualityAnalyzer
 
 
 # ---------------------------------------------------------------------------

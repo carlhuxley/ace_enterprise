@@ -7,7 +7,7 @@ class TestSubmission:
 
     def test_submission_has_no_agent_identity(self):
         """Submission should only have opaque submission_id, no agent info."""
-        from src.broker.blind_evaluation import Submission
+        from src.benchmark.blind_evaluation import Submission
 
         sub = Submission(
             task_id="task-001",
@@ -27,7 +27,7 @@ class TestEvaluationResult:
 
     def test_evaluation_result_has_quality_score(self):
         """Result should have quality_score 0-100."""
-        from src.broker.blind_evaluation import EvaluationResult
+        from src.benchmark.blind_evaluation import EvaluationResult
 
         result = EvaluationResult(
             submission_id="sub-001",
@@ -41,7 +41,7 @@ class TestEvaluationResult:
 
     def test_evaluation_result_has_no_agent_identity(self):
         """Result should not reveal agent identity."""
-        from src.broker.blind_evaluation import EvaluationResult
+        from src.benchmark.blind_evaluation import EvaluationResult
 
         result = EvaluationResult(
             submission_id="sub-001",
@@ -59,7 +59,7 @@ class TestBlindEvaluator:
 
     def test_evaluate_returns_result(self):
         """Should return EvaluationResult for submission."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -77,7 +77,7 @@ class TestBlindEvaluator:
 
     def test_evaluate_with_test_file(self):
         """Should run tests and report pass/fail."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -94,7 +94,7 @@ class TestBlindEvaluator:
 
     def test_evaluate_captures_details(self):
         """Should capture evaluation details."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -114,7 +114,7 @@ class TestCodeQualityEvaluation:
 
     def test_scores_syntax_errors_low(self):
         """Code with syntax errors should score low."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -131,7 +131,7 @@ class TestCodeQualityEvaluation:
 
     def test_scores_valid_code_higher(self):
         """Valid code should score higher than broken code."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
 
@@ -160,7 +160,7 @@ class TestTestExecution:
 
     def test_passing_tests_sets_tests_passed_true(self):
         """Passing tests should set tests_passed=True."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -177,7 +177,7 @@ class TestTestExecution:
 
     def test_failing_tests_sets_tests_passed_false(self):
         """Failing tests should set tests_passed=False."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
@@ -194,7 +194,7 @@ class TestTestExecution:
 
     def test_no_tests_sets_tests_passed_none(self):
         """No tests provided should set tests_passed=None."""
-        from src.broker.blind_evaluation import BlindEvaluator, Submission
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
 
         evaluator = BlindEvaluator()
         submission = Submission(
