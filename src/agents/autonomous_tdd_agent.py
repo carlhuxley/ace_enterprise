@@ -1010,6 +1010,7 @@ Output EITHER:
         MAX_GREEN_RETRIES = 3
         green_result = None
         previous_impl_code = None
+        latest_bullets_used: list[str] = []
 
         for attempt in range(1, MAX_GREEN_RETRIES + 1):
             if attempt > 1:
@@ -1060,7 +1061,7 @@ Output EITHER:
                                 "      ⚠️  Test correction failed, continuing with original test"
                             )
 
-            impl_code = self._write_minimal_code(
+            impl_code, latest_bullets_used = self._write_minimal_code(
                 increment, red_result, previous_failure=green_result, attempt=attempt
             )
             previous_impl_code = impl_code  # Save for learning if this attempt fails
@@ -1147,6 +1148,7 @@ Output EITHER:
                     for bullet in learned_bullets
                 ],
                 playbook_id=self.playbook_id,
+                retrieved_bullet_ids=latest_bullets_used,
                 # Model attribution for production quality analysis
                 actual_model=self.llm_client.model,
                 requested_model=self.llm_client.model,
@@ -1337,7 +1339,7 @@ def test_add_returns_sum():
         test_result: TestResult,
         previous_failure: TestResult = None,
         attempt: int = 1,
-    ) -> str:
+    ) -> tuple[str, list[str]]:
         """
         Write minimal code to make test pass (GREEN phase).
 
@@ -1543,6 +1545,7 @@ class OAuth:
         )
         gen_output = self.generator.execute(task, self.playbook_id)
         impl_code = extract_code(gen_output.solution)
+        bullets_used = gen_output.bullets_used
 
         # Validate and fix import paths
         try:
@@ -1557,7 +1560,7 @@ class OAuth:
         # Write to file
         increment.implementation_file.write_text(impl_code)
 
-        return impl_code
+        return impl_code, bullets_used
 
     def _needs_refactoring(self, code: str) -> bool:
         """

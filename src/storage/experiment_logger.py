@@ -108,6 +108,7 @@ class ExperimentLogger:
         green_output: str,
         learned_bullets: list[dict[str, Any]],
         playbook_id: str,
+        retrieved_bullet_ids: list[str] | None = None,
         # Model attribution fields (optional for backward compatibility)
         actual_model: str | None = None,
         requested_model: str | None = None,
@@ -169,6 +170,10 @@ class ExperimentLogger:
             "test_code": test_code,
             "implementation_code": implementation_code,
         }
+
+        # Add retrieved bullets (for reliability analysis)
+        if retrieved_bullet_ids is not None:
+            generator_data["retrieved_bullet_ids"] = retrieved_bullet_ids
 
         # Add model attribution if provided
         if actual_model is not None:
@@ -423,3 +428,45 @@ class ExperimentLogger:
                 unique_lessons.add(lesson["lesson"])
 
         return list(unique_lessons)
+
+    def get_tdd_cycle_records(
+        self,
+        playbook_id: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return TDD cycle records as plain dicts for reliability analysis.
+
+        Each record contains: timestamp, result, retry_count, playbook_id,
+        retrieved_bullet_ids, and learned_bullet_count.
+        """
+        from sqlalchemy import desc
+
+        with self.repo.get_session() as session:
+            query = session.query(ExperimentLogModel).filter(
+                ExperimentLogModel.task_data["type"].astext == "tdd_cycle"
+            )
+            if playbook_id:
+                query = query.filter(
+                    ExperimentLogModel.task_data["playbook_id"].astext == playbook_id
+                )
+            if since:
+                query = query.filter(ExperimentLogModel.timestamp >= since)
+            query = query.order_by(desc(ExperimentLogModel.timestamp))
+            if limit:
+                query = query.limit(limit)
+
+            records = []
+            for row in query.all():
+                reflector = row.reflector_data or {}
+                generator = row.generator_data or {}
+                curator = row.curator_data or {}
+                records.append({
+                    "timestamp": row.timestamp,
+                    "result": row.result,
+                    "retry_count": reflector.get("retry_count", 0),
+                    "playbook_id": (row.task_data or {}).get("playbook_id"),
+                    "retrieved_bullet_ids": generator.get("retrieved_bullet_ids", []),
+                    "learned_bullet_count": curator.get("bullet_count", 0),
+                })
+            return records
