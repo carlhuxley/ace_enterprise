@@ -49,51 +49,42 @@ class ExperimentLogger:
         playbook_updated: bool = False,
         performance_delta: float = 0.0,
         checkpoint_created: bool = False,
-    ) -> ExperimentLogModel:
+    ) -> ExperimentLogModel | None:
         """
         Log a complete experiment to PostgreSQL.
 
-        Args:
-            experiment_id: Unique experiment identifier
-            task_data: Task description and context
-            generator_data: What was generated (code, config, hyperparameters)
-            environment_data: Execution results (test output, metrics)
-            result: Outcome (SUCCESS/FAILED/TIMEOUT/ERROR)
-            reflector_data: Analysis of what happened (optional)
-            curator_data: Decisions about what to learn (optional)
-            playbook_updated: Whether playbook was updated
-            performance_delta: Change in performance metric
-            checkpoint_created: Whether a checkpoint was created
-
-        Returns:
-            Created experiment log model
+        Returns None (and logs a warning) if the database is unavailable.
         """
-        with self.repo.get_session() as session:
-            experiment = ExperimentLogModel(
-                experiment_id=experiment_id,
-                playbook_version=self.playbook_version,
-                timestamp=datetime.utcnow(),
-                task_data=task_data,
-                generator_data=generator_data,
-                environment_data=environment_data,
-                result=result,
-                reflector_data=reflector_data,
-                curator_data=curator_data,
-                playbook_updated=playbook_updated,
-                performance_delta=performance_delta,
-                checkpoint_created=checkpoint_created,
-            )
+        try:
+            with self.repo.get_session() as session:
+                experiment = ExperimentLogModel(
+                    experiment_id=experiment_id,
+                    playbook_version=self.playbook_version,
+                    timestamp=datetime.utcnow(),
+                    task_data=task_data,
+                    generator_data=generator_data,
+                    environment_data=environment_data,
+                    result=result,
+                    reflector_data=reflector_data,
+                    curator_data=curator_data,
+                    playbook_updated=playbook_updated,
+                    performance_delta=performance_delta,
+                    checkpoint_created=checkpoint_created,
+                )
 
-            session.add(experiment)
-            session.commit()
-            session.refresh(experiment)
+                session.add(experiment)
+                session.commit()
+                session.refresh(experiment)
 
-            logger.info(
-                f"Logged experiment {experiment_id}: {result} "
-                f"(playbook_updated={playbook_updated})"
-            )
+                logger.info(
+                    f"Logged experiment {experiment_id}: {result} "
+                    f"(playbook_updated={playbook_updated})"
+                )
 
-            return experiment
+                return experiment
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, skipping log for {experiment_id}: {exc}")
+            return None
 
     def log_tdd_cycle(
         self,
@@ -288,76 +279,65 @@ class ExperimentLogger:
         result_filter: str | None = None,
         experiment_type: str | None = None,
     ) -> list[ExperimentLogModel]:
-        """
-        Get recent experiments from the database.
-
-        Args:
-            limit: Maximum number of experiments to return
-            result_filter: Filter by result (SUCCESS/FAILED/etc)
-            experiment_type: Filter by type (tdd_cycle/ml_experiment)
-
-        Returns:
-            List of experiment logs
-        """
+        """Get recent experiments from the database. Returns [] if DB is unavailable."""
         from sqlalchemy import desc
 
-        with self.repo.get_session() as session:
-            query = session.query(ExperimentLogModel)
+        try:
+            with self.repo.get_session() as session:
+                query = session.query(ExperimentLogModel)
 
-            if result_filter:
-                query = query.filter(ExperimentLogModel.result == result_filter)
+                if result_filter:
+                    query = query.filter(ExperimentLogModel.result == result_filter)
 
-            if experiment_type:
-                query = query.filter(
-                    ExperimentLogModel.task_data["type"].astext == experiment_type
-                )
+                if experiment_type:
+                    query = query.filter(
+                        ExperimentLogModel.task_data["type"].astext == experiment_type
+                    )
 
-            query = query.order_by(desc(ExperimentLogModel.timestamp))
-            query = query.limit(limit)
+                query = query.order_by(desc(ExperimentLogModel.timestamp))
+                query = query.limit(limit)
 
-            return query.all()
+                return query.all()
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, returning empty experiment list: {exc}")
+            return []
 
     def get_experiment_stats(self) -> dict[str, Any]:
-        """
-        Get statistics about logged experiments.
-
-        Returns:
-            Dictionary with experiment statistics
-        """
+        """Get statistics about logged experiments. Returns zeroed stats if DB is unavailable."""
         from sqlalchemy import func, text
 
-        with self.repo.get_session() as session:
-            # Total experiments
-            total = session.query(func.count(ExperimentLogModel.id)).scalar()
+        try:
+            with self.repo.get_session() as session:
+                total = session.query(func.count(ExperimentLogModel.id)).scalar()
 
-            # By result
-            by_result = session.query(
-                ExperimentLogModel.result,
-                func.count(ExperimentLogModel.id)
-            ).group_by(ExperimentLogModel.result).all()
+                by_result = session.query(
+                    ExperimentLogModel.result,
+                    func.count(ExperimentLogModel.id)
+                ).group_by(ExperimentLogModel.result).all()
 
-            # By type
-            by_type = session.execute(
-                text("""
-                    SELECT task_data->>'type' as type, COUNT(*)
-                    FROM experiment_logs
-                    WHERE task_data->>'type' IS NOT NULL
-                    GROUP BY task_data->>'type'
-                """)
-            ).fetchall()
+                by_type = session.execute(
+                    text("""
+                        SELECT task_data->>'type' as type, COUNT(*)
+                        FROM experiment_logs
+                        WHERE task_data->>'type' IS NOT NULL
+                        GROUP BY task_data->>'type'
+                    """)
+                ).fetchall()
 
-            # Playbook updates
-            playbook_updates = session.query(
-                func.count(ExperimentLogModel.id)
-            ).filter(ExperimentLogModel.playbook_updated == True).scalar()
+                playbook_updates = session.query(
+                    func.count(ExperimentLogModel.id)
+                ).filter(ExperimentLogModel.playbook_updated == True).scalar()
 
-            return {
-                "total_experiments": total,
-                "by_result": dict(by_result),
-                "by_type": dict(by_type),
-                "playbook_updates": playbook_updates,
-                "update_rate": playbook_updates / total if total > 0 else 0.0,
-            }
+                return {
+                    "total_experiments": total,
+                    "by_result": dict(by_result),
+                    "by_type": dict(by_type),
+                    "playbook_updates": playbook_updates,
+                    "update_rate": playbook_updates / total if total > 0 else 0.0,
+                }
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, returning empty stats: {exc}")
+            return {"total_experiments": 0, "by_result": {}, "by_type": {}, "playbook_updates": 0, "update_rate": 0.0}
 
     def get_tdd_lessons(self, limit: int = 20) -> list[dict[str, Any]]:
         """
@@ -374,43 +354,45 @@ class ExperimentLogger:
         """
         from sqlalchemy import desc, text
 
-        lessons = []
+        try:
+            lessons = []
+            with self.repo.get_session() as session:
+                results = session.execute(
+                    text("""
+                        SELECT
+                            task_data->>'test_name' as test_name,
+                            reflector_data->>'failure_category' as category,
+                            reflector_data->>'failure_root_cause' as root_cause,
+                            reflector_data->>'failure_lesson' as lesson,
+                            reflector_data->>'retry_count' as retry_count,
+                            reflector_data->>'human_intervention' as human_intervention,
+                            timestamp
+                        FROM experiment_logs
+                        WHERE task_data->>'type' = 'tdd_cycle'
+                          AND result IN ('FAILED', 'ERROR')
+                          AND reflector_data->>'failure_lesson' IS NOT NULL
+                        ORDER BY timestamp DESC
+                        LIMIT :limit
+                    """),
+                    {"limit": limit}
+                ).fetchall()
 
-        with self.repo.get_session() as session:
-            # Query failed TDD cycles that have failure analysis
-            results = session.execute(
-                text("""
-                    SELECT
-                        task_data->>'test_name' as test_name,
-                        reflector_data->>'failure_category' as category,
-                        reflector_data->>'failure_root_cause' as root_cause,
-                        reflector_data->>'failure_lesson' as lesson,
-                        reflector_data->>'retry_count' as retry_count,
-                        reflector_data->>'human_intervention' as human_intervention,
-                        timestamp
-                    FROM experiment_logs
-                    WHERE task_data->>'type' = 'tdd_cycle'
-                      AND result IN ('FAILED', 'ERROR')
-                      AND reflector_data->>'failure_lesson' IS NOT NULL
-                    ORDER BY timestamp DESC
-                    LIMIT :limit
-                """),
-                {"limit": limit}
-            ).fetchall()
+                for row in results:
+                    lessons.append({
+                        "test_name": row[0],
+                        "category": row[1],
+                        "root_cause": row[2],
+                        "lesson": row[3],
+                        "retry_count": row[4],
+                        "human_intervention": row[5] == "true",
+                        "timestamp": row[6],
+                    })
 
-            for row in results:
-                lessons.append({
-                    "test_name": row[0],
-                    "category": row[1],
-                    "root_cause": row[2],
-                    "lesson": row[3],
-                    "retry_count": row[4],
-                    "human_intervention": row[5] == "true",
-                    "timestamp": row[6],
-                })
-
-        logger.info(f"Retrieved {len(lessons)} TDD lessons")
-        return lessons
+            logger.info(f"Retrieved {len(lessons)} TDD lessons")
+            return lessons
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, returning empty lessons: {exc}")
+            return []
 
     def get_tdd_anti_patterns(self) -> list[str]:
         """
@@ -437,25 +419,30 @@ class ExperimentLogger:
         """Return experiment records as plain dicts for success rate analysis.
 
         Each record contains: timestamp, result, playbook_version, experiment_type.
+        Returns [] if DB is unavailable.
         """
-        with self.repo.get_session() as session:
-            query = session.query(ExperimentLogModel)
-            if experiment_type:
-                query = query.filter(
-                    ExperimentLogModel.task_data["type"].astext == experiment_type
-                )
-            if since:
-                query = query.filter(ExperimentLogModel.timestamp >= since)
+        try:
+            with self.repo.get_session() as session:
+                query = session.query(ExperimentLogModel)
+                if experiment_type:
+                    query = query.filter(
+                        ExperimentLogModel.task_data["type"].astext == experiment_type
+                    )
+                if since:
+                    query = query.filter(ExperimentLogModel.timestamp >= since)
 
-            records = []
-            for row in query.all():
-                records.append({
-                    "timestamp": row.timestamp,
-                    "result": row.result,
-                    "playbook_version": row.playbook_version,
-                    "experiment_type": (row.task_data or {}).get("type"),
-                })
-            return records
+                records = []
+                for row in query.all():
+                    records.append({
+                        "timestamp": row.timestamp,
+                        "result": row.result,
+                        "playbook_version": row.playbook_version,
+                        "experiment_type": (row.task_data or {}).get("type"),
+                    })
+                return records
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, returning empty records: {exc}")
+            return []
 
     def get_tdd_cycle_records(
         self,
@@ -467,34 +454,39 @@ class ExperimentLogger:
 
         Each record contains: timestamp, result, retry_count, playbook_id,
         retrieved_bullet_ids, and learned_bullet_count.
+        Returns [] if DB is unavailable.
         """
         from sqlalchemy import desc
 
-        with self.repo.get_session() as session:
-            query = session.query(ExperimentLogModel).filter(
-                ExperimentLogModel.task_data["type"].astext == "tdd_cycle"
-            )
-            if playbook_id:
-                query = query.filter(
-                    ExperimentLogModel.task_data["playbook_id"].astext == playbook_id
+        try:
+            with self.repo.get_session() as session:
+                query = session.query(ExperimentLogModel).filter(
+                    ExperimentLogModel.task_data["type"].astext == "tdd_cycle"
                 )
-            if since:
-                query = query.filter(ExperimentLogModel.timestamp >= since)
-            query = query.order_by(desc(ExperimentLogModel.timestamp))
-            if limit:
-                query = query.limit(limit)
+                if playbook_id:
+                    query = query.filter(
+                        ExperimentLogModel.task_data["playbook_id"].astext == playbook_id
+                    )
+                if since:
+                    query = query.filter(ExperimentLogModel.timestamp >= since)
+                query = query.order_by(desc(ExperimentLogModel.timestamp))
+                if limit:
+                    query = query.limit(limit)
 
-            records = []
-            for row in query.all():
-                reflector = row.reflector_data or {}
-                generator = row.generator_data or {}
-                curator = row.curator_data or {}
-                records.append({
-                    "timestamp": row.timestamp,
-                    "result": row.result,
-                    "retry_count": reflector.get("retry_count", 0),
-                    "playbook_id": (row.task_data or {}).get("playbook_id"),
-                    "retrieved_bullet_ids": generator.get("retrieved_bullet_ids", []),
-                    "learned_bullet_count": curator.get("bullet_count", 0),
-                })
-            return records
+                records = []
+                for row in query.all():
+                    reflector = row.reflector_data or {}
+                    generator = row.generator_data or {}
+                    curator = row.curator_data or {}
+                    records.append({
+                        "timestamp": row.timestamp,
+                        "result": row.result,
+                        "retry_count": reflector.get("retry_count", 0),
+                        "playbook_id": (row.task_data or {}).get("playbook_id"),
+                        "retrieved_bullet_ids": generator.get("retrieved_bullet_ids", []),
+                        "learned_bullet_count": curator.get("bullet_count", 0),
+                    })
+                return records
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: DB unavailable, returning empty TDD records: {exc}")
+            return []
