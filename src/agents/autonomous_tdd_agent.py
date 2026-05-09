@@ -382,6 +382,10 @@ class AutonomousTDDAgent:
         # Store feature requirement for placement decisions
         self._feature_requirement = requirement
 
+        # Seed test_functions from any files already on disk so the agent is
+        # aware of work done in previous runs (context continuity).
+        self._load_existing_context()
+
         # Execute TDD cycles with emergent planning
         results = []
         cycle_number = 1
@@ -574,6 +578,42 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
             )
 
         return increments
+
+    def _load_existing_context(self) -> None:
+        """Populate self.test_functions from test files already on disk.
+
+        Called once at the start of build_feature so re-runs are aware of
+        code written in previous sessions. Only loads files not already tracked.
+        """
+        import ast
+
+        for test_file in self.test_dir.glob("test_*.py"):
+            file_key = str(test_file)
+            if file_key in self.test_functions:
+                continue  # already tracked from this session
+
+            source = test_file.read_text()
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                logger.warning(f"_load_existing_context: skipping unparseable file {test_file.name}")
+                continue
+
+            functions: list[dict] = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+                    # Extract the raw source lines for this function
+                    lines = source.splitlines()
+                    start = node.lineno - 1
+                    end = node.end_lineno
+                    code = "\n".join(lines[start:end])
+                    functions.append({"cycle": 0, "name": node.name, "code": code})
+
+            if functions:
+                self.test_functions[file_key] = functions
+                logger.info(
+                    f"  📂 Loaded {len(functions)} existing test(s) from {test_file.name}"
+                )
 
     def _get_existing_test_summaries(self) -> str:
         """Generate summary of existing tests and implementation to help avoid redundancy.
