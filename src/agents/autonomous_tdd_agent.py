@@ -952,7 +952,22 @@ Output EITHER:
 
         # RED: Write failing test
         logger.info("  🔴 RED: Writing failing test...")
-        test_code = self._write_test(increment, cycle_number)
+        try:
+            test_code = self._write_test(increment, cycle_number)
+        except ValueError as exc:
+            logger.warning(f"  ⏭️  Skipping cycle — LLM could not generate a valid test: {exc}")
+            return CycleResult(
+                increment=increment,
+                test_code="",
+                implementation_code="",
+                red_result=TestResult(passed=True, failed=False, output=str(exc)),
+                green_result=TestResult(passed=True, failed=False, output=str(exc)),
+                refactored=False,
+                learned_bullets=[],
+                cycle_number=cycle_number,
+                skipped=True,
+                skip_reason=f"LLM test generation failed: {exc}",
+            )
         logger.info(f"      Created: {increment.test_file.relative_to(self.project_root)}")
 
         red_result = self._run_tests()
