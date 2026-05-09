@@ -94,6 +94,9 @@ def cmd_tdd(args: argparse.Namespace) -> int:
                 print(f"  {f.relative_to(project_root)}")
         feature_path = candidates[0]
     else:
+        # Resolve relative paths against the project root, not CWD
+        if not feature_path.is_absolute():
+            feature_path = project_root / feature_path
         feature_path = feature_path.resolve()
         if not feature_path.exists():
             print(f"error: feature file not found: {feature_path}", file=sys.stderr)
