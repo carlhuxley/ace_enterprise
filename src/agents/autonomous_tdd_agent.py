@@ -1284,6 +1284,11 @@ Example: "Then the URL should contain the client_id parameter" → ONE assertion
 - Match the coding style and patterns from existing tests
 - Do NOT mix patterns (don't use standalone `add()` if existing tests use `calc.add()`)
 
+**ARCHITECTURAL LAYER AWARENESS**:
+- **Library classes** (in `{self.src_dir.name}/`) are in-memory by default. Do NOT write tests that expect persistence across separate instances (e.g., `obj1 = Cls(); obj2 = Cls(); assert obj2 sees obj1's data`) unless the class explicitly accepts a `storage_path` parameter.
+- **Entry points** (`__main__.py`, CLI scripts) own I/O and persistence — test those with subprocess calls or by passing an explicit storage path.
+- If you need to test persistence, pass `tmp_path` (pytest fixture) as the storage location so tests are isolated.
+
 **Task**: Write ONLY the test function `{increment.test_name}`.
 
 **CRITICAL CONSTRAINT**:
@@ -1510,6 +1515,12 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 8. **Test 3+ → Generalize** (Now you can abstract):
    - ✅ Now add proper logic, validation, API calls
    - ✅ Extract helpers, handle edge cases
+
+**ARCHITECTURAL LAYER RULES** — follow these strictly:
+- **Library classes** live in `{self.src_dir.name}/` and must stay in-memory by default. Do NOT add file I/O, database calls, or a default `storage_path="somefile.json"` to a library class. Library classes should be pure: they take data in, return data out.
+- **Persistence is opt-in**: If a class genuinely needs optional persistence, use `storage_path=None` (None = in-memory, a path = file-backed). Never hardcode a default file path.
+- **Entry points** (`__main__.py`, CLI scripts, `run()` wrappers) are the correct place to wire up persistence, parse arguments, and do I/O. Do not push these concerns into library classes.
+- **The test of the test**: If the test creates two separate instances and expects them to share state without passing a file path, the test is wrong — not the implementation.
 
 **SCOPE**:
 8. ❌ Don't add features for future tests
