@@ -429,6 +429,34 @@ class ExperimentLogger:
 
         return list(unique_lessons)
 
+    def get_experiment_records(
+        self,
+        experiment_type: str | None = None,
+        since: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return experiment records as plain dicts for success rate analysis.
+
+        Each record contains: timestamp, result, playbook_version, experiment_type.
+        """
+        with self.repo.get_session() as session:
+            query = session.query(ExperimentLogModel)
+            if experiment_type:
+                query = query.filter(
+                    ExperimentLogModel.task_data["type"].astext == experiment_type
+                )
+            if since:
+                query = query.filter(ExperimentLogModel.timestamp >= since)
+
+            records = []
+            for row in query.all():
+                records.append({
+                    "timestamp": row.timestamp,
+                    "result": row.result,
+                    "playbook_version": row.playbook_version,
+                    "experiment_type": (row.task_data or {}).get("type"),
+                })
+            return records
+
     def get_tdd_cycle_records(
         self,
         playbook_id: str | None = None,
