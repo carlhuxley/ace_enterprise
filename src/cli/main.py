@@ -48,6 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum TDD cycles (default from config or 20)",
     )
     tdd.add_argument(
+        "--no-learn",
+        action="store_true",
+        help="Skip the LEARN phase (faster, no playbook updates)",
+    )
+    tdd.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -109,6 +114,7 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     print()
 
     agent = build_agent(config)
+    agent.skip_learn = args.no_learn
     result = agent.build_feature(requirement=requirement, gherkin_dir=gherkin_dir)
 
     print()

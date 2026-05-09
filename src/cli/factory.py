@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
 from src.agents.test_review_agent import TestReviewAgent
 from src.cli.config import ProjectConfig
@@ -28,6 +26,7 @@ def build_agent(config: ProjectConfig) -> AutonomousTDDAgent:
         models=[(provider, model)],
         playbook_id=config.playbook_id,
     )
+    ensemble.playbook_manager.get_or_create_playbook(config.playbook_id)
 
     reviewer = TestReviewAgent(llm_client=llm_client)
 

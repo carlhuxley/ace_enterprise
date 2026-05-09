@@ -152,6 +152,7 @@ class AutonomousTDDAgent:
             review_threshold: Minimum test quality score to learn from
         """
         self.ensemble = ensemble_learner
+        self.skip_learn = False
         self.test_reviewer = test_reviewer
         self.project_root = project_root
         self.test_dir = test_dir
@@ -1122,9 +1123,13 @@ Output EITHER:
             logger.info("  ✨ REFACTOR: Code quality acceptable, skipping")
 
         # LEARN: Ensemble votes on patterns
-        logger.info("  🧠 LEARN: Ensemble reviewing cycle...")
-        learned_bullets = self._ensemble_learn(test_code, impl_code, increment)
-        logger.info(f"      {len(learned_bullets)} patterns approved")
+        if self.skip_learn:
+            logger.info("  🧠 LEARN: skipped (--no-learn)")
+            learned_bullets = []
+        else:
+            logger.info("  🧠 LEARN: Ensemble reviewing cycle...")
+            learned_bullets = self._ensemble_learn(test_code, impl_code, increment)
+            logger.info(f"      {len(learned_bullets)} patterns approved")
 
         # LOG: Record TDD cycle to experiment_logs
         logger.info("  📊 LOG: Recording cycle to experiment_logs...")

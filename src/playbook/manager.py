@@ -50,6 +50,31 @@ class PlaybookManager:
         # Load existing playbooks from disk
         self._load_all_playbooks()
 
+    def get_or_create_playbook(self, playbook_id: str, domain: str = "general") -> Playbook:
+        """Return an existing playbook or create one with the exact ID supplied."""
+        existing = self.get_playbook(playbook_id)
+        if existing is not None:
+            return existing
+
+        now = datetime.utcnow()
+        playbook = Playbook(
+            playbook_id=playbook_id,
+            version="0.1.0",
+            metadata=PlaybookMetadata(domain=domain, base_model="", total_tokens=0, total_bullets=0),
+            sections={
+                "strategies_and_hard_rules": [],
+                "code_snippets": [],
+                "troubleshooting": [],
+                "domain_knowledge": [],
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        self._playbooks[playbook_id] = playbook
+        self._save_playbook(playbook_id)
+        logger.info(f"Created playbook '{playbook_id}' for domain '{domain}'")
+        return playbook
+
     def create_playbook(self, create_data: PlaybookCreate) -> Playbook:
         """
         Create a new empty playbook.
