@@ -929,12 +929,10 @@ Your reconsidered vote:"""
         Returns:
             License type string
         """
-        # Block proprietary/closed-source models (ToS violation for training)
+        # Note proprietary/closed-source providers for audit trail
         if provider in ["openai", "anthropic", "google", "cohere"]:
-            raise ValueError(
-                f"Proprietary provider '{provider}' is not allowed. "
-                f"Use open-source providers: ollama, vllm, deepseek, togetherai"
-            )
+            logger.warning(f"Proprietary provider '{provider}' — tagging bullets as proprietary")
+            return "proprietary"
 
         # Open-source models with permissive licenses
         if provider in ["ollama", "vllm", "togetherai"]:

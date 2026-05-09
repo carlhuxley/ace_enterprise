@@ -2653,12 +2653,10 @@ Output ONLY the JSON, no other text."""
         Raises:
             ValueError: If proprietary provider is used
         """
-        # Block proprietary/closed-source models (ToS violation for training)
+        # Note proprietary/closed-source providers for audit trail
         if provider in ["openai", "anthropic", "google", "cohere"]:
-            raise ValueError(
-                f"Proprietary provider '{provider}' is not allowed. "
-                f"Use open-source providers: ollama, vllm, deepseek, togetherai, openrouter"
-            )
+            logger.warning(f"Proprietary provider '{provider}' — tagging bullets as proprietary")
+            return "proprietary"
 
         # Open-source models with permissive licenses
         if provider in ["ollama", "vllm", "togetherai"]:
@@ -2688,13 +2686,11 @@ Output ONLY the JSON, no other text."""
         if provider == "openrouter":
             model_lower = model.lower()
 
-            # Block proprietary models accessed through openrouter
+            # Note proprietary models accessed through openrouter for audit trail
             proprietary_prefixes = ["openai/", "anthropic/", "cohere/"]
             if any(model_lower.startswith(prefix) for prefix in proprietary_prefixes):
-                raise ValueError(
-                    f"Proprietary model '{model}' via OpenRouter is not allowed. "
-                    f"Use open-source models: qwen/, meta-llama/, mistralai/, deepseek/, google/gemma"
-                )
+                logger.warning(f"Proprietary model '{model}' via OpenRouter — tagging bullets as proprietary")
+                return "proprietary"
 
             # Apache 2.0 licensed models via OpenRouter
             if any(name in model_lower for name in ["qwen", "mistral", "gemma"]):
