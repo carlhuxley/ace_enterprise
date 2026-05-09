@@ -26,6 +26,9 @@ dependencies = [
     "sentence-transformers>=2.2.0",
 ]
 
+[project.scripts]
+ace = "src.cli.main:main"
+
 [project.optional-dependencies]
 ml = [
     # MLflow integration for experiment knowledge capture
