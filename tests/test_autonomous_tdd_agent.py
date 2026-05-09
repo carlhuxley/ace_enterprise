@@ -29,19 +29,19 @@ class TestTestResult:
 class TestGetLicenseType:
     """Tests for _get_license_type method."""
 
-    def test_openai_raises_error(self):
-        """Proprietary providers like OpenAI should raise ValueError."""
+    def test_openai_returns_proprietary(self):
+        """Proprietary providers like OpenAI should return 'proprietary' (not raise)."""
         from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
 
-        with pytest.raises(ValueError, match="Proprietary provider"):
-            AutonomousTDDAgent._get_license_type(None, "openai", "gpt-4")
+        result = AutonomousTDDAgent._get_license_type(None, "openai", "gpt-4")
+        assert result == "proprietary"
 
-    def test_anthropic_raises_error(self):
-        """Proprietary providers like Anthropic should raise ValueError."""
+    def test_anthropic_returns_proprietary(self):
+        """Proprietary providers like Anthropic should return 'proprietary' (not raise)."""
         from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
 
-        with pytest.raises(ValueError, match="Proprietary provider"):
-            AutonomousTDDAgent._get_license_type(None, "anthropic", "claude-3")
+        result = AutonomousTDDAgent._get_license_type(None, "anthropic", "claude-3")
+        assert result == "proprietary"
 
     def test_togetherai_llama_returns_open(self):
         """TogetherAI with Llama returns open license."""

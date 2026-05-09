@@ -584,8 +584,15 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 
         Called once at the start of build_feature so re-runs are aware of
         code written in previous sessions. Only loads files not already tracked.
+
+        Files that fail AST parsing or whose imports cannot be resolved are
+        skipped with a warning rather than loaded — this prevents broken
+        artifacts from failed runs from poisoning the context.
         """
         import ast
+
+        env = __import__("os").environ.copy()
+        env["PYTHONPATH"] = str(self.project_root)
 
         for test_file in self.test_dir.glob("test_*.py"):
             file_key = str(test_file)
@@ -593,16 +600,34 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
                 continue  # already tracked from this session
 
             source = test_file.read_text()
+
+            # 1. Syntax check
             try:
                 tree = ast.parse(source)
-            except SyntaxError:
-                logger.warning(f"_load_existing_context: skipping unparseable file {test_file.name}")
+            except SyntaxError as exc:
+                logger.warning(
+                    f"_load_existing_context: skipping {test_file.name} — syntax error: {exc}"
+                )
+                continue
+
+            # 2. Import / collection check — run pytest --collect-only on just this file.
+            #    A non-zero exit means broken imports or missing dependencies; skip it.
+            collect_result = __import__("subprocess").run(
+                [__import__("sys").executable, "-m", "pytest", str(test_file), "--collect-only", "-q"],
+                capture_output=True, text=True,
+                cwd=str(self.project_root), env=env, timeout=15,
+            )
+            if collect_result.returncode != 0:
+                logger.warning(
+                    f"_load_existing_context: skipping {test_file.name} — "
+                    f"collection failed (broken imports or bad test): "
+                    f"{collect_result.stdout.strip()[:200]}"
+                )
                 continue
 
             functions: list[dict] = []
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
-                    # Extract the raw source lines for this function
                     lines = source.splitlines()
                     start = node.lineno - 1
                     end = node.end_lineno
@@ -764,15 +789,47 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
                     scenario_text += f"   {step['type']}: {step['text']}\n"
                 scenarios_summary.append(scenario_text)
 
-            gherkin_section = f"""
-**🎯 GHERKIN-DRIVEN ATDD - Business Requirements:**
-```gherkin
-{gherkin_context}
+            # Detect subprocess-style scenarios ("When I run python -m ..." or similar)
+            all_step_text = " ".join(
+                step["text"]
+                for s in gherkin_scenarios
+                for step in s["steps"]
+            ).lower()
+            is_subprocess_feature = any(
+                marker in all_step_text
+                for marker in ["python -m ", "i run ", "$ ", "shell ", "command line"]
+            )
+
+            if is_subprocess_feature:
+                test_pattern_section = f"""
+**🖥️ CLI / SUBPROCESS FEATURE DETECTED**
+The Gherkin steps describe invoking a command-line program (e.g. "python -m ...").
+Generate **subprocess integration tests** — NOT unit tests against Python classes.
+
+**Required test pattern**:
+```python
+import subprocess, sys, os
+
+def test_add_task_prints_confirmation(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-m", "task_manager", "add", "Buy milk"],
+        capture_output=True, text=True,
+        cwd=str(tmp_path),           # isolated working dir per test
+        env={{**os.environ, "TASK_DATA": str(tmp_path / "tasks.json")}},
+    )
+    assert result.returncode == 0
+    assert "Buy milk" in result.stdout
 ```
 
-**Parsed Scenarios ({len(gherkin_scenarios)} total):**
-{"".join(scenarios_summary)}
-
+**Rules for subprocess tests**:
+1. Use `subprocess.run([sys.executable, "-m", "<module>", ...], capture_output=True, text=True)`
+2. Always pass `cwd=str(tmp_path)` so each test gets an isolated working directory
+3. Check `result.returncode`, `result.stdout`, and `result.stderr`
+4. Do NOT import or instantiate the implementation class directly — test via the process boundary
+5. Each test covers ONE scenario step (add, list, complete, etc.)
+"""
+            else:
+                test_pattern_section = """
 **CRITICAL - Generate Unit Tests from Gherkin:**
 Each Gherkin scenario defines a business capability. Your task is to derive unit tests that:
 1. Verify the behaviors described in the Given/When/Then steps
@@ -788,7 +845,17 @@ Scenario: User grants application access
 → Unit Test: test_generate_authorization_url_returns_valid_url()
 → Unit Test: test_authorization_url_includes_required_parameters()
 ```
+"""
 
+            gherkin_section = f"""
+**🎯 GHERKIN-DRIVEN ATDD - Business Requirements:**
+```gherkin
+{gherkin_context}
+```
+
+**Parsed Scenarios ({len(gherkin_scenarios)} total):**
+{"".join(scenarios_summary)}
+{test_pattern_section}
 **Your TDD tests should enable the Gherkin scenarios to pass.**
 """
         elif gherkin_context:
@@ -1068,6 +1135,23 @@ Output EITHER:
         previous_impl_code = None
         latest_bullets_used: list[str] = []
 
+        # Snapshot passing tests before GREEN writes so we can detect regressions.
+        # Only meaningful when the implementation file already exists (modifying, not creating).
+        _impl_file_existed = increment.implementation_file.exists()
+        _impl_file_original: str | None = (
+            increment.implementation_file.read_text() if _impl_file_existed else None
+        )
+
+        def _passing_test_ids(result: TestResult) -> set[str]:
+            """Extract the set of test node IDs that passed from pytest -v output."""
+            ids = set()
+            for line in (result.output or "").splitlines():
+                if " PASSED" in line:
+                    node_id = line.split(" PASSED")[0].strip()
+                    if "::" in node_id:
+                        ids.add(node_id)
+            return ids
+
         for attempt in range(1, MAX_GREEN_RETRIES + 1):
             if attempt > 1:
                 logger.info(
@@ -1132,8 +1216,35 @@ Output EITHER:
             if green_result.all_passed:
                 logger.info("  ⚙️  Running tests... PASSED ✓")
                 break
-            else:
-                logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
+
+            # Regression check: if we modified an existing file and existing tests
+            # now fail, roll back the file and skip this cycle rather than retrying.
+            if _impl_file_existed and _impl_file_original is not None:
+                red_passing = _passing_test_ids(red_result)
+                green_passing = _passing_test_ids(green_result)
+                regressions = red_passing - green_passing
+                if regressions:
+                    logger.warning(
+                        f"  🔙 REGRESSION DETECTED — {len(regressions)} previously passing "
+                        f"test(s) now fail: {', '.join(sorted(regressions))}"
+                    )
+                    logger.warning("  🔙 Rolling back implementation to avoid breaking existing tests")
+                    increment.implementation_file.write_text(_impl_file_original)
+                    # Return a skipped result so the TDD loop can continue
+                    return CycleResult(
+                        increment=increment,
+                        test_code=test_code,
+                        implementation_code=_impl_file_original,
+                        red_result=red_result,
+                        green_result=green_result,
+                        refactored=False,
+                        learned_bullets=[],
+                        cycle_number=cycle_number,
+                        skipped=True,
+                        skip_reason=f"Rolled back: implementation broke {len(regressions)} existing test(s)",
+                    )
+
+            logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
 
         if not green_result.all_passed:
             # Record failure for self-healing before raising
@@ -1328,6 +1439,12 @@ def test_everything_at_once():
 5. Write ONLY the test function (imports added automatically)
 6. FOLLOW existing patterns from tests above
 7. Use pytest style (simple assert statements)
+
+**FILE SYSTEM ISOLATION — mandatory**:
+- Any test that reads from or writes to the filesystem MUST use pytest's `tmp_path` fixture (add it as a parameter: `def test_foo(tmp_path):`)
+- Never write to a hardcoded path like `"tasks.json"` or `"/tmp/data"` — those leak between tests
+- Pass the isolated path into the object under test: `MyClass(storage_path=str(tmp_path / "data.json"))`
+- For subprocess tests: pass `cwd=str(tmp_path)` to `subprocess.run()`
 
 **Example showing pattern consistency**:
 ```python
