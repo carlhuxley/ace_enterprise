@@ -87,7 +87,8 @@ class TDDFailureRecorder:
             Experiment ID of the logged failure
         """
         self.failed_cycles += 1
-        experiment_id = f"tdd-fail-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        now = datetime.now(timezone.utc)
+        experiment_id = f"tdd-fail-{now.strftime('%Y%m%d-%H%M%S%f')}"
         
         # 1. Log to ExperimentLogger
         if self.experiment_logger:
@@ -122,7 +123,7 @@ class TDDFailureRecorder:
             logger.info(f"📊 Logged failure experiment: {experiment_id}")
         
         # 2. Create beads issue
-        issue_id = self._create_beads_issue(context, suggested_fix)
+        issue_id = self._create_beads_issue(context, suggested_fix, experiment_id, now)
         logger.info(f"🐛 Created beads issue: {issue_id}")
         
         # 3. Add playbook bullet
@@ -183,10 +184,12 @@ class TDDFailureRecorder:
         self,
         context: FailureContext,
         suggested_fix: str | None,
+        experiment_id: str,
+        now: datetime,
     ) -> str:
         """Create a bug issue in beads."""
-        issue_id = f"ace_enterprise-bf{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
+        issue_id = f"ace_enterprise-bf{now.strftime('%Y%m%d%H%M%S%f')}"
+
         issue = {
             "id": issue_id,
             "title": f"TDD build failed: {context.error_type} in cycle {context.cycle_number}",
@@ -207,10 +210,10 @@ class TDDFailureRecorder:
             "issue_type": "bug",
             "status": "open",
             "priority": 2,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
             "created_by": "TDDFailureRecorder",
             "labels": ["tdd", "auto-generated", context.error_type.lower()],
-            "related_experiment": f"tdd-fail-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            "related_experiment": experiment_id,
         }
         
         # Append to beads file
