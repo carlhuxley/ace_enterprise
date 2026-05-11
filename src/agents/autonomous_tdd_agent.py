@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.utils.code_extraction import extract_code
+from src.utils.context_map import ContextMap
 from src.agents.redundancy_checker import (
     ExistingTest,
     ProposedTest,
@@ -138,6 +139,7 @@ class AutonomousTDDAgent:
         src_dir: Path,
         max_iterations: int = 20,
         review_threshold: float = 0.7,
+        context_map: ContextMap | None = None,
     ):
         """
         Initialize Autonomous TDD Agent.
@@ -202,6 +204,9 @@ class AutonomousTDDAgent:
             playbook_manager=self.playbook_manager,
             playbook_id=self.playbook_id,
         )
+
+        # AST context map for scoped prompt injection (optional)
+        self.context_map: ContextMap | None = context_map
 
         # Initialize TDD lesson injector
         self._tdd_lesson_injector = TDDLessonInjector()
@@ -1515,6 +1520,23 @@ def test_add_returns_sum():
 
         return test_function
 
+    def _get_implementation_context(self, failing_test_ids: list[str]) -> str:
+        """Return a compact AST-signature section for the given test node IDs.
+
+        When a context_map is set, returns only the signatures referenced by
+        the failing tests — no function bodies. Returns empty string when no
+        context map is configured (falls back to existing prompt behaviour).
+        """
+        if not self.context_map or not failing_test_ids:
+            return ""
+        signatures = self.context_map.nodes_relevant_to(failing_test_ids)
+        if not signatures:
+            return ""
+        lines = ["**Related module interfaces** (AST signatures — bodies omitted):"]
+        for sig in signatures:
+            lines.append(f"  {sig.format_compact()}")
+        return "\n".join(lines)
+
     def _write_minimal_code(
         self,
         increment: TestIncrement,
@@ -1541,6 +1563,10 @@ def test_add_returns_sum():
 
         # Read test code
         test_code = increment.test_file.read_text()
+
+        # AST-scoped context from other modules (empty when no context map configured)
+        test_node_id = f"{increment.test_file}::{increment.test_name}"
+        module_context = self._get_implementation_context([test_node_id])
 
         prompt = f"""You are following ATDD (Acceptance Test-Driven Development): write code to satisfy the test contract.
 
@@ -1582,7 +1608,7 @@ Write comprehensive, production-quality code that satisfies the test's contract 
 ```python
 {existing_code if existing_code else "# Empty file - create what's needed"}
 ```
-{
+{f"{module_context}" + chr(10) if module_context else ""}{
             ""
             if not previous_failure
             else f'''
