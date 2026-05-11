@@ -93,3 +93,7 @@ playbook_*.json
 examples/**/__pycache__/
 USER_CONTRIBUTIONS.md
 mlruns/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
