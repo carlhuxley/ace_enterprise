@@ -6,9 +6,13 @@ The LEARN phase (playbook bullets, ensemble voting) remains in the harness.
 
 See docs/adr/002-language-pod-interface.md for design rationale.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from src.analytics.token_efficiency import TokenUsage  # re-export
+
+__all__ = ["PodSpec", "PhaseResult", "TokenUsage", "LanguagePod"]
 
 
 @dataclass
@@ -28,15 +32,6 @@ class PhaseResult:
     passed: bool
     output: str
     error: str | None = None
-
-
-@dataclass
-class TokenUsage:
-    """Token consumption for one complete TDD cycle."""
-
-    cycle_number: int
-    input_tokens: int
-    output_tokens: int
 
 
 @runtime_checkable

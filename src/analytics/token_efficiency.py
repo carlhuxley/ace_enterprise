@@ -9,7 +9,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from src.agents.language_pod import TokenUsage
+@dataclass
+class TokenUsage:
+    """Token consumption for one complete TDD cycle."""
+
+    cycle_number: int
+    input_tokens: int
+    output_tokens: int
 
 
 @dataclass
