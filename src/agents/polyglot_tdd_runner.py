@@ -73,6 +73,23 @@ class PolyglotTDDRunner:
         self._max_cycles = max_cycles
         self._reporter = reporter or TokenEfficiencyReporter
 
+    def run_from_feature(
+        self,
+        feature_path: Path,
+        languages: list[str],
+        test_file: Path,
+        implementation_file: Path,
+    ) -> PolyglotRunResult:
+        """Parse a Gherkin .feature file and run the polyglot TDD loop."""
+        from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+        spec = GherkinFeatureBridge.parse(Path(feature_path))
+        return self.run(
+            feature_requirement=spec.as_requirement(),
+            test_file=test_file,
+            implementation_file=implementation_file,
+            languages=languages,
+        )
+
     def run(
         self,
         feature_requirement: str,
