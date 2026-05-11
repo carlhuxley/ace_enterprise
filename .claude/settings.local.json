@@ -1,6 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(uv add *)",
+      "Bash(uv run *)",
+      "Bash(wait)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "ace"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
