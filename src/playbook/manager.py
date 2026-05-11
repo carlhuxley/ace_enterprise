@@ -367,6 +367,14 @@ class PlaybookManager:
 
         return playbook.sections[section]
 
+    def get_bullets(self, section: str) -> list[str]:
+        """Return bullet content strings from all loaded playbooks for a section."""
+        result = []
+        for playbook in self._playbooks.values():
+            for bullet in playbook.sections.get(section, []):
+                result.append(bullet.content)
+        return result
+
     def get_all_bullets(self, playbook_id: str) -> list[Bullet]:
         """
         Get all bullets across all sections.
