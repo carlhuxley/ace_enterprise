@@ -1293,6 +1293,12 @@ Output EITHER:
         else:
             logger.info("  ✨ REFACTOR: Code quality acceptable, skipping")
 
+        # SESSION BULLET: promote GREEN success to playbook session-wins section
+        try:
+            self._promote_session_bullet(increment, cycle_number)
+        except Exception as e:
+            logger.warning(f"  ⚠️  Failed to promote session bullet: {e}")
+
         # LEARN: Ensemble votes on patterns
         if self.skip_learn:
             logger.info("  🧠 LEARN: skipped (--no-learn)")
@@ -1519,6 +1525,28 @@ def test_add_returns_sum():
         self._assemble_test_file(increment.test_file, increment.implementation_file)
 
         return test_function
+
+    def _build_session_bullet(self, increment: "TestIncrement", cycle_number: int) -> DeltaBullet:
+        """Build a session-wins bullet for a successfully passing cycle."""
+        content = (
+            f"GREEN cycle {cycle_number}: {increment.test_name} — {increment.description}"
+        )
+        return DeltaBullet(
+            section="session-wins",
+            content=content,
+            tags=["tdd", "session-win"],
+        )
+
+    def _promote_session_bullet(self, increment: "TestIncrement", cycle_number: int) -> None:
+        """Promote a session bullet to the playbook after GREEN succeeds."""
+        if self.playbook_manager is None:
+            return
+        bullet = self._build_session_bullet(increment, cycle_number)
+        curator_output = CuratorOutput(
+            delta_bullets=[bullet],
+            reasoning=f"GREEN phase completed for {increment.test_name} in cycle {cycle_number}",
+        )
+        self.curator.apply_updates(self.playbook_id, curator_output)
 
     def _get_implementation_context(self, failing_test_ids: list[str]) -> str:
         """Return a compact AST-signature section for the given test node IDs.

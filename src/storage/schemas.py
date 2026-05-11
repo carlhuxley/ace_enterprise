@@ -2,6 +2,7 @@
 Pydantic schemas for data validation and API models.
 Based on PRD Section 3: Data Architecture
 """
+import hashlib
 from datetime import datetime
 from typing import Any, Literal
 
@@ -221,6 +222,25 @@ class GeneratorOutput(BaseModel):
 
 
 # ============================================================================
+# Curator Schemas (PRD Section 3.2)
+# ============================================================================
+
+
+class DeltaBullet(BaseModel):
+    """A new bullet to add to playbook"""
+
+    section: str = Field(..., description="Target section")
+    content: str = Field(..., description="Bullet content")
+    tags: list[str] = Field(default_factory=list)
+
+    @property
+    def content_hash(self) -> str:
+        """SHA-256 of normalised content — used for fast deduplication."""
+        normalised = self.content.strip()
+        return hashlib.sha256(normalised.encode()).hexdigest()[:16]
+
+
+# ============================================================================
 # Reflector Schemas (PRD Section 3.2)
 # ============================================================================
 
@@ -241,19 +261,10 @@ class ReflectorOutput(BaseModel):
     quality_score: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Quality of insights (0-1)"
     )
-
-
-# ============================================================================
-# Curator Schemas (PRD Section 3.2)
-# ============================================================================
-
-
-class DeltaBullet(BaseModel):
-    """A new bullet to add to playbook"""
-
-    section: str = Field(..., description="Target section")
-    content: str = Field(..., description="Bullet content")
-    tags: list[str] = Field(default_factory=list)
+    session_bullets: list[DeltaBullet] = Field(
+        default_factory=list,
+        description="Bullets promoted to session-wins playbook section on GREEN success",
+    )
 
 
 class CuratorOutput(BaseModel):
