@@ -8,6 +8,7 @@ Bead: ace_enterprise-lfu
 """
 
 import logging
+import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -54,6 +55,10 @@ class AgentPerformanceMetrics:
     total_cost: float = 0.0
     avg_cost_per_task: float = 0.0
 
+    # Variance / consistency (from quality_score audit field)
+    variance_coefficient: float = 0.0   # std_dev / mean of quality scores; 0 = no data
+    consistency_rate: float = 1.0       # max(success_rate, 1-success_rate); 1 = no data
+
     # Temporal
     first_seen: datetime | None = None
     last_seen: datetime | None = None
@@ -75,6 +80,18 @@ class AgentPerformanceMetrics:
             return self.success_rate * 0.8
         else:
             return self.success_rate
+
+    @property
+    def variance_adjusted_reliability(self) -> float:
+        """Reliability penalised for inconsistency and quality variance.
+
+        Formula: reliability_score * consistency_rate * (1 - variance_coefficient)
+        Defaults (consistency_rate=1.0, variance_coefficient=0.0) reproduce
+        reliability_score exactly so behaviour is unchanged when no variance
+        data is present.
+        """
+        vc = min(self.variance_coefficient, 1.0)
+        return self.reliability_score * self.consistency_rate * (1.0 - vc)
 
     def can_handle_complexity(self, level: int, min_success_rate: float = 0.7) -> bool:
         """Check if agent can handle a complexity level."""
@@ -299,6 +316,7 @@ class PerformanceAggregator:
         metrics = AgentPerformanceMetrics(agent_ref=agent_ref)
 
         latencies = []
+        quality_scores: list[float] = []
         complexity_results: dict[int, list[bool]] = {}
         task_type_results: dict[str, list[bool]] = {}
 
@@ -325,6 +343,7 @@ class PerformanceAggregator:
             complexity = payload.get("complexity", None)
             task_type = payload.get("task_type", None)
             cost = payload.get("cost", None)
+            quality_score = payload.get("quality_score", None)
 
             # Never extract: prompt, output, content, agent identity
 
@@ -339,6 +358,9 @@ class PerformanceAggregator:
 
             if cost is not None:
                 metrics.total_cost += cost
+
+            if quality_score is not None:
+                quality_scores.append(float(quality_score))
 
             # Track by complexity
             if complexity is not None:
@@ -360,6 +382,17 @@ class PerformanceAggregator:
 
         if metrics.total_tasks > 0 and metrics.total_cost > 0:
             metrics.avg_cost_per_task = metrics.total_cost / metrics.total_tasks
+
+        # Variance coefficient from quality scores
+        if len(quality_scores) > 1:
+            mean_q = statistics.mean(quality_scores)
+            if mean_q > 0:
+                metrics.variance_coefficient = statistics.stdev(quality_scores) / mean_q
+
+        # Consistency rate from binary success/fail outcomes
+        if metrics.total_tasks > 0:
+            sr = metrics.success_rate
+            metrics.consistency_rate = max(sr, 1.0 - sr)
 
         # Compute success rates by complexity
         for level, results in complexity_results.items():

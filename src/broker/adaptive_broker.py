@@ -232,7 +232,7 @@ class AdaptiveBroker:
         Profile adjustment: +10% for domain strengths, -10% for weaknesses.
         """
         config = self._config
-        base_score = metrics.reliability_score
+        base_score = metrics.variance_adjusted_reliability
 
         overall_component = base_score * config.overall_weight
 

@@ -5,6 +5,7 @@ submission_id is opaque - evaluator cannot link to agent.
 """
 
 import ast
+import statistics
 import tempfile
 import subprocess
 from dataclasses import dataclass, field
@@ -38,6 +39,21 @@ class EvaluationResult:
     tests_passed: bool | None  # None if no tests provided
     details: dict = field(default_factory=dict)
     evaluated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class MultiRunResult:
+    """Aggregated result across N evaluations of the same task.
+
+    Captures score variance and pass/fail consistency to flag unreliable models.
+    """
+
+    task_id: str
+    results: list[EvaluationResult]
+    mean_score: float
+    std_dev: float
+    variance_coefficient: float  # std_dev / mean_score; 0 when mean is 0
+    consistency_rate: float      # fraction of runs matching majority pass/fail
 
 
 class BlindEvaluator:
@@ -93,6 +109,52 @@ class BlindEvaluator:
             quality_score=min(score, 100),
             tests_passed=tests_passed,
             details=details
+        )
+
+    def evaluate_multi_run(
+        self,
+        submissions: list[Submission],
+    ) -> MultiRunResult:
+        """Evaluate multiple submissions for the same task and report variance.
+
+        Args:
+            submissions: Multiple outputs for the same task (same task_id).
+
+        Returns:
+            MultiRunResult with per-run scores, variance coefficient, and
+            consistency rate so callers can detect unreliable models.
+
+        Raises:
+            ValueError: if submissions is empty or task_ids are mixed.
+        """
+        if not submissions:
+            raise ValueError("submissions must not be empty")
+
+        task_ids = {s.task_id for s in submissions}
+        if len(task_ids) > 1:
+            raise ValueError(f"All submissions must share the same task_id; got {task_ids}")
+
+        task_id = submissions[0].task_id
+        results = [self.evaluate(s) for s in submissions]
+        scores = [r.quality_score for r in results]
+
+        mean_score = statistics.mean(scores)
+        std_dev = statistics.stdev(scores) if len(scores) > 1 else 0.0
+        variance_coefficient = std_dev / mean_score if mean_score > 0 else 0.0
+
+        # Consistency: fraction of runs matching majority pass/fail outcome
+        pass_count = sum(1 for r in results if r.tests_passed is True)
+        fail_count = len(results) - pass_count
+        majority_count = max(pass_count, fail_count)
+        consistency_rate = majority_count / len(results)
+
+        return MultiRunResult(
+            task_id=task_id,
+            results=results,
+            mean_score=mean_score,
+            std_dev=std_dev,
+            variance_coefficient=variance_coefficient,
+            consistency_rate=consistency_rate,
         )
 
     def _check_syntax(self, code: str) -> bool:
