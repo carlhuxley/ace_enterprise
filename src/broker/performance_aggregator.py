@@ -303,6 +303,40 @@ class PerformanceAggregator:
             for ref, m in self.get_all_agent_metrics().items()
         }
 
+    def get_feedback_adjusted_score(
+        self,
+        agent_ref: str,
+        evaluation_ids: list[str],
+        feedback_collector,  # FeedbackCollector — avoid circular import via type hint
+    ) -> float:
+        """Return the agent's automated quality score blended with human feedback.
+
+        Each evaluation_id in evaluation_ids is blended individually using the
+        FeedbackCollector, then the results are averaged.  If no evaluation has
+        feedback, the raw reliability score is returned unchanged.
+
+        Args:
+            agent_ref:          Agent whose metrics to use as the automated baseline.
+            evaluation_ids:     Evaluation IDs whose feedback should be considered.
+            feedback_collector: FeedbackCollector instance.
+
+        Returns:
+            Blended score in [0, 100].
+        """
+        metrics = self.get_agent_metrics(agent_ref)
+        automated_score = metrics.reliability_score * 100.0
+
+        blended_scores = []
+        for eid in evaluation_ids:
+            if feedback_collector.has_feedback(eid):
+                blended = feedback_collector.blended_score(automated_score, eid)
+                blended_scores.append(blended)
+
+        if not blended_scores:
+            return automated_score
+
+        return sum(blended_scores) / len(blended_scores)
+
     def _aggregate_metrics(
         self,
         agent_ref: str,
