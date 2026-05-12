@@ -39,6 +39,7 @@ class EvaluationResult:
     tests_passed: bool | None  # None if no tests provided
     details: dict = field(default_factory=dict)
     evaluated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    rubric_name: str | None = None  # set when a domain rubric was applied
 
 
 @dataclass
@@ -59,7 +60,11 @@ class MultiRunResult:
 class BlindEvaluator:
     """Evaluates submissions without knowing which agent produced them.
 
-    Scoring:
+    When a domain rubric matches submission.output_type the rubric drives
+    scoring.  Otherwise the built-in heuristic (syntax + structure + tests)
+    is used as a fallback.
+
+    Scoring (fallback):
     - Syntax validity: 30 points
     - Code structure: 20 points
     - Tests passing: 50 points (or 30 if no tests)
@@ -68,12 +73,53 @@ class BlindEvaluator:
     def evaluate(self, submission: Submission) -> EvaluationResult:
         """Evaluate a submission and return quality score.
 
+        Selects a domain rubric based on submission.output_type when one is
+        registered; otherwise falls back to the built-in heuristic.
+
         Args:
             submission: The submission to evaluate (no agent identity)
 
         Returns:
-            EvaluationResult with quality_score (0-100), tests_passed, details
+            EvaluationResult with quality_score (0-100), tests_passed, details,
+            and rubric_name (set when a domain rubric was used).
         """
+        from src.benchmark.rubrics import get_rubric
+
+        rubric = get_rubric(submission.output_type)
+        if rubric is not None:
+            return self._evaluate_with_rubric(submission, rubric)
+        return self._evaluate_fallback(submission)
+
+    def _evaluate_with_rubric(self, submission: Submission, rubric) -> EvaluationResult:
+        """Score using a domain-specific rubric."""
+        context = {}
+        if submission.test_content:
+            context["test_content"] = submission.test_content
+
+        result = rubric.score(submission.output_content, context)
+
+        # Determine tests_passed from rubric dimension scores if applicable
+        tests_passed: bool | None = None
+        for ds in result.dimension_scores:
+            if ds.dimension == "tests" and submission.test_content:
+                tests_passed = ds.score >= 50.0
+                break
+
+        return EvaluationResult(
+            submission_id=submission.submission_id,
+            quality_score=round(result.total_score),
+            tests_passed=tests_passed,
+            details={
+                "rubric_dimensions": {
+                    ds.dimension: {"score": ds.score, "weight": ds.weight}
+                    for ds in result.dimension_scores
+                }
+            },
+            rubric_name=rubric.name,
+        )
+
+    def _evaluate_fallback(self, submission: Submission) -> EvaluationResult:
+        """Built-in heuristic scoring (no rubric available)."""
         details: dict = {}
         score = 0
 
@@ -93,14 +139,13 @@ class BlindEvaluator:
         if submission.test_content:
             tests_passed, test_details = self._run_tests(
                 submission.output_content,
-                submission.test_content
+                submission.test_content,
             )
             details["test_details"] = test_details
             if tests_passed:
                 score += 50
         else:
             tests_passed = None
-            # Award partial points for valid code without tests
             if syntax_valid:
                 score += 20
 
@@ -108,7 +153,8 @@ class BlindEvaluator:
             submission_id=submission.submission_id,
             quality_score=min(score, 100),
             tests_passed=tests_passed,
-            details=details
+            details=details,
+            rubric_name=None,
         )
 
     def evaluate_multi_run(
