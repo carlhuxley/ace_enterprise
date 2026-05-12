@@ -262,7 +262,15 @@ class AdaptiveBroker:
         Profile adjustment: +10% for domain strengths, -10% for weaknesses.
         """
         config = self._config
-        base_score = metrics.variance_adjusted_reliability
+        if metrics.bayesian_estimate is not None and metrics.total_tasks > 0:
+            vc = min(metrics.variance_coefficient, 1.0)
+            base_score = (
+                metrics.bayesian_estimate.ci_lower
+                * metrics.consistency_rate
+                * (1.0 - vc)
+            )
+        else:
+            base_score = metrics.variance_adjusted_reliability
 
         overall_component = base_score * config.overall_weight
 

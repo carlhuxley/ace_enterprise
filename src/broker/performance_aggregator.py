@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from src.audit.store import AuditStore, AuditQuery
 from src.audit.schemas import AuditEventType
+from src.broker.bayesian import BayesianEstimate, estimate_success_rate
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,9 @@ class AgentPerformanceMetrics:
 
     # Per-version quality tracking (for regression detection)
     quality_by_version: dict[str, list[float]] = field(default_factory=dict)
+
+    # Bayesian success-rate estimate (Beta-Binomial posterior)
+    bayesian_estimate: BayesianEstimate | None = None
 
     # Temporal
     first_seen: datetime | None = None
@@ -358,6 +362,17 @@ class PerformanceAggregator:
 
         return sum(blended_scores) / len(blended_scores)
 
+    def compute_bayesian_estimate(self, agent_ref: str) -> BayesianEstimate:
+        """Return the Bayesian success-rate estimate for one agent."""
+        return self.get_agent_metrics(agent_ref).bayesian_estimate
+
+    def get_all_bayesian_estimates(self) -> dict[str, BayesianEstimate]:
+        """Return Bayesian estimates for every known agent."""
+        return {
+            ref: m.bayesian_estimate
+            for ref, m in self.get_all_agent_metrics().items()
+        }
+
     def _aggregate_metrics(
         self,
         agent_ref: str,
@@ -492,6 +507,11 @@ class PerformanceAggregator:
         for ttype, results in task_type_results.items():
             if results:
                 metrics.success_by_task_type[ttype] = sum(results) / len(results)
+
+        # Bayesian posterior over success rate
+        metrics.bayesian_estimate = estimate_success_rate(
+            metrics.successful_tasks, metrics.failed_tasks
+        )
 
         return metrics
 
