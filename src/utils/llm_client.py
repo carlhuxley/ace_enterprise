@@ -600,3 +600,40 @@ class LLMClient:
             return False
 
         return False
+
+
+# ---------------------------------------------------------------------------
+# Model version extraction
+# ---------------------------------------------------------------------------
+
+# OpenRouter and compatible providers surface the resolved model identifier in
+# various response headers.  We check the most common ones in priority order.
+_VERSION_HEADER_KEYS = (
+    "x-model-version",
+    "x-openrouter-model",
+    "openai-model",
+    "x-model",
+    "x-ratelimit-model",
+)
+
+
+def extract_model_version(response_headers: dict | None) -> str | None:
+    """Extract the model version string from HTTP response headers.
+
+    Checks a prioritised list of header names used by OpenRouter and
+    compatible providers.  Returns None when no version header is found.
+
+    Args:
+        response_headers: Mapping of header name → value (case-insensitive
+                          lookup is performed internally).
+
+    Returns:
+        Model version string, or None.
+    """
+    if not response_headers:
+        return None
+    lower = {k.lower(): v for k, v in response_headers.items()}
+    for key in _VERSION_HEADER_KEYS:
+        if key in lower:
+            return lower[key]
+    return None

@@ -77,6 +77,9 @@ class AgentPerformanceMetrics:
     latency_p95_seconds: float = 0.0
     latency_p50_by_quality_tier: dict[str, float] = field(default_factory=dict)
 
+    # Per-version quality tracking (for regression detection)
+    quality_by_version: dict[str, list[float]] = field(default_factory=dict)
+
     # Temporal
     first_seen: datetime | None = None
     last_seen: datetime | None = None
@@ -397,6 +400,7 @@ class PerformanceAggregator:
             task_type = payload.get("task_type", None)
             cost = payload.get("cost", None)
             quality_score = payload.get("quality_score", None)
+            model_version = payload.get("model_version", None)
 
             # Never extract: prompt, output, content, agent identity
 
@@ -414,6 +418,10 @@ class PerformanceAggregator:
 
             if quality_score is not None:
                 quality_scores.append(float(quality_score))
+                if model_version:
+                    metrics.quality_by_version.setdefault(model_version, []).append(
+                        float(quality_score)
+                    )
 
             if elapsed and quality_score is not None:
                 lq_pairs.append((float(elapsed), float(quality_score)))
@@ -542,6 +550,44 @@ class PerformanceAggregator:
         if not candidates:
             return None
         return min(candidates, key=lambda ref: candidates[ref].avg_latency_seconds)
+
+    def get_regression_alerts(
+        self,
+        agent_refs: list[str] | None = None,
+        regression_threshold: float = 0.15,
+        warning_threshold: float = 0.07,
+        window: int = 10,
+    ) -> list:
+        """Run regression detection across all (or specified) agents.
+
+        Populates a RegressionDetector from each agent's quality_by_version
+        data and returns any alerts found.
+
+        Args:
+            agent_refs:           Restrict to these agents; None = all known.
+            regression_threshold: Fraction drop to trigger REGRESSION_DETECTED.
+            warning_threshold:    Fraction drop to trigger WARNING.
+            window:               Max tasks from the new version to evaluate.
+
+        Returns:
+            List of RegressionAlert objects (may be empty).
+        """
+        from src.broker.regression_detector import RegressionDetector
+
+        detector = RegressionDetector(
+            regression_threshold=regression_threshold,
+            warning_threshold=warning_threshold,
+            window=window,
+        )
+        all_metrics = self.get_all_agent_metrics()
+        for ref, m in all_metrics.items():
+            if agent_refs is not None and ref not in agent_refs:
+                continue
+            for version, scores in m.quality_by_version.items():
+                for score in scores:
+                    detector.record(ref, version, score)
+
+        return detector.check_all()
 
     @staticmethod
     def _percentile(data: list[float], p: float) -> float:
