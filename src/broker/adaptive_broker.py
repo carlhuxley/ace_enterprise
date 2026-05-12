@@ -65,6 +65,9 @@ class BrokerConfig:
     cost_quality_tradeoff: float = 0.5       # 0 = cheapest, 1 = best quality
     acceptable_quality_delta: float = 0.05   # max quality loss tolerated in BUDGET mode
 
+    # Latency-constrained routing
+    max_latency_seconds: float | None = None  # hard cap on avg latency; None = no limit
+
 
 class AdaptiveBroker:
     """Routes tasks to best agent based on historical performance."""
@@ -96,6 +99,10 @@ class AdaptiveBroker:
             score = self._calculate_score(metrics, task_type, complexity, profile)
             candidates.append((agent_ref, score))
 
+        candidates = self._filter_by_latency(candidates, all_metrics)
+        if not candidates:
+            return self._fallback_result(task_type, complexity)
+
         candidates = self._apply_routing_mode(candidates, all_metrics)
 
         candidates.sort(key=lambda x: x[1], reverse=True)
@@ -111,6 +118,29 @@ class AdaptiveBroker:
             task_type=task_type,
             complexity=complexity,
         )
+
+    def _filter_by_latency(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Remove candidates exceeding max_latency_seconds.
+
+        Agents with no latency history (avg_latency_seconds == 0) are kept —
+        absence of data is not evidence of slowness.  Falls back to the full
+        list if every agent exceeds the cap.
+        """
+        cap = self._config.max_latency_seconds
+        if cap is None:
+            return candidates
+
+        within = [
+            (ref, score)
+            for ref, score in candidates
+            if all_metrics[ref].avg_latency_seconds == 0
+            or all_metrics[ref].avg_latency_seconds <= cap
+        ]
+        return within if within else candidates
 
     def _apply_routing_mode(
         self,

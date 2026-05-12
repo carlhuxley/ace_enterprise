@@ -30,6 +30,18 @@ class ModelProfile:
 
 
 @dataclass
+class LatencyQualityReport:
+    """Latency-quality correlation summary for one agent."""
+
+    agent_ref: str
+    latency_quality_correlation: float | None  # Pearson r; None = insufficient data
+    latency_p50_seconds: float
+    latency_p95_seconds: float
+    latency_p50_by_quality_tier: dict[str, float]  # "low"|"mid"|"high" → p50 latency
+    sample_count: int
+
+
+@dataclass
 class AgentPerformanceMetrics:
     """Performance metrics for an agent (anonymized by agent_ref)."""
 
@@ -58,6 +70,12 @@ class AgentPerformanceMetrics:
     # Variance / consistency (from quality_score audit field)
     variance_coefficient: float = 0.0   # std_dev / mean of quality scores; 0 = no data
     consistency_rate: float = 1.0       # max(success_rate, 1-success_rate); 1 = no data
+
+    # Latency-quality correlation (requires both fields in audit events)
+    latency_quality_correlation: float | None = None  # Pearson r; None = insufficient data
+    latency_p50_seconds: float = 0.0
+    latency_p95_seconds: float = 0.0
+    latency_p50_by_quality_tier: dict[str, float] = field(default_factory=dict)
 
     # Temporal
     first_seen: datetime | None = None
@@ -349,8 +367,9 @@ class PerformanceAggregator:
         """
         metrics = AgentPerformanceMetrics(agent_ref=agent_ref)
 
-        latencies = []
+        latencies: list[float] = []
         quality_scores: list[float] = []
+        lq_pairs: list[tuple[float, float]] = []   # (latency, quality_score) when both present
         complexity_results: dict[int, list[bool]] = {}
         task_type_results: dict[str, list[bool]] = {}
 
@@ -396,6 +415,9 @@ class PerformanceAggregator:
             if quality_score is not None:
                 quality_scores.append(float(quality_score))
 
+            if elapsed and quality_score is not None:
+                lq_pairs.append((float(elapsed), float(quality_score)))
+
             # Track by complexity
             if complexity is not None:
                 if complexity not in complexity_results:
@@ -413,9 +435,34 @@ class PerformanceAggregator:
             metrics.avg_latency_seconds = sum(latencies) / len(latencies)
             metrics.min_latency_seconds = min(latencies)
             metrics.max_latency_seconds = max(latencies)
+            metrics.latency_p50_seconds = self._percentile(latencies, 50)
+            metrics.latency_p95_seconds = self._percentile(latencies, 95)
 
         if metrics.total_tasks > 0 and metrics.total_cost > 0:
             metrics.avg_cost_per_task = metrics.total_cost / metrics.total_tasks
+
+        # Latency-quality correlation and tier breakdown
+        if len(lq_pairs) >= 2:
+            lats = [p[0] for p in lq_pairs]
+            quals = [p[1] for p in lq_pairs]
+            try:
+                metrics.latency_quality_correlation = statistics.correlation(lats, quals)
+            except statistics.StatisticsError:
+                pass  # constant series → correlation undefined
+
+            tier_buckets: dict[str, list[float]] = {"low": [], "mid": [], "high": []}
+            for lat, q in lq_pairs:
+                if q < 40:
+                    tier_buckets["low"].append(lat)
+                elif q < 70:
+                    tier_buckets["mid"].append(lat)
+                else:
+                    tier_buckets["high"].append(lat)
+            metrics.latency_p50_by_quality_tier = {
+                tier: self._percentile(lats_in_tier, 50)
+                for tier, lats_in_tier in tier_buckets.items()
+                if lats_in_tier
+            }
 
         # Variance coefficient from quality scores
         if len(quality_scores) > 1:
@@ -439,6 +486,71 @@ class PerformanceAggregator:
                 metrics.success_by_task_type[ttype] = sum(results) / len(results)
 
         return metrics
+
+    # ------------------------------------------------------------------
+    # Latency-quality analysis
+    # ------------------------------------------------------------------
+
+    def get_latency_quality_report(self, agent_ref: str) -> LatencyQualityReport:
+        """Return a latency-quality correlation report for one agent."""
+        m = self.get_agent_metrics(agent_ref)
+        return LatencyQualityReport(
+            agent_ref=agent_ref,
+            latency_quality_correlation=m.latency_quality_correlation,
+            latency_p50_seconds=m.latency_p50_seconds,
+            latency_p95_seconds=m.latency_p95_seconds,
+            latency_p50_by_quality_tier=m.latency_p50_by_quality_tier,
+            sample_count=m.total_tasks,
+        )
+
+    def get_all_latency_quality_reports(self) -> dict[str, LatencyQualityReport]:
+        """Return latency-quality reports for every known agent."""
+        return {
+            ref: LatencyQualityReport(
+                agent_ref=ref,
+                latency_quality_correlation=m.latency_quality_correlation,
+                latency_p50_seconds=m.latency_p50_seconds,
+                latency_p95_seconds=m.latency_p95_seconds,
+                latency_p50_by_quality_tier=m.latency_p50_by_quality_tier,
+                sample_count=m.total_tasks,
+            )
+            for ref, m in self.get_all_agent_metrics().items()
+        }
+
+    def fastest_model_meeting_quality(
+        self,
+        min_quality: float,
+        agent_refs: list[str] | None = None,
+    ) -> str | None:
+        """Return the agent_ref with the lowest avg latency whose reliability
+        score (0-1) is at or above *min_quality*.
+
+        Args:
+            min_quality:  Minimum reliability_score threshold (0.0 – 1.0).
+            agent_refs:   Restrict search to these refs; None = all known agents.
+
+        Returns:
+            agent_ref of the fastest qualifying agent, or None if none qualify.
+        """
+        all_metrics = self.get_all_agent_metrics()
+        candidates = {
+            ref: m for ref, m in all_metrics.items()
+            if (agent_refs is None or ref in agent_refs)
+            and m.reliability_score >= min_quality
+            and m.avg_latency_seconds > 0
+        }
+        if not candidates:
+            return None
+        return min(candidates, key=lambda ref: candidates[ref].avg_latency_seconds)
+
+    @staticmethod
+    def _percentile(data: list[float], p: float) -> float:
+        """Return the p-th percentile of *data* (0 ≤ p ≤ 100)."""
+        if not data:
+            return 0.0
+        sorted_data = sorted(data)
+        idx = int(len(sorted_data) * p / 100)
+        return sorted_data[min(idx, len(sorted_data) - 1)]
 
     def _is_cache_valid(self) -> bool:
         """Check if cache is still valid."""
