@@ -21,8 +21,9 @@ import logging
 from dataclasses import dataclass
 
 from src.broker.performance_aggregator import (
-    PerformanceAggregator,
     AgentPerformanceMetrics,
+    ModelProfile,
+    PerformanceAggregator,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,9 +76,12 @@ class AdaptiveBroker:
         if not all_metrics:
             return self._fallback_result(task_type, complexity)
 
+        profiles = self._aggregator.get_all_model_profiles()
+
         candidates = []
         for agent_ref, metrics in all_metrics.items():
-            score = self._calculate_score(metrics, task_type, complexity)
+            profile = profiles.get(agent_ref)
+            score = self._calculate_score(metrics, task_type, complexity, profile)
             candidates.append((agent_ref, score))
 
         candidates.sort(key=lambda x: x[1], reverse=True)
@@ -99,8 +103,12 @@ class AdaptiveBroker:
         metrics: AgentPerformanceMetrics,
         task_type: str | None,
         complexity: int | None,
+        profile: ModelProfile | None = None,
     ) -> float:
-        """Calculate routing score for an agent."""
+        """Calculate routing score for an agent.
+
+        Profile adjustment: +10% for domain strengths, -10% for weaknesses.
+        """
         config = self._config
         base_score = metrics.reliability_score
 
@@ -121,6 +129,13 @@ class AdaptiveBroker:
             complexity_component = base_score * 0.5 * config.complexity_weight
 
         score = overall_component + task_component + complexity_component
+
+        if profile and task_type:
+            if task_type in profile.strengths:
+                score *= 1.10
+            elif task_type in profile.weaknesses:
+                score *= 0.90
+
         return min(1.0, max(0.0, score))
 
     def _get_verdict(self, confidence: float) -> str:

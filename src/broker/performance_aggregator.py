@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class ModelProfile:
+    """Strength/weakness profile derived from per-model task-type metrics."""
+
+    model_id: str
+    strengths: list[str]          # task types where rate > avg + 0.10
+    weaknesses: list[str]         # task types where rate < avg - 0.10
+    optimal_complexity: int | None  # complexity level with best success rate
+    avoid_complexity: int | None    # complexity level with worst success rate
+
+
+@dataclass
 class AgentPerformanceMetrics:
     """Performance metrics for an agent (anonymized by agent_ref)."""
 
@@ -226,6 +237,54 @@ class PerformanceAggregator:
         candidates.sort(key=lambda x: x[1], reverse=True)
 
         return candidates
+
+    def build_model_profile(
+        self,
+        agent_ref: str,
+        metrics: AgentPerformanceMetrics,
+    ) -> ModelProfile:
+        """Derive a ModelProfile from pre-computed metrics.
+
+        Strengths: task types where success rate exceeds the agent's own average
+        by more than 10 percentage points.
+        Weaknesses: task types where rate falls more than 10pp below average.
+        """
+        rates = metrics.success_by_task_type
+        if rates:
+            avg = sum(rates.values()) / len(rates)
+            strengths = [t for t, r in rates.items() if r > avg + 0.10]
+            weaknesses = [t for t, r in rates.items() if r < avg - 0.10]
+        else:
+            strengths = []
+            weaknesses = []
+
+        complexity_rates = metrics.success_by_complexity
+        if complexity_rates:
+            optimal_complexity = max(complexity_rates, key=complexity_rates.get)
+            avoid_complexity = min(complexity_rates, key=complexity_rates.get)
+        else:
+            optimal_complexity = None
+            avoid_complexity = None
+
+        return ModelProfile(
+            model_id=agent_ref,
+            strengths=strengths,
+            weaknesses=weaknesses,
+            optimal_complexity=optimal_complexity,
+            avoid_complexity=avoid_complexity,
+        )
+
+    def get_model_profile(self, agent_ref: str) -> ModelProfile:
+        """Compute the ModelProfile for one agent from live metrics."""
+        metrics = self.get_agent_metrics(agent_ref)
+        return self.build_model_profile(agent_ref, metrics)
+
+    def get_all_model_profiles(self) -> dict[str, ModelProfile]:
+        """Compute ModelProfiles for every known agent."""
+        return {
+            ref: self.build_model_profile(ref, m)
+            for ref, m in self.get_all_agent_metrics().items()
+        }
 
     def _aggregate_metrics(
         self,
