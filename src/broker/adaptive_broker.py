@@ -42,6 +42,12 @@ class RoutingResult:
     complexity: int | None = None
 
 
+ROUTING_BEST_QUALITY = "BEST_QUALITY"
+ROUTING_BUDGET = "BUDGET"
+ROUTING_BALANCED = "BALANCED"
+ROUTING_PARETO = "PARETO"
+
+
 @dataclass
 class BrokerConfig:
     """Configuration for AdaptiveBroker."""
@@ -52,6 +58,12 @@ class BrokerConfig:
     complexity_weight: float = 0.3
     overall_weight: float = 0.4
     fallback_agent: str | None = None
+
+    # Cost-aware routing
+    routing_mode: str = ROUTING_BEST_QUALITY
+    max_cost_per_task: float | None = None   # hard cap; None = no limit
+    cost_quality_tradeoff: float = 0.5       # 0 = cheapest, 1 = best quality
+    acceptable_quality_delta: float = 0.05   # max quality loss tolerated in BUDGET mode
 
 
 class AdaptiveBroker:
@@ -70,7 +82,7 @@ class AdaptiveBroker:
         task_type: str | None = None,
         complexity: int | None = None,
     ) -> RoutingResult:
-        """Route task to best agent based on performance history."""
+        """Route task to best agent based on performance history and routing mode."""
         all_metrics = self._aggregator.get_all_agent_metrics()
 
         if not all_metrics:
@@ -83,6 +95,8 @@ class AdaptiveBroker:
             profile = profiles.get(agent_ref)
             score = self._calculate_score(metrics, task_type, complexity, profile)
             candidates.append((agent_ref, score))
+
+        candidates = self._apply_routing_mode(candidates, all_metrics)
 
         candidates.sort(key=lambda x: x[1], reverse=True)
         selected_agent, confidence = candidates[0]
@@ -97,6 +111,114 @@ class AdaptiveBroker:
             task_type=task_type,
             complexity=complexity,
         )
+
+    def _apply_routing_mode(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Apply cost-aware routing mode to re-score or filter candidates."""
+        mode = self._config.routing_mode
+
+        if mode == ROUTING_BEST_QUALITY:
+            return candidates
+
+        if mode == ROUTING_BUDGET:
+            return self._apply_budget_mode(candidates, all_metrics)
+
+        if mode == ROUTING_BALANCED:
+            return self._apply_balanced_mode(candidates, all_metrics)
+
+        if mode == ROUTING_PARETO:
+            return self._apply_pareto_mode(candidates, all_metrics)
+
+        return candidates
+
+    def _apply_budget_mode(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Filter to agents within budget; fall back to cheapest if all exceed cap."""
+        cap = self._config.max_cost_per_task
+        if cap is None:
+            return candidates
+
+        within_budget = [
+            (ref, score)
+            for ref, score in candidates
+            if all_metrics[ref].avg_cost_per_task <= cap
+        ]
+
+        if within_budget:
+            return within_budget
+
+        # All exceed cap — return cheapest as sole candidate with zero score
+        cheapest = min(candidates, key=lambda x: all_metrics[x[0]].avg_cost_per_task)
+        return [(cheapest[0], 0.0)]
+
+    def _apply_balanced_mode(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Re-score as weighted combo of quality and (1 - normalized_cost)."""
+        costs = [all_metrics[ref].avg_cost_per_task for ref, _ in candidates]
+        max_cost = max(costs) if costs else 0.0
+
+        q_weight = self._config.cost_quality_tradeoff
+        c_weight = 1.0 - q_weight
+
+        result = []
+        for ref, quality_score in candidates:
+            cost = all_metrics[ref].avg_cost_per_task
+            cost_score = 1.0 - (cost / max_cost) if max_cost > 0 else 1.0
+            combined = q_weight * quality_score + c_weight * cost_score
+            result.append((ref, min(1.0, max(0.0, combined))))
+        return result
+
+    def _apply_pareto_mode(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Keep only Pareto-optimal agents, then score by cost_quality_tradeoff."""
+        frontier = self._get_pareto_frontier(candidates, all_metrics)
+
+        costs = [all_metrics[ref].avg_cost_per_task for ref, _ in frontier]
+        max_cost = max(costs) if costs else 0.0
+
+        q_weight = self._config.cost_quality_tradeoff
+        c_weight = 1.0 - q_weight
+
+        result = []
+        for ref, quality_score in frontier:
+            cost = all_metrics[ref].avg_cost_per_task
+            cost_score = 1.0 - (cost / max_cost) if max_cost > 0 else 1.0
+            combined = q_weight * quality_score + c_weight * cost_score
+            result.append((ref, min(1.0, max(0.0, combined))))
+        return result
+
+    def _get_pareto_frontier(
+        self,
+        candidates: list[tuple[str, float]],
+        all_metrics: dict,
+    ) -> list[tuple[str, float]]:
+        """Return non-dominated agents (higher quality, lower cost = better)."""
+        frontier = []
+        for ref, quality in candidates:
+            cost = all_metrics[ref].avg_cost_per_task
+            dominated = any(
+                other_quality >= quality and other_cost <= cost and (
+                    other_quality > quality or other_cost < cost
+                )
+                for other_ref, other_quality in candidates
+                if other_ref != ref
+                for other_cost in [all_metrics[other_ref].avg_cost_per_task]
+            )
+            if not dominated:
+                frontier.append((ref, quality))
+        return frontier
 
     def _calculate_score(
         self,

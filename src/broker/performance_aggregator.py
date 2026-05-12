@@ -324,6 +324,7 @@ class PerformanceAggregator:
             elapsed = payload.get("elapsed_seconds", 0)
             complexity = payload.get("complexity", None)
             task_type = payload.get("task_type", None)
+            cost = payload.get("cost", None)
 
             # Never extract: prompt, output, content, agent identity
 
@@ -335,6 +336,9 @@ class PerformanceAggregator:
 
             if elapsed:
                 latencies.append(elapsed)
+
+            if cost is not None:
+                metrics.total_cost += cost
 
             # Track by complexity
             if complexity is not None:
@@ -353,6 +357,9 @@ class PerformanceAggregator:
             metrics.avg_latency_seconds = sum(latencies) / len(latencies)
             metrics.min_latency_seconds = min(latencies)
             metrics.max_latency_seconds = max(latencies)
+
+        if metrics.total_tasks > 0 and metrics.total_cost > 0:
+            metrics.avg_cost_per_task = metrics.total_cost / metrics.total_tasks
 
         # Compute success rates by complexity
         for level, results in complexity_results.items():
