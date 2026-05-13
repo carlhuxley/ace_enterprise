@@ -121,7 +121,15 @@ class RedundancyPreChecker:
             operation_overlap = proposed_operations & existing_operations
 
             if operation_overlap:
-                # Same operation being tested and no edge case differentiation
+                # Same operation — but only redundant if the subject/entity also overlaps.
+                # "add plant" vs "add structural_asset" are different behaviors despite
+                # sharing the "add" verb.
+                proposed_subject = proposed_normalized - self._operation_keywords
+                existing_subject = existing_normalized - self._operation_keywords
+                subject_overlap = proposed_subject & existing_subject
+                if not subject_overlap:
+                    # Different entities: same verb, distinct behavior
+                    continue
                 operation = next(iter(operation_overlap))
                 return RedundancyResult(
                     is_redundant=True,
@@ -154,7 +162,11 @@ class RedundancyPreChecker:
             for word in words:
                 # Remove common prefixes/suffixes
                 word = word.strip('()[]{}"\',')
-                if len(word) > 2 and word not in {'test', 'assert', 'that', 'the', 'and', 'for', 'with'}:
+                if len(word) > 2 and word not in {
+                'test', 'assert', 'that', 'the', 'and', 'for', 'with',
+                'can', 'should', 'will', 'when', 'given', 'then', 'have',
+                'has', 'been', 'into', 'from', 'its', 'are', 'not',
+            }:
                     keywords.add(word)
         return keywords
 
