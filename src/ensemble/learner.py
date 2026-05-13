@@ -934,6 +934,16 @@ Your reconsidered vote:"""
             logger.warning(f"Proprietary provider '{provider}' — tagging bullets as proprietary")
             return "proprietary"
 
+        # OpenRouter: a gateway — determine license from model name prefix
+        if provider == "openrouter":
+            model_lower = model.lower()
+            if any(p in model_lower for p in ["anthropic/", "openai/", "google/", "cohere/"]):
+                return "proprietary"
+            if any(p in model_lower for p in ["qwen/", "mistral/", "meta-llama/", "deepseek/"]):
+                return "apache-2.0"
+            # Unknown model routed through openrouter
+            return "open-source-unknown"
+
         # Open-source models with permissive licenses
         if provider in ["ollama", "vllm", "togetherai"]:
             # Map common open-source models to their licenses
@@ -961,7 +971,7 @@ Your reconsidered vote:"""
         # Unknown provider - raise error for safety
         raise ValueError(
             f"Unknown provider '{provider}'. "
-            f"Allowed providers: ollama, vllm, deepseek, togetherai"
+            f"Allowed providers: ollama, vllm, deepseek, togetherai, openrouter"
         )
 
     def add_approved_bullets_to_playbook(

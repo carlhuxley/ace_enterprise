@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     api_version: str = "0.1.0"
     api_description: str = "Agentic Context Engineering for Production LLM Applications"
 
-    # Database
-    database_url: PostgresDsn = Field(
+    # Database — accepts any SQLAlchemy URL (postgresql+asyncpg, sqlite, etc.)
+    database_url: str = Field(
         default="postgresql+asyncpg://ace_user:ace_password@localhost:5432/ace_enterprise"
     )
     database_pool_size: int = 20
@@ -145,8 +145,7 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def validate_database_url(cls, v: PostgresDsn) -> str:
-        """Convert PostgresDsn to string"""
+    def validate_database_url(cls, v: str) -> str:
         return str(v)
 
     @field_validator("redis_url")
