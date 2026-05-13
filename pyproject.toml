@@ -115,3 +115,16 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "packages/ace-core",
+    "packages/ace-storage",
+    "packages/ace-audit",
+    "packages/ace-playbook",
+    "packages/ace-ensemble",
+    "packages/ace-tdd",
+    "packages/ace-contracts",
+    "packages/ace-ml",
+    "packages/ace-mcp",
+]

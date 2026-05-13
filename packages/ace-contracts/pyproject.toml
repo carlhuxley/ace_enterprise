@@ -1,0 +1,21 @@
+[project]
+name = "ace-contracts"
+version = "0.1.0"
+description = "ACE contracts: contract-driven development, module architects, and TDD builders"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "ace-core>=0.1.0",
+    "ace-audit>=0.1.0",
+]
+
+[tool.uv.sources]
+ace-core = { workspace = true }
+ace-audit = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

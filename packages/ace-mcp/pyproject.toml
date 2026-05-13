@@ -1,0 +1,32 @@
+[project]
+name = "ace-mcp"
+version = "0.1.0"
+description = "ACE MCP: Model Context Protocol server for agent ecosystem integration"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "ace-core>=0.1.0",
+    "ace-storage>=0.1.0",
+    "ace-audit>=0.1.0",
+    "ace-playbook>=0.1.0",
+    "ace-tdd>=0.1.0",
+    "ace-ensemble>=0.1.0",
+]
+
+[tool.uv.sources]
+ace-core = { workspace = true }
+ace-storage = { workspace = true }
+ace-audit = { workspace = true }
+ace-playbook = { workspace = true }
+ace-tdd = { workspace = true }
+ace-ensemble = { workspace = true }
+
+[project.optional-dependencies]
+server = ["mcp>=1.0.0"]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

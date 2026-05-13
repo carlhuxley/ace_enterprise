@@ -1,0 +1,23 @@
+[project]
+name = "ace-ensemble"
+version = "0.1.0"
+description = "ACE ensemble: multi-model consensus, voting strategies, and ensemble learning"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "ace-core>=0.1.0",
+    "ace-storage>=0.1.0",
+    "ace-playbook>=0.1.0",
+]
+
+[tool.uv.sources]
+ace-core = { workspace = true }
+ace-storage = { workspace = true }
+ace-playbook = { workspace = true }
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
