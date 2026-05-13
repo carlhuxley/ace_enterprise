@@ -19,6 +19,15 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Sentinel returned by _get_next_increment when the LLM explicitly says COMPLETE.
+# None means a parse error — skip the cycle and keep going.
+_COMPLETE = object()
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip LLM markdown formatting artifacts from a parsed increment field."""
+    return text.strip().strip("*`_").strip()
+
 from src.utils.code_extraction import extract_code
 from src.utils.context_map import ContextMap
 from src.agents.redundancy_checker import (
@@ -408,10 +417,15 @@ class AutonomousTDDAgent:
                 gherkin_scenarios=gherkin_scenarios,
             )
 
-            # Check if requirement is satisfied
-            if increment is None:
+            # Check if requirement is satisfied (LLM explicitly said COMPLETE)
+            if increment is _COMPLETE:
                 logger.info(f"\n✅ Requirement satisfied after {cycle_number - 1} cycles")
                 break
+
+            # Parse error — skip this cycle, don't treat as completion
+            if increment is None:
+                logger.warning("  ⚠️  Could not parse next increment, skipping cycle")
+                continue
 
             logger.info(f"  → Next test: {increment.test_name}")
             logger.info(f"  → {increment.description}")
@@ -955,7 +969,7 @@ Output EITHER:
         # Check if complete
         if "COMPLETE" in response.upper() and "|" not in response:
             logger.info("  ✓ LLM determined requirement is satisfied")
-            return None
+            return _COMPLETE
 
         # Parse response
         lines = [
@@ -965,15 +979,17 @@ Output EITHER:
         ]
         if not lines:
             logger.warning(f"Could not parse next increment from: {response}")
-            return None
+            return None  # parse error — caller skips this cycle
 
         line = lines[0]  # Take first valid line
         parts = [p.strip() for p in line.split("|")]
         if len(parts) != 4:
             logger.warning(f"Invalid increment format: {line}")
-            return None
+            return None  # parse error — caller skips this cycle
 
-        test_name, description, test_file, impl_file = parts
+        test_name, description, test_file, impl_file = [
+            _strip_markdown(p) for p in parts
+        ]
 
         # Ensure paths are under test_dir and use smart placement for impl
         test_path = self.test_dir / Path(test_file).name
