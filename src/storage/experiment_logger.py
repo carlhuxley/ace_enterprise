@@ -36,6 +36,10 @@ class ExperimentLogger:
         """
         self.playbook_version = playbook_version
         self.repo = repository or PlaybookRepository()
+        try:
+            self.repo.create_tables()
+        except Exception as exc:
+            logger.warning(f"ExperimentLogger: could not ensure tables exist: {exc}")
 
     def log_experiment(
         self,
@@ -113,6 +117,7 @@ class ExperimentLogger:
         failure_lesson: str | None = None,
         retry_count: int = 0,
         human_intervention: bool = False,
+        result_override: str | None = None,
     ) -> ExperimentLogModel:
         """
         Log a TDD cycle (specialized wrapper for TDD experiments).
@@ -147,7 +152,9 @@ class ExperimentLogger:
         experiment_id = f"tdd_{playbook_id}_cycle_{cycle_number}"
 
         # Determine result
-        if green_passed and not red_passed:
+        if result_override is not None:
+            result = result_override
+        elif green_passed and not red_passed:
             result = "SUCCESS"  # Proper TDD: red then green
         elif not green_passed:
             result = "FAILED"  # Couldn't get to green

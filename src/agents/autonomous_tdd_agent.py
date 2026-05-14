@@ -1003,6 +1003,51 @@ Output EITHER:
             implementation_file=impl_path,
         )
 
+    def _log_cycle(
+        self,
+        *,
+        increment: "TestIncrement",
+        cycle_number: int,
+        test_code: str,
+        impl_code: str,
+        red_result: "TestResult | None",
+        green_result: "TestResult | None",
+        learned_bullets: list,
+        latest_bullets_used: list,
+        result: str,  # "SUCCESS" | "FAILED" | "SKIPPED" | "ERROR"
+        skip_reason: str = "",
+        retry_count: int = 0,
+    ) -> None:
+        """Log a cycle outcome to experiment_logs regardless of success/failure/skip."""
+        _no_result = TestResult(passed=False, failed=False, output="phase not reached")
+        try:
+            self.experiment_logger.log_tdd_cycle(
+                cycle_number=cycle_number,
+                requirement=increment.description,
+                test_name=increment.test_name,
+                test_code=test_code,
+                implementation_code=impl_code,
+                red_passed=(red_result is not None and not red_result.failed),
+                green_passed=(green_result is not None and green_result.all_passed),
+                red_output=(red_result or _no_result).output[:500] if (red_result or _no_result).output else "",
+                green_output=(green_result or _no_result).output[:500] if (green_result or _no_result).output else "",
+                learned_bullets=[
+                    {"content": b.content, "section": b.section, "tags": b.tags or []}
+                    for b in learned_bullets
+                ],
+                playbook_id=self.playbook_id,
+                retrieved_bullet_ids=latest_bullets_used,
+                actual_model=self.llm_client.model,
+                requested_model=self.llm_client.model,
+                provider=self.llm_client.provider,
+                retry_count=retry_count,
+                failure_category=skip_reason or None,
+                result_override=result,
+            )
+            logger.info(f"  📊 Cycle {cycle_number} logged ({result})")
+        except Exception as exc:
+            logger.warning(f"  ⚠️  Failed to log cycle {cycle_number}: {exc}")
+
     def _tdd_cycle(self, increment: TestIncrement, cycle_number: int) -> CycleResult:
         """
         Execute one TDD cycle: RED → GREEN → REFACTOR → LEARN.
@@ -1014,359 +1059,342 @@ Output EITHER:
         Returns:
             CycleResult with all artifacts
         """
-        # PRE-CHECK: Detect redundancy BEFORE writing test code
-        existing_tests = self._build_existing_tests_list()
-        proposed = ProposedTest(name=increment.test_name, description=increment.description)
-        redundancy_result = self.redundancy_checker.check(existing_tests, proposed)
+        # State accumulated through phases so the finally block can always log.
+        _test_code: str = ""
+        _impl_code: str = ""
+        _red_result: "TestResult | None" = None
+        _green_result: "TestResult | None" = None
+        _learned_bullets: list = []
+        _latest_bullets_used: list[str] = []
+        _cycle_outcome: str = "SKIPPED"
+        _skip_reason: str = ""
+        _retry_count: int = 0
 
-        if redundancy_result.is_redundant:
-            logger.info(
-                f"  ⏭️  PRE-CHECK: Skipping redundant test (confidence: {redundancy_result.confidence:.0%})"
-            )
-            logger.info(f"      Reason: {redundancy_result.reason}")
-
-            # Return skipped cycle without writing any code
-            return CycleResult(
-                increment=increment,
-                test_code="",
-                implementation_code="",
-                red_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
-                green_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
-                refactored=False,
-                learned_bullets=[],
-                cycle_number=cycle_number,
-                skipped=True,
-                skip_reason=f"Pre-check redundancy: {redundancy_result.reason}",
-            )
-
-        # RED: Write failing test
-        logger.info("  🔴 RED: Writing failing test...")
         try:
-            test_code = self._write_test(increment, cycle_number)
-        except ValueError as exc:
-            logger.warning(f"  ⏭️  Skipping cycle — LLM could not generate a valid test: {exc}")
-            return CycleResult(
-                increment=increment,
-                test_code="",
-                implementation_code="",
-                red_result=TestResult(passed=True, failed=False, output=str(exc)),
-                green_result=TestResult(passed=True, failed=False, output=str(exc)),
-                refactored=False,
-                learned_bullets=[],
-                cycle_number=cycle_number,
-                skipped=True,
-                skip_reason=f"LLM test generation failed: {exc}",
-            )
-        logger.info(f"      Created: {increment.test_file.relative_to(self.project_root)}")
+            # PRE-CHECK: Detect redundancy BEFORE writing test code
+            existing_tests = self._build_existing_tests_list()
+            proposed = ProposedTest(name=increment.test_name, description=increment.description)
+            redundancy_result = self.redundancy_checker.check(existing_tests, proposed)
 
-        red_result = self._run_tests()
-
-        # RED PHASE REFINEMENT: If test passes, refine it to make it fail (proper TDD)
-        MAX_RED_REFINEMENTS = 3
-        refinement_attempt = 0
-
-        while not red_result.failed and refinement_attempt < MAX_RED_REFINEMENTS:
-            refinement_attempt += 1
-
-            logger.info(
-                f"  ⚠️  Test passed unexpectedly (attempt {refinement_attempt}/{MAX_RED_REFINEMENTS})"
-            )
-            logger.info("  🧠 LEARN: Analyzing redundancy pattern...")
-
-            # Analyze why test is redundant
-            redundancy_bullet = self._analyze_redundancy_pattern(increment, test_code)
-
-            # Store bullet in playbook for future learning (only on first refinement)
-            if refinement_attempt == 1:
-                from src.storage.schemas import BulletCreate
-
-                bullet_data = BulletCreate(
-                    content=redundancy_bullet,
-                    section="strategies_and_hard_rules",  # Anti-patterns are strategic rules
-                    tags=["test_redundancy", "anti_pattern", "tdd"],
-                    created_by_model=self.llm_client.model,
-                    model_provider=self.llm_client.provider,
-                    license_type=self._get_license_type(
-                        self.llm_client.provider, self.llm_client.model
-                    ),
-                    # Low initial confidence - needs validation via feedback
-                    confidence_score=0.3,
-                    applicable_domains=["tdd"],
-                    project_ids=[str(self.project_root)],
-                )
-                if self.playbook_manager is not None:
-                    self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
-                    logger.info("      Stored redundancy pattern")
-
-            # Refine test to make it more specific/strict
-            logger.info("  🔧 REFINING: Strengthening test to make it fail...")
-            refined_test_code = self._refine_test_to_fail(
-                increment=increment,
-                test_code=test_code,
-                redundancy_analysis=redundancy_bullet,
-                attempt=refinement_attempt,
-            )
-
-            # Update test code and test_functions array
-            test_code = refined_test_code
-            test_file_key = str(increment.test_file)
-
-            # Update the stored test function
-            if test_file_key in self.test_functions:
-                for func_data in self.test_functions[test_file_key]:
-                    if func_data["name"] == increment.test_name:
-                        func_data["code"] = refined_test_code
-                        break
-
-            # Reassemble test file with refined test
-            self._assemble_test_file(increment.test_file, increment.implementation_file)
-            logger.info("      ✓ Test refined and reloaded")
-
-            # Retry RED phase with refined test
-            red_result = self._run_tests()
-
-        # After refinement loop, check if test finally fails
-        if not red_result.failed:
-            skip_reason = (
-                f"Test passed after {MAX_RED_REFINEMENTS} refinement attempts, "
-                f"indicating the behavior is already fully implemented."
-            )
-            logger.info(f"  ⏭️  SKIPPING: {skip_reason}")
-            logger.info("  ✓ Moving to next increment...")
-
-            # Return a skipped cycle result
-            return CycleResult(
-                increment=increment,
-                test_code=test_code,
-                implementation_code="",  # No new implementation needed
-                red_result=red_result,
-                green_result=red_result,  # Reuse red_result since we didn't run GREEN
-                refactored=False,
-                learned_bullets=[],
-                cycle_number=cycle_number,
-                skipped=True,
-                skip_reason=skip_reason,
-            )
-
-        logger.info("  ⚙️  Running tests... FAILED (expected)")
-
-        # GREEN: Write minimal code (with retry logic and in-loop learning)
-        logger.info("  🟢 GREEN: Writing minimal code...")
-        MAX_GREEN_RETRIES = 3
-        green_result = None
-        previous_impl_code = None
-        latest_bullets_used: list[str] = []
-
-        # Snapshot passing tests before GREEN writes so we can detect regressions.
-        # Only meaningful when the implementation file already exists (modifying, not creating).
-        _impl_file_existed = increment.implementation_file.exists()
-        _impl_file_original: str | None = (
-            increment.implementation_file.read_text() if _impl_file_existed else None
-        )
-
-        def _passing_test_ids(result: TestResult) -> set[str]:
-            """Extract the set of test node IDs that passed from pytest -v output."""
-            ids = set()
-            for line in (result.output or "").splitlines():
-                if " PASSED" in line:
-                    node_id = line.split(" PASSED")[0].strip()
-                    if "::" in node_id:
-                        ids.add(node_id)
-            return ids
-
-        for attempt in range(1, MAX_GREEN_RETRIES + 1):
-            if attempt > 1:
+            if redundancy_result.is_redundant:
                 logger.info(
-                    f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)..."
+                    f"  ⏭️  PRE-CHECK: Skipping redundant test (confidence: {redundancy_result.confidence:.0%})"
                 )
+                logger.info(f"      Reason: {redundancy_result.reason}")
 
-                # LEARN from previous failure BEFORE next attempt
-                logger.info(f"  🧠 LEARN: Analyzing attempt {attempt - 1} failure...")
-                failure_analysis = self._analyze_green_failure(
+                _skip_reason = f"Pre-check redundancy: {redundancy_result.reason}"
+                # Return skipped cycle without writing any code
+                return CycleResult(
                     increment=increment,
-                    test_code=test_code,
-                    impl_code=previous_impl_code,
-                    error=green_result.error,
-                    attempts=attempt - 1,
+                    test_code="",
+                    implementation_code="",
+                    red_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
+                    green_result=TestResult(passed=True, failed=False, output="Pre-check: redundant"),
+                    refactored=False,
+                    learned_bullets=[],
+                    cycle_number=cycle_number,
+                    skipped=True,
+                    skip_reason=_skip_reason,
                 )
 
-                if failure_analysis and self.playbook_manager is not None:
-                    # Route through Curator so redundancy checking and token
-                    # budget enforcement apply, rather than bypassing via add_bullet().
-                    curator_output = CuratorOutput(
-                        delta_bullets=[DeltaBullet(
-                            section="troubleshooting",
-                            content=failure_analysis["bullet"],
-                            tags=failure_analysis["tags"],
-                        )],
-                        reasoning=failure_analysis["summary"],
+            # RED: Write failing test
+            logger.info("  🔴 RED: Writing failing test...")
+            try:
+                _test_code = self._write_test(increment, cycle_number)
+            except ValueError as exc:
+                logger.warning(f"  ⏭️  Skipping cycle — LLM could not generate a valid test: {exc}")
+                _skip_reason = f"LLM test generation failed: {exc}"
+                return CycleResult(
+                    increment=increment,
+                    test_code="",
+                    implementation_code="",
+                    red_result=TestResult(passed=True, failed=False, output=str(exc)),
+                    green_result=TestResult(passed=True, failed=False, output=str(exc)),
+                    refactored=False,
+                    learned_bullets=[],
+                    cycle_number=cycle_number,
+                    skipped=True,
+                    skip_reason=_skip_reason,
+                )
+            logger.info(f"      Created: {increment.test_file.relative_to(self.project_root)}")
+
+            _red_result = self._run_tests()
+            red_result = _red_result
+
+            # RED PHASE REFINEMENT: If test passes, refine it to make it fail (proper TDD)
+            MAX_RED_REFINEMENTS = 3
+            refinement_attempt = 0
+
+            while not _red_result.failed and refinement_attempt < MAX_RED_REFINEMENTS:
+                refinement_attempt += 1
+
+                logger.info(
+                    f"  ⚠️  Test passed unexpectedly (attempt {refinement_attempt}/{MAX_RED_REFINEMENTS})"
+                )
+                logger.info("  🧠 LEARN: Analyzing redundancy pattern...")
+
+                # Analyze why test is redundant
+                redundancy_bullet = self._analyze_redundancy_pattern(increment, _test_code)
+
+                # Store bullet in playbook for future learning (only on first refinement)
+                if refinement_attempt == 1:
+                    from src.storage.schemas import BulletCreate
+
+                    bullet_data = BulletCreate(
+                        content=redundancy_bullet,
+                        section="strategies_and_hard_rules",
+                        tags=["test_redundancy", "anti_pattern", "tdd"],
+                        created_by_model=self.llm_client.model,
+                        model_provider=self.llm_client.provider,
+                        license_type=self._get_license_type(
+                            self.llm_client.provider, self.llm_client.model
+                        ),
+                        confidence_score=0.3,
+                        applicable_domains=["tdd"],
+                        project_ids=[str(self.project_root)],
                     )
-                    self.curator.apply_updates(self.playbook_id, curator_output)
-                    logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
+                    if self.playbook_manager is not None:
+                        self.playbook_manager.add_bullet(self.playbook_id, bullet_data)
+                        logger.info("      Stored redundancy pattern")
 
-                    # If test correction is suggested, APPLY IT automatically
-                    if failure_analysis.get("test_correction"):
-                        logger.info("      🔧 Applying test correction...")
-                        corrected = self._apply_test_correction(
-                            increment.test_file,
-                            increment.implementation_file,
-                            increment.test_name,
-                            test_code,
-                            failure_analysis["test_correction"],
-                            cycle_number,
-                        )
-                        if corrected:
-                            test_code = increment.test_file.read_text()  # Reload corrected test
-                            logger.info("      ✓ Test corrected and reloaded")
-                        else:
-                            logger.warning(
-                                "      ⚠️  Test correction failed, continuing with original test"
-                            )
+                # Refine test to make it more specific/strict
+                logger.info("  🔧 REFINING: Strengthening test to make it fail...")
+                refined_test_code = self._refine_test_to_fail(
+                    increment=increment,
+                    test_code=_test_code,
+                    redundancy_analysis=redundancy_bullet,
+                    attempt=refinement_attempt,
+                )
 
-            impl_code, latest_bullets_used = self._write_minimal_code(
-                increment, red_result, previous_failure=green_result, attempt=attempt
+                _test_code = refined_test_code
+                test_file_key = str(increment.test_file)
+
+                if test_file_key in self.test_functions:
+                    for func_data in self.test_functions[test_file_key]:
+                        if func_data["name"] == increment.test_name:
+                            func_data["code"] = refined_test_code
+                            break
+
+                self._assemble_test_file(increment.test_file, increment.implementation_file)
+                logger.info("      ✓ Test refined and reloaded")
+
+                _red_result = self._run_tests()
+
+            # After refinement loop, check if test finally fails
+            if not _red_result.failed:
+                _skip_reason = (
+                    f"Test passed after {MAX_RED_REFINEMENTS} refinement attempts, "
+                    f"indicating the behavior is already fully implemented."
+                )
+                logger.info(f"  ⏭️  SKIPPING: {_skip_reason}")
+                logger.info("  ✓ Moving to next increment...")
+
+                return CycleResult(
+                    increment=increment,
+                    test_code=_test_code,
+                    implementation_code="",
+                    red_result=_red_result,
+                    green_result=_red_result,
+                    refactored=False,
+                    learned_bullets=[],
+                    cycle_number=cycle_number,
+                    skipped=True,
+                    skip_reason=_skip_reason,
+                )
+
+            logger.info("  ⚙️  Running tests... FAILED (expected)")
+
+            # GREEN: Write minimal code (with retry logic and in-loop learning)
+            logger.info("  🟢 GREEN: Writing minimal code...")
+            MAX_GREEN_RETRIES = 3
+            previous_impl_code = None
+
+            # Snapshot passing tests before GREEN writes so we can detect regressions.
+            _impl_file_existed = increment.implementation_file.exists()
+            _impl_file_original: str | None = (
+                increment.implementation_file.read_text() if _impl_file_existed else None
             )
-            previous_impl_code = impl_code  # Save for learning if this attempt fails
-            logger.info(
-                f"      Created: {increment.implementation_file.relative_to(self.project_root)}"
-            )
 
-            # ATDD: No triangulation enforcement - allow comprehensive implementations
-            # (Triangulation validation removed - conflicts with contract-based testing)
+            def _passing_test_ids(result: TestResult) -> set[str]:
+                ids = set()
+                for line in (result.output or "").splitlines():
+                    if " PASSED" in line:
+                        node_id = line.split(" PASSED")[0].strip()
+                        if "::" in node_id:
+                            ids.add(node_id)
+                return ids
 
-            green_result = self._run_tests()
-            if green_result.all_passed:
-                logger.info("  ⚙️  Running tests... PASSED ✓")
-                break
-
-            # Regression check: if we modified an existing file and existing tests
-            # now fail, roll back the file and skip this cycle rather than retrying.
-            if _impl_file_existed and _impl_file_original is not None:
-                red_passing = _passing_test_ids(red_result)
-                green_passing = _passing_test_ids(green_result)
-                regressions = red_passing - green_passing
-                if regressions:
-                    logger.warning(
-                        f"  🔙 REGRESSION DETECTED — {len(regressions)} previously passing "
-                        f"test(s) now fail: {', '.join(sorted(regressions))}"
+            for attempt in range(1, MAX_GREEN_RETRIES + 1):
+                if attempt > 1:
+                    logger.info(
+                        f"  🔄 GREEN retry {attempt}/{MAX_GREEN_RETRIES} (previous implementation failed)..."
                     )
-                    logger.warning("  🔙 Rolling back implementation to avoid breaking existing tests")
-                    increment.implementation_file.write_text(_impl_file_original)
-                    # Return a skipped result so the TDD loop can continue
-                    return CycleResult(
+                    _retry_count = attempt - 1
+
+                    logger.info(f"  🧠 LEARN: Analyzing attempt {attempt - 1} failure...")
+                    failure_analysis = self._analyze_green_failure(
                         increment=increment,
-                        test_code=test_code,
-                        implementation_code=_impl_file_original,
-                        red_result=red_result,
-                        green_result=green_result,
-                        refactored=False,
-                        learned_bullets=[],
-                        cycle_number=cycle_number,
-                        skipped=True,
-                        skip_reason=f"Rolled back: implementation broke {len(regressions)} existing test(s)",
+                        test_code=_test_code,
+                        impl_code=previous_impl_code,
+                        error=_green_result.error,
+                        attempts=attempt - 1,
                     )
 
-            logger.warning(f"  ⚠️  Tests still failing: {green_result.error[:100]}...")
+                    if failure_analysis and self.playbook_manager is not None:
+                        curator_output = CuratorOutput(
+                            delta_bullets=[DeltaBullet(
+                                section="troubleshooting",
+                                content=failure_analysis["bullet"],
+                                tags=failure_analysis["tags"],
+                            )],
+                            reasoning=failure_analysis["summary"],
+                        )
+                        self.curator.apply_updates(self.playbook_id, curator_output)
+                        logger.info(f"      ✓ Stored: {failure_analysis['summary']}")
 
-        if not green_result.all_passed:
-            # Record failure for self-healing before raising
-            failure_context = FailureContext(
-                feature_requirement=self._feature_requirement or increment.description,
-                cycle_number=cycle_number,
-                error_message=green_result.error,
-                error_type="GreenPhaseFailure",
-                test_file=str(increment.test_file),
-                impl_file=str(increment.implementation_file),
-                explicit_class_name=self._explicit_class_name,
-                explicit_file_path=self._explicit_file_path,
-                model=self.llm_client.model,
-                provider=self.llm_client.provider,
-            )
-            self.failure_recorder.record_failure(
-                failure_context,
-                suggested_fix=f"Review test expectations and implementation for cycle {cycle_number}",
-            )
+                        if failure_analysis.get("test_correction"):
+                            logger.info("      🔧 Applying test correction...")
+                            corrected = self._apply_test_correction(
+                                increment.test_file,
+                                increment.implementation_file,
+                                increment.test_name,
+                                _test_code,
+                                failure_analysis["test_correction"],
+                                cycle_number,
+                            )
+                            if corrected:
+                                _test_code = increment.test_file.read_text()
+                                logger.info("      ✓ Test corrected and reloaded")
+                            else:
+                                logger.warning(
+                                    "      ⚠️  Test correction failed, continuing with original test"
+                                )
 
-            raise RuntimeError(
-                f"Tests must pass after implementation (GREEN phase). "
-                f"Still failing after {MAX_GREEN_RETRIES} attempts: {green_result.error}"
-            )
+                _impl_code, _latest_bullets_used = self._write_minimal_code(
+                    increment, _red_result, previous_failure=_green_result, attempt=attempt
+                )
+                previous_impl_code = _impl_code
+                logger.info(
+                    f"      Created: {increment.implementation_file.relative_to(self.project_root)}"
+                )
 
-        # REFACTOR: Improve quality (optional)
-        refactored = False
-        if self._needs_refactoring(impl_code):
-            logger.info("  ✨ REFACTOR: Improving code quality...")
-            refactored_code = self._refactor_code(increment.implementation_file)
+                _green_result = self._run_tests()
+                if _green_result.all_passed:
+                    logger.info("  ⚙️  Running tests... PASSED ✓")
+                    break
 
-            # Tests must stay green
-            refactor_result = self._run_tests()
-            if not refactor_result.all_passed:
-                logger.warning("  ⚠️  Refactoring broke tests, reverting...")
-                increment.implementation_file.write_text(impl_code)
+                # Regression check
+                if _impl_file_existed and _impl_file_original is not None:
+                    red_passing = _passing_test_ids(_red_result)
+                    green_passing = _passing_test_ids(_green_result)
+                    regressions = red_passing - green_passing
+                    if regressions:
+                        logger.warning(
+                            f"  🔙 REGRESSION DETECTED — {len(regressions)} previously passing "
+                            f"test(s) now fail: {', '.join(sorted(regressions))}"
+                        )
+                        logger.warning("  🔙 Rolling back implementation to avoid breaking existing tests")
+                        increment.implementation_file.write_text(_impl_file_original)
+                        _impl_code = _impl_file_original
+                        _skip_reason = f"Rolled back: implementation broke {len(regressions)} existing test(s)"
+                        return CycleResult(
+                            increment=increment,
+                            test_code=_test_code,
+                            implementation_code=_impl_file_original,
+                            red_result=_red_result,
+                            green_result=_green_result,
+                            refactored=False,
+                            learned_bullets=[],
+                            cycle_number=cycle_number,
+                            skipped=True,
+                            skip_reason=_skip_reason,
+                        )
+
+                logger.warning(f"  ⚠️  Tests still failing: {_green_result.error[:100]}...")
+
+            if not _green_result.all_passed:
+                _cycle_outcome = "FAILED"
+                failure_context = FailureContext(
+                    feature_requirement=self._feature_requirement or increment.description,
+                    cycle_number=cycle_number,
+                    error_message=_green_result.error,
+                    error_type="GreenPhaseFailure",
+                    test_file=str(increment.test_file),
+                    impl_file=str(increment.implementation_file),
+                    explicit_class_name=self._explicit_class_name,
+                    explicit_file_path=self._explicit_file_path,
+                    model=self.llm_client.model,
+                    provider=self.llm_client.provider,
+                )
+                self.failure_recorder.record_failure(
+                    failure_context,
+                    suggested_fix=f"Review test expectations and implementation for cycle {cycle_number}",
+                )
+
+                raise RuntimeError(
+                    f"Tests must pass after implementation (GREEN phase). "
+                    f"Still failing after {MAX_GREEN_RETRIES} attempts: {_green_result.error}"
+                )
+
+            _cycle_outcome = "SUCCESS"
+
+            # REFACTOR: Improve quality (optional)
+            _refactored = False
+            if self._needs_refactoring(_impl_code):
+                logger.info("  ✨ REFACTOR: Improving code quality...")
+                refactored_code = self._refactor_code(increment.implementation_file)
+
+                refactor_result = self._run_tests()
+                if not refactor_result.all_passed:
+                    logger.warning("  ⚠️  Refactoring broke tests, reverting...")
+                    increment.implementation_file.write_text(_impl_code)
+                else:
+                    logger.info("  ✓ Refactoring complete, tests still green")
+                    _impl_code = refactored_code
+                    _refactored = True
             else:
-                logger.info("  ✓ Refactoring complete, tests still green")
-                impl_code = refactored_code
-                refactored = True
-        else:
-            logger.info("  ✨ REFACTOR: Code quality acceptable, skipping")
+                logger.info("  ✨ REFACTOR: Code quality acceptable, skipping")
 
-        # SESSION BULLET: promote GREEN success to playbook session-wins section
-        try:
-            self._promote_session_bullet(increment, cycle_number)
-        except Exception as e:
-            logger.warning(f"  ⚠️  Failed to promote session bullet: {e}")
+            # SESSION BULLET: promote GREEN success to playbook session-wins section
+            try:
+                self._promote_session_bullet(increment, cycle_number)
+            except Exception as e:
+                logger.warning(f"  ⚠️  Failed to promote session bullet: {e}")
 
-        # LEARN: Ensemble votes on patterns
-        if self.skip_learn:
-            logger.info("  🧠 LEARN: skipped (--no-learn)")
-            learned_bullets = []
-        else:
-            logger.info("  🧠 LEARN: Ensemble reviewing cycle...")
-            learned_bullets = self._ensemble_learn(test_code, impl_code, increment)
-            logger.info(f"      {len(learned_bullets)} patterns approved")
+            # LEARN: Ensemble votes on patterns
+            if self.skip_learn:
+                logger.info("  🧠 LEARN: skipped (--no-learn)")
+                _learned_bullets = []
+            else:
+                logger.info("  🧠 LEARN: Ensemble reviewing cycle...")
+                _learned_bullets = self._ensemble_learn(_test_code, _impl_code, increment)
+                logger.info(f"      {len(_learned_bullets)} patterns approved")
 
-        # LOG: Record TDD cycle to experiment_logs
-        logger.info("  📊 LOG: Recording cycle to experiment_logs...")
-        try:
-            self.experiment_logger.log_tdd_cycle(
+            return CycleResult(
+                increment=increment,
+                test_code=_test_code,
+                implementation_code=_impl_code,
+                red_result=_red_result,
+                green_result=_green_result,
+                refactored=_refactored,
+                learned_bullets=_learned_bullets,
                 cycle_number=cycle_number,
-                requirement=increment.description,
-                test_name=increment.test_name,
-                test_code=test_code,
-                implementation_code=impl_code,
-                red_passed=not red_result.failed,
-                green_passed=green_result.all_passed,
-                red_output=red_result.output[:500] if red_result.output else "",
-                green_output=green_result.output[:500] if green_result.output else "",
-                learned_bullets=[
-                    {
-                        "content": bullet.content,
-                        "section": bullet.section,
-                        "tags": bullet.tags or [],
-                    }
-                    for bullet in learned_bullets
-                ],
-                playbook_id=self.playbook_id,
-                retrieved_bullet_ids=latest_bullets_used,
-                # Model attribution for production quality analysis
-                actual_model=self.llm_client.model,
-                requested_model=self.llm_client.model,
-                provider=self.llm_client.provider,
             )
-            logger.info("      ✓ Cycle logged successfully")
-        except Exception as e:
-            logger.warning(f"      ⚠️  Failed to log cycle: {e}")
 
-        return CycleResult(
-            increment=increment,
-            test_code=test_code,
-            implementation_code=impl_code,
-            red_result=red_result,
-            green_result=green_result,
-            refactored=refactored,
-            learned_bullets=learned_bullets,
-            cycle_number=cycle_number,
-        )
+        finally:
+            self._log_cycle(
+                increment=increment,
+                cycle_number=cycle_number,
+                test_code=_test_code,
+                impl_code=_impl_code,
+                red_result=_red_result,
+                green_result=_green_result,
+                learned_bullets=_learned_bullets,
+                latest_bullets_used=_latest_bullets_used,
+                result=_cycle_outcome,
+                skip_reason=_skip_reason,
+                retry_count=_retry_count,
+            )
 
     def _write_test(self, increment: TestIncrement, cycle_number: int) -> str:
         """

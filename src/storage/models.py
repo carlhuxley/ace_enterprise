@@ -248,7 +248,7 @@ class ExperimentLogModel(Base):
     # Environment feedback
     environment_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     result: Mapped[str] = mapped_column(
-        Enum("SUCCESS", "FAILED", "TIMEOUT", "ERROR", name="task_result"),
+        Enum("SUCCESS", "FAILED", "SKIPPED", "TIMEOUT", "ERROR", name="task_result"),
         nullable=False,
         index=True,
     )
