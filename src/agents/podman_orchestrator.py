@@ -5,12 +5,17 @@ Sends code strings to an isolated ContainerRunner, returns a PhaseResult.
 Production runner is PodmanRunner (requires podman); SubprocessRunner is the
 test double for environments without a container runtime.
 """
+import hashlib
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from src.agents.language_pod import PhaseResult
+
+
+class SecurityBreachError(Exception):
+    """Raised when H_proposed ≠ H_executed — the container ran different code than was sent."""
 
 
 @dataclass
@@ -24,6 +29,7 @@ class PulseResult:
     bandit_medium: int = 0
     bandit_low: int = 0
     bandit_clean: bool = True
+    h_executed: str = ""
 
 
 @runtime_checkable
@@ -43,6 +49,7 @@ class PodmanOrchestrator:
     def pulse(self, code: str) -> PhaseResult:
         if not self._started:
             self.start()
+        h_proposed = hashlib.sha256(code.encode()).hexdigest()
         code_path = self._work_dir / "pulse_code.py"
         code_path.write_text(code)
         try:
@@ -50,6 +57,11 @@ class PodmanOrchestrator:
         except Exception:
             self.start()
             raw = self._runner.send_pulse(code_path)
+        if raw.h_executed and raw.h_executed != h_proposed:
+            code_path.unlink(missing_ok=True)
+            raise SecurityBreachError(
+                f"Hash mismatch: H_proposed={h_proposed} H_executed={raw.h_executed}"
+            )
         return self._to_phase_result(raw)
 
     def _to_phase_result(self, raw: PulseResult) -> PhaseResult:
