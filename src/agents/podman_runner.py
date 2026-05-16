@@ -27,7 +27,7 @@ class PodmanRunner:
 
     def __init__(
         self,
-        image: str = "python:3.12-slim",
+        image: str = "localhost/ace-harness:latest",
         container_name: str | None = None,
     ) -> None:
         self._image = image
@@ -46,11 +46,6 @@ class PodmanRunner:
         )
         subprocess.run(
             ["podman", "run", "-d", "--name", self._name, self._image, "sleep", "infinity"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["podman", "exec", self._name, "pip", "install", "pytest", "bandit", "-q"],
             check=True,
             capture_output=True,
         )
