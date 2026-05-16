@@ -1,6 +1,8 @@
 """Tests for PythonLanguagePod wired to PodmanOrchestrator (ace_enterprise-jz8).
 
 All tests exercise the from_worker() construction path only.
+Test and impl are kept as separate files — the worker generates each in isolation
+and the orchestrator runs them together in one workspace.
 """
 import subprocess
 import sys
@@ -20,7 +22,7 @@ from src.agents.python_language_pod import PythonLanguagePod
 # ---------------------------------------------------------------------------
 
 class HashingSubprocessRunner:
-    """Runs pytest on host + returns h_executed, mimicking sidecar behaviour."""
+    """Runs pytest on a workspace dir + returns canonical h_executed."""
 
     def __init__(self):
         self._alive = True
@@ -77,64 +79,60 @@ class TamperingRunner:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Shared fixtures
 # ---------------------------------------------------------------------------
 
-PASSING_CODE = (
-    "def add(a, b):\n"
-    "    return a + b\n"
-    "def test_add():\n"
-    "    assert add(1, 2) == 3\n"
-)
-
-FAILING_CODE = (
-    "def add(a, b):\n"
-    "    return 0  # wrong\n"
-    "def test_add():\n"
-    "    assert add(1, 2) == 3\n"
-)
-
-FORBIDDEN_CODE = (
-    "import os\n"
-    "def add(a, b):\n"
-    "    return a + b\n"
-    "def test_add():\n"
-    "    assert add(1, 2) == 3\n"
-)
+IMPL_ONLY = "def add(a, b):\n    return a + b\n"
+TEST_ONLY = "from add import add\n\ndef test_add():\n    assert add(1, 2) == 3\n"
+IMPL_WRONG = "def add(a, b):\n    return 0\n"
+IMPL_FORBIDDEN = "import os\n\ndef add(a, b):\n    return a + b\n"
 
 
-def make_worker(impl_code: str = PASSING_CODE) -> MagicMock:
+def make_worker(impl_code: str = IMPL_ONLY, test_code: str = TEST_ONLY) -> MagicMock:
     worker = MagicMock()
     worker.llm_client = MagicMock()
     worker.llm_client.generate.return_value = {"content": "", "tokens_used": 10}
     worker.generate_implementation.return_value = impl_code
-    worker.generate_test.return_value = impl_code
+    worker.generate_test.return_value = test_code
+    worker.generate_refactor.return_value = impl_code
     return worker
 
 
-def make_pod(tmp_path: Path, runner=None, impl_code: str = PASSING_CODE) -> tuple[PythonLanguagePod, PodSpec]:
-    runner = runner or HashingSubprocessRunner()
-    orchestrator = PodmanOrchestrator(
-        runner=runner,
-        work_dir=tmp_path / "sidecar",
-    )
-    worker = make_worker(impl_code)
-    pod = PythonLanguagePod.from_worker(worker, tmp_path, orchestrator)
-    spec = PodSpec(
+def make_spec(tmp_path: Path) -> PodSpec:
+    return PodSpec(
         feature_requirement="add two numbers",
         test_file=tmp_path / "tests" / "test_add.py",
         implementation_file=tmp_path / "src" / "add.py",
         cycle_number=1,
     )
-    return pod, spec
+
+
+def make_pod(tmp_path: Path, runner=None, impl_code: str = IMPL_ONLY) -> tuple[PythonLanguagePod, PodSpec]:
+    runner = runner or HashingSubprocessRunner()
+    orchestrator = PodmanOrchestrator(runner=runner, work_dir=tmp_path / "sidecar")
+    worker = make_worker(impl_code=impl_code)
+    pod = PythonLanguagePod.from_worker(worker, tmp_path, orchestrator)
+    return pod, make_spec(tmp_path)
+
+
+def write_test_file(spec: PodSpec, content: str = TEST_ONLY) -> None:
+    """Simulate the RED phase having committed the test file."""
+    spec.test_file.parent.mkdir(parents=True, exist_ok=True)
+    spec.test_file.write_text(content)
+
+
+def write_impl_file(spec: PodSpec, content: str = IMPL_ONLY) -> None:
+    spec.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+    spec.implementation_file.write_text(content)
 
 
 # ---------------------------------------------------------------------------
-# Behavior 1: clean code → passed=True + impl file committed (tracer bullet)
+# GREEN: test file on disk + impl from worker → cross-module import (tracer)
 # ---------------------------------------------------------------------------
 
-def test_green_clean_code_returns_passed_and_commits_file(tmp_path):
+def test_green_uses_test_file_from_disk_with_separate_impl(tmp_path):
     pod, spec = make_pod(tmp_path)
+    write_test_file(spec)
 
     result = pod.run_green(spec)
 
@@ -145,11 +143,12 @@ def test_green_clean_code_returns_passed_and_commits_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Behavior 2: pytest fails → passed=False + impl file NOT committed
+# GREEN: wrong impl → test fails → not committed
 # ---------------------------------------------------------------------------
 
-def test_green_failing_pytest_does_not_commit_file(tmp_path):
-    pod, spec = make_pod(tmp_path, impl_code=FAILING_CODE)
+def test_green_failing_impl_not_committed(tmp_path):
+    pod, spec = make_pod(tmp_path, impl_code=IMPL_WRONG)
+    write_test_file(spec)
 
     result = pod.run_green(spec)
 
@@ -158,11 +157,28 @@ def test_green_failing_pytest_does_not_commit_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Behavior 4: hash mismatch → passed=False, "SecurityBreach" in error, no commit
+# GREEN: forbidden import in impl → rejected before reaching orchestrator
+# ---------------------------------------------------------------------------
+
+def test_green_forbidden_import_in_impl_surfaces_as_failed(tmp_path):
+    pod, spec = make_pod(tmp_path, impl_code=IMPL_FORBIDDEN)
+    write_test_file(spec)
+
+    result = pod.run_green(spec)
+
+    assert result.passed is False
+    assert result.error is not None
+    assert "Forbidden" in result.error
+    assert not spec.implementation_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# GREEN: hash mismatch → SecurityBreach error, no commit
 # ---------------------------------------------------------------------------
 
 def test_green_hash_mismatch_surfaces_as_failed_phase_result(tmp_path):
     pod, spec = make_pod(tmp_path, runner=TamperingRunner())
+    write_test_file(spec)
 
     result = pod.run_green(spec)
 
@@ -173,32 +189,42 @@ def test_green_hash_mismatch_surfaces_as_failed_phase_result(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Behavior 5: commit_to_disk is atomic — no .tmp left behind, dst is correct
+# REFACTOR: uses both files from disk, runs them together
+# ---------------------------------------------------------------------------
+
+def test_refactor_runs_test_and_impl_together(tmp_path):
+    pod, spec = make_pod(tmp_path)
+    write_test_file(spec)
+    write_impl_file(spec)
+
+    result = pod.run_refactor(spec)
+
+    assert isinstance(result, PhaseResult)
+    assert result.passed is True
+
+
+# ---------------------------------------------------------------------------
+# RED: names test file correctly (spec.test_file.name, not test_pulse.py)
+# ---------------------------------------------------------------------------
+
+def test_red_commits_test_file_to_spec_path(tmp_path):
+    pod, spec = make_pod(tmp_path)
+
+    pod.run_red(spec)
+
+    assert spec.test_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# commit_to_disk: atomic write — no .tmp left behind
 # ---------------------------------------------------------------------------
 
 def test_commit_to_disk_is_atomic(tmp_path):
     from src.agents.python_language_pod import commit_to_disk
 
     dst = tmp_path / "subdir" / "output.py"
-    code = "x = 42\n"
-
-    commit_to_disk(code, dst)
+    commit_to_disk("x = 42\n", dst)
 
     assert dst.exists()
-    assert dst.read_text() == code
+    assert dst.read_text() == "x = 42\n"
     assert not (tmp_path / "subdir" / "output.tmp").exists()
-
-
-# ---------------------------------------------------------------------------
-# Behavior 3: forbidden import → passed=False, "Forbidden" in error, no commit
-# ---------------------------------------------------------------------------
-
-def test_green_forbidden_import_surfaces_as_failed_phase_result(tmp_path):
-    pod, spec = make_pod(tmp_path, impl_code=FORBIDDEN_CODE)
-
-    result = pod.run_green(spec)
-
-    assert result.passed is False
-    assert result.error is not None
-    assert "Forbidden" in result.error
-    assert not spec.implementation_file.exists()

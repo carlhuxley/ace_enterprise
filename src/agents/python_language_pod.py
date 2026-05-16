@@ -166,7 +166,7 @@ class PythonLanguagePod:
             return PhaseResult(passed=False, output="", error=str(exc))
 
         try:
-            result = self._orchestrator.pulse(code)
+            result = self._orchestrator.pulse({spec.test_file.name: code})
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
@@ -179,12 +179,12 @@ class PythonLanguagePod:
 
     def _worker_run_green(self, spec: PodSpec) -> PhaseResult:
         try:
-            code = self._worker.generate_implementation(
+            impl_code = self._worker.generate_implementation(
                 spec,
                 error_output="",
                 failing_test_ids=[str(spec.test_file)],
             )
-            _import_filter.check(code)
+            _import_filter.check(impl_code)
         except ForbiddenImportError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
@@ -192,22 +192,33 @@ class PythonLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
+        test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
+        files = {
+            spec.test_file.name: test_code,
+            spec.implementation_file.name: impl_code,
+        }
+
         try:
-            result = self._orchestrator.pulse(code)
+            result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
 
         if result.passed:
-            commit_to_disk(code, spec.implementation_file)
+            commit_to_disk(impl_code, spec.implementation_file)
 
         self._record_usage(spec.cycle_number)
         return result
 
     def _worker_run_refactor(self, spec: PodSpec) -> PhaseResult:
-        code = spec.test_file.read_text() if spec.test_file.exists() else ""
+        test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
+        impl_code = spec.implementation_file.read_text() if spec.implementation_file.exists() else ""
+        files = {
+            spec.test_file.name: test_code,
+            spec.implementation_file.name: impl_code,
+        }
         try:
-            result = self._orchestrator.pulse(code)
+            result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
