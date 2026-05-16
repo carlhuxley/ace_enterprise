@@ -181,7 +181,7 @@ class PythonLanguagePod:
         try:
             impl_code = self._worker.generate_implementation(
                 spec,
-                error_output="",
+                error_output=spec.error_output,
                 failing_test_ids=[str(spec.test_file)],
             )
             _import_filter.check(impl_code)

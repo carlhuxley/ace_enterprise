@@ -23,6 +23,7 @@ class PodSpec:
     test_file: Path
     implementation_file: Path
     cycle_number: int
+    error_output: str = ""  # feedback from a previous failed GREEN, set by TDDCycleRunner
 
 
 @dataclass

@@ -1,0 +1,203 @@
+"""Tests for TDDCycleRunner (ace_enterprise-2qm).
+
+Uses controlled pod doubles so we can drive exact pass/fail sequences
+without touching the container or LLM.
+"""
+import dataclasses
+from pathlib import Path
+
+import pytest
+
+from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
+from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner
+
+
+# ---------------------------------------------------------------------------
+# Test doubles
+# ---------------------------------------------------------------------------
+
+class ControlledPod:
+    """Pod double: RED always fails; GREEN passes on Nth attempt; REFACTOR passes."""
+
+    def __init__(self, green_pass_on: int = 1, refactor_passes: bool = True):
+        self._green_pass_on = green_pass_on
+        self._green_count = 0
+        self._refactor_passes = refactor_passes
+        self.green_specs: list[PodSpec] = []
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        return PhaseResult(passed=False, output="test fails: no impl", error=None)
+
+    def run_green(self, spec: PodSpec) -> PhaseResult:
+        self.green_specs.append(spec)
+        self._green_count += 1
+        if self._green_count >= self._green_pass_on:
+            return PhaseResult(passed=True, output="1 passed", error=None)
+        return PhaseResult(passed=False, output="AssertionError: expected 3 got 0", error=None)
+
+    def run_refactor(self, spec: PodSpec) -> PhaseResult:
+        if self._refactor_passes:
+            return PhaseResult(passed=True, output="1 passed", error=None)
+        return PhaseResult(passed=False, output="FAILED", error="refactor broke tests")
+
+    def token_usage(self) -> list[TokenUsage]:
+        return []
+
+
+class AbortingRedPod(ControlledPod):
+    """RED returns a forbidden import error → should abort cycle."""
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        return PhaseResult(passed=False, output="", error="ForbiddenImport: os")
+
+
+class AbortingGreenPod(ControlledPod):
+    """GREEN returns a security breach → should abort without further retries."""
+
+    def run_green(self, spec: PodSpec) -> PhaseResult:
+        self.green_specs.append(spec)
+        return PhaseResult(passed=False, output="", error="SecurityBreach: hash mismatch")
+
+
+class TokenPod(ControlledPod):
+    """Accumulates one TokenUsage record per phase call."""
+
+    def __init__(self):
+        super().__init__()
+        self._usage: list[TokenUsage] = []
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=50, output_tokens=0))
+        return super().run_red(spec)
+
+    def run_green(self, spec: PodSpec) -> PhaseResult:
+        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=150, output_tokens=0))
+        return super().run_green(spec)
+
+    def run_refactor(self, spec: PodSpec) -> PhaseResult:
+        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=80, output_tokens=0))
+        return super().run_refactor(spec)
+
+    def token_usage(self) -> list[TokenUsage]:
+        return list(self._usage)
+
+
+def _spec(tmp_path: Path) -> PodSpec:
+    return PodSpec(
+        feature_requirement="add two numbers",
+        test_file=tmp_path / "test_add.py",
+        implementation_file=tmp_path / "add.py",
+        cycle_number=1,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Behavior 1: full happy-path RED → GREEN → REFACTOR (tracer bullet)
+# ---------------------------------------------------------------------------
+
+def test_full_cycle_success(tmp_path):
+    runner = TDDCycleRunner(ControlledPod())
+    result = runner.run(_spec(tmp_path))
+
+    assert isinstance(result, CycleResult)
+    assert result.success is True
+    assert result.red_result.passed is False
+    assert result.green_result.passed is True
+    assert result.refactor_result is not None
+    assert result.refactor_result.passed is True
+
+
+# ---------------------------------------------------------------------------
+# Behavior 2: RED abort (ForbiddenImport) → no GREEN attempted
+# ---------------------------------------------------------------------------
+
+def test_red_abort_skips_green_and_refactor(tmp_path):
+    pod = AbortingRedPod()
+    runner = TDDCycleRunner(pod)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.green_attempts == 0
+    assert result.refactor_result is None
+    assert "RED aborted" in (result.error or "")
+
+
+# ---------------------------------------------------------------------------
+# Behavior 3: GREEN fails first attempt, succeeds on second
+# ---------------------------------------------------------------------------
+
+def test_green_retry_succeeds_on_second_attempt(tmp_path):
+    runner = TDDCycleRunner(ControlledPod(green_pass_on=2))
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is True
+    assert result.green_attempts == 2
+
+
+# ---------------------------------------------------------------------------
+# Behavior 4: GREEN exhausts all retries → success=False
+# ---------------------------------------------------------------------------
+
+def test_green_exhausts_retries_returns_failure(tmp_path):
+    runner = TDDCycleRunner(ControlledPod(green_pass_on=999), max_green_attempts=3)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.green_attempts == 3
+    assert result.refactor_result is None
+
+
+# ---------------------------------------------------------------------------
+# Behavior 5: REFACTOR fails → success=False with refactor_result populated
+# ---------------------------------------------------------------------------
+
+def test_refactor_failure_returns_success_false(tmp_path):
+    runner = TDDCycleRunner(ControlledPod(refactor_passes=False))
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.refactor_result is not None
+    assert result.refactor_result.passed is False
+
+
+# ---------------------------------------------------------------------------
+# Behavior 6: GREEN abort (SecurityBreach) stops retries immediately
+# ---------------------------------------------------------------------------
+
+def test_green_abort_stops_retries(tmp_path):
+    pod = AbortingGreenPod()
+    runner = TDDCycleRunner(pod, max_green_attempts=3)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert len(pod.green_specs) == 1  # only one attempt made
+
+
+# ---------------------------------------------------------------------------
+# Behavior 7: error_output from failed GREEN is passed to next attempt
+# ---------------------------------------------------------------------------
+
+def test_error_output_threaded_to_retry(tmp_path):
+    pod = ControlledPod(green_pass_on=2)
+    runner = TDDCycleRunner(pod)
+    runner.run(_spec(tmp_path))
+
+    # First attempt gets blank error_output
+    assert pod.green_specs[0].error_output == ""
+    # Second attempt gets the output from the first failure
+    assert "AssertionError" in pod.green_specs[1].error_output
+
+
+# ---------------------------------------------------------------------------
+# Behavior 8: token_usage from pod is captured in CycleResult
+# ---------------------------------------------------------------------------
+
+def test_token_usage_carried_in_result(tmp_path):
+    runner = TDDCycleRunner(TokenPod())
+    result = runner.run(_spec(tmp_path))
+
+    # full cycle: red + green + refactor → 3 records
+    assert len(result.token_usage) == 3
+    assert result.token_usage[0].input_tokens == 50   # red
+    assert result.token_usage[1].input_tokens == 150  # green
+    assert result.token_usage[2].input_tokens == 80   # refactor
