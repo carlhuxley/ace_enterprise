@@ -8,7 +8,8 @@ from src.utils.import_validator import ImportValidator, ImportValidationError
 @pytest.fixture
 def validator():
     """Create validator with project root."""
-    return ImportValidator(Path("/home/ch_dev/ace_enterprise"))
+    project_root = Path(__file__).resolve().parents[1]
+    return ImportValidator(project_root)
 
 
 class TestExtractImports:

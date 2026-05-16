@@ -13,7 +13,8 @@ def test_efficiency_grade_A_when_quality_per_dollar_above_5000():
 
 
 def test_efficiency_grade_B_when_quality_per_dollar_between_1000_and_5000():
-    analyzer = CostQualityAnalyzer({"accuracy": 0.80, "cost_per_prediction": 0.001})
+    # 0.80 / 0.0004 = 2000, which is between 1000 and 5000 → grade B
+    analyzer = CostQualityAnalyzer({"accuracy": 0.80, "cost_per_prediction": 0.0004})
     result = analyzer.calculate_cost_efficiency_metrics()
     assert result["efficiency_grade"] == "B"
 

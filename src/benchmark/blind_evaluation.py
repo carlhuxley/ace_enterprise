@@ -110,10 +110,11 @@ class BlindEvaluator:
             quality_score=round(result.total_score),
             tests_passed=tests_passed,
             details={
+                "syntax_valid": self._check_syntax(submission.output_content),
                 "rubric_dimensions": {
                     ds.dimension: {"score": ds.score, "weight": ds.weight}
                     for ds in result.dimension_scores
-                }
+                },
             },
             rubric_name=rubric.name,
         )
