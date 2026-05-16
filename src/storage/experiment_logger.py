@@ -118,6 +118,7 @@ class ExperimentLogger:
         retry_count: int = 0,
         human_intervention: bool = False,
         result_override: str | None = None,
+        harness_metadata: dict | None = None,
     ) -> ExperimentLogModel:
         """
         Log a TDD cycle (specialized wrapper for TDD experiments).
@@ -206,6 +207,7 @@ class ExperimentLogger:
                     "passed": green_passed,
                     "output": green_output,
                 },
+                **({"harness": harness_metadata} if harness_metadata is not None else {}),
             },
             result=result,
             reflector_data={
