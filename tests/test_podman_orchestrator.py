@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src.agents.language_pod import PhaseResult
 from src.agents.podman_orchestrator import ContainerRunner, PodmanOrchestrator, PulseResult
 
 
@@ -36,7 +37,7 @@ def make_orchestrator(tmp_path) -> PodmanOrchestrator:
     return PodmanOrchestrator(runner=SubprocessRunner(), work_dir=tmp_path)
 
 
-# --- Behavior 1: passing code returns exit_code=0 ---
+# --- Behavior 1: passing code returns passed=True ---
 
 def test_pulse_passing_code_returns_success(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
@@ -44,11 +45,12 @@ def test_pulse_passing_code_returns_success(tmp_path):
 
     result = orchestrator.pulse(code)
 
-    assert result.exit_code == 0
-    assert "passed" in result.stdout
+    assert isinstance(result, PhaseResult)
+    assert result.passed is True
+    assert "passed" in result.output
 
 
-# --- Behavior 2: failing test returns exit_code=1 with failure detail ---
+# --- Behavior 2: failing test returns passed=False with failure detail ---
 
 def test_pulse_failing_code_returns_failure(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
@@ -56,8 +58,9 @@ def test_pulse_failing_code_returns_failure(tmp_path):
 
     result = orchestrator.pulse(code)
 
-    assert result.exit_code == 1
-    assert "failed" in result.stdout.lower()
+    assert isinstance(result, PhaseResult)
+    assert result.passed is False
+    assert "failed" in result.output.lower()
 
 
 # --- Behavior 3: auto-start on first pulse without explicit start() ---
@@ -70,7 +73,7 @@ def test_pulse_auto_starts_runner(tmp_path):
     code = "def test_ping():\n    assert True\n"
     result = orchestrator.pulse(code)
 
-    assert result.exit_code == 0
+    assert result.passed is True
     assert runner.is_alive()
 
 
@@ -112,5 +115,5 @@ def test_pulse_recovers_from_dead_runner(tmp_path):
     code = "def test_survives():\n    assert True\n"
     result = orchestrator.pulse(code)
 
-    assert result.exit_code == 0
+    assert result.passed is True
     assert runner.is_alive()
