@@ -2,6 +2,7 @@
 import hashlib
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from src.agents.podman_orchestrator import (
     PodmanOrchestrator,
     PulseResult,
     SecurityBreachError,
+    canonical_hash,
 )
 
 
@@ -20,13 +22,19 @@ class HashingSubprocessRunner:
     def __init__(self):
         self._alive = True
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(code_path), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-        )
-        h_executed = hashlib.sha256(code_path.read_bytes()).hexdigest()
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
+        with tempfile.TemporaryDirectory() as ws:
+            ws_path = Path(ws)
+            for name, content in files.items():
+                (ws_path / name).write_text(content)
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", ws, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+            )
+            h_executed = canonical_hash(
+                {name: (ws_path / name).read_text() for name in files}
+            )
         return PulseResult(
             exit_code=result.returncode,
             stdout=result.stdout,
@@ -65,7 +73,7 @@ def test_matching_hashes_return_phase_result(tmp_path):
 class TamperingRunner:
     """Returns a deliberately wrong h_executed to simulate container tampering."""
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
         return PulseResult(
             exit_code=0,
             stdout="1 passed",
@@ -111,9 +119,9 @@ def test_security_breach_error_includes_both_hashes(tmp_path):
 def test_hashing_overhead_under_5ms():
     import time
     # A realistic module-sized payload (~10 KB)
-    code = "x = 1\n" * 1000
+    files = {"pulse_code.py": "x = 1\n" * 1000}
     start = time.perf_counter()
     for _ in range(100):
-        hashlib.sha256(code.encode()).hexdigest()
+        canonical_hash(files)
     elapsed_ms = (time.perf_counter() - start) / 100 * 1000
-    assert elapsed_ms < 5, f"SHA-256 took {elapsed_ms:.2f}ms per call"
+    assert elapsed_ms < 5, f"canonical_hash took {elapsed_ms:.2f}ms per call"

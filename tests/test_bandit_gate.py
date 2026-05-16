@@ -1,6 +1,7 @@
 """Tests for Bandit gate in PodmanOrchestrator (ace_enterprise-c5d)."""
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,17 +16,21 @@ class BanditSubprocessRunner:
     def __init__(self):
         self._alive = True
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
-        pytest_result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(code_path), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-        )
-        bandit_result = subprocess.run(
-            [sys.executable, "-m", "bandit", "-r", str(code_path), "--format", "json", "-q"],
-            capture_output=True,
-            text=True,
-        )
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
+        with tempfile.TemporaryDirectory() as ws:
+            ws_path = Path(ws)
+            for name, content in files.items():
+                (ws_path / name).write_text(content)
+            pytest_result = subprocess.run(
+                [sys.executable, "-m", "pytest", ws, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+            )
+            bandit_result = subprocess.run(
+                [sys.executable, "-m", "bandit", "-r", ws, "--format", "json", "-q"],
+                capture_output=True,
+                text=True,
+            )
         return _parse_bandit_pulse(pytest_result, bandit_result)
 
     def is_alive(self) -> bool:

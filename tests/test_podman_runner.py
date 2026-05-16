@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from src.agents.podman_orchestrator import ContainerRunner, PodmanOrchestrator
+from src.agents.podman_orchestrator import ContainerRunner, PodmanOrchestrator, canonical_hash
 from src.agents.podman_runner import PodmanRunner
 
 
@@ -79,39 +79,36 @@ def test_stop_removes_container():
 # ---------------------------------------------------------------------------
 
 def test_send_pulse_passing_code_returns_exit_code_zero(shared_podman_runner, tmp_path):
-    code_path = tmp_path / "pulse_code.py"
-    code_path.write_text("def test_ping():\n    assert True\n")
-    result = shared_podman_runner.send_pulse(code_path)
+    files = {"pulse_code.py": "def test_ping():\n    assert True\n"}
+    result = shared_podman_runner.send_pulse(files)
     assert result.exit_code == 0
     assert "passed" in result.stdout
 
 
 def test_send_pulse_failing_code_returns_nonzero_exit(shared_podman_runner, tmp_path):
-    code_path = tmp_path / "pulse_code.py"
-    code_path.write_text("def test_fail():\n    assert 1 == 2\n")
-    result = shared_podman_runner.send_pulse(code_path)
+    files = {"pulse_code.py": "def test_fail():\n    assert 1 == 2\n"}
+    result = shared_podman_runner.send_pulse(files)
     assert result.exit_code != 0
 
 
 def test_send_pulse_populates_h_executed(shared_podman_runner, tmp_path):
-    code = "def test_ping():\n    assert True\n"
-    code_path = tmp_path / "pulse_code.py"
-    code_path.write_text(code)
-    result = shared_podman_runner.send_pulse(code_path)
-    expected = hashlib.sha256(code.encode()).hexdigest()
+    files = {"pulse_code.py": "def test_ping():\n    assert True\n"}
+    result = shared_podman_runner.send_pulse(files)
+    expected = canonical_hash(files)
     assert result.h_executed == expected
 
 
 def test_send_pulse_bandit_flags_shell_injection(shared_podman_runner, tmp_path):
-    code_path = tmp_path / "pulse_code.py"
-    code_path.write_text(
-        "import subprocess\n"
-        "def run(cmd):\n"
-        "    subprocess.Popen(cmd, shell=True)\n"
-        "def test_passes():\n"
-        "    assert True\n"
-    )
-    result = shared_podman_runner.send_pulse(code_path)
+    files = {
+        "pulse_code.py": (
+            "import subprocess\n"
+            "def run(cmd):\n"
+            "    subprocess.Popen(cmd, shell=True)\n"
+            "def test_passes():\n"
+            "    assert True\n"
+        )
+    }
+    result = shared_podman_runner.send_pulse(files)
     assert result.bandit_high >= 1
     assert not result.bandit_clean
 
@@ -122,3 +119,14 @@ def test_orchestrator_pulse_end_to_end_with_podman_runner(shared_podman_runner, 
     code = "def test_ping():\n    assert True\n"
     result = orchestrator.pulse(code)
     assert result.passed is True
+
+
+def test_multi_file_cross_import_in_container(shared_podman_runner, tmp_path):
+    """Impl and test as separate files — test imports from impl module."""
+    files = {
+        "add.py": "def add(a, b):\n    return a + b\n",
+        "test_add.py": "from add import add\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+    }
+    result = shared_podman_runner.send_pulse(files)
+    assert result.exit_code == 0
+    assert "passed" in result.stdout

@@ -1,19 +1,17 @@
 """Tests for PythonLanguagePod wired to PodmanOrchestrator (ace_enterprise-jz8).
 
 All tests exercise the from_worker() construction path only.
-Worker mock returns self-contained code strings (test + impl in one file)
-since PodmanOrchestrator.pulse() runs pytest on a single file.
 """
-import hashlib
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.agents.language_pod import PhaseResult, PodSpec
-from src.agents.podman_orchestrator import PodmanOrchestrator, PulseResult
+from src.agents.podman_orchestrator import PodmanOrchestrator, PulseResult, canonical_hash
 from src.agents.python_language_pod import PythonLanguagePod
 
 
@@ -27,13 +25,19 @@ class HashingSubprocessRunner:
     def __init__(self):
         self._alive = True
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(code_path), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-        )
-        h_executed = hashlib.sha256(code_path.read_bytes()).hexdigest()
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
+        with tempfile.TemporaryDirectory() as ws:
+            ws_path = Path(ws)
+            for name, content in files.items():
+                (ws_path / name).write_text(content)
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", ws, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+            )
+            h_executed = canonical_hash(
+                {name: (ws_path / name).read_text() for name in files}
+            )
         return PulseResult(
             exit_code=result.returncode,
             stdout=result.stdout,
@@ -54,7 +58,7 @@ class HashingSubprocessRunner:
 class TamperingRunner:
     """Returns a wrong h_executed to simulate container tampering."""
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
         return PulseResult(
             exit_code=0,
             stdout="1 passed",

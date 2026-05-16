@@ -1,6 +1,7 @@
 """Tests for PodmanOrchestrator (ace_enterprise-2j2)."""
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,12 +16,16 @@ class SubprocessRunner:
     def __init__(self):
         self._alive = True
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(code_path), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-        )
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
+        with tempfile.TemporaryDirectory() as ws:
+            ws_path = Path(ws)
+            for name, content in files.items():
+                (ws_path / name).write_text(content)
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", ws, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+            )
         return PulseResult(exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
     def is_alive(self) -> bool:
@@ -86,16 +91,20 @@ class DyingRunner:
         self._alive = True
         self._pulse_count = 0
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
         self._pulse_count += 1
         if self._pulse_count == 1:
             self._alive = False
             raise RuntimeError("sidecar died")
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(code_path), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-        )
+        with tempfile.TemporaryDirectory() as ws:
+            ws_path = Path(ws)
+            for name, content in files.items():
+                (ws_path / name).write_text(content)
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", ws, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+            )
         return PulseResult(exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
     def is_alive(self) -> bool:

@@ -1,9 +1,12 @@
 """
 PodmanOrchestrator — stateless sidecar execution layer for the Clean Room harness.
 
-Sends code strings to an isolated ContainerRunner, returns a PhaseResult.
+Sends code to an isolated ContainerRunner, returns a PhaseResult.
 Production runner is PodmanRunner (requires podman); SubprocessRunner is the
 test double for environments without a container runtime.
+
+pulse() accepts either a string (single-file backward compat) or a
+dict[str, str] mapping filename → content for multi-file workspaces.
 """
 import hashlib
 import tempfile
@@ -32,9 +35,15 @@ class PulseResult:
     h_executed: str = ""
 
 
+def canonical_hash(files: dict[str, str]) -> str:
+    """Deterministic SHA-256 over a workspace: sorted(filename + content) pairs."""
+    manifest = "".join(f"{k}\n{v}" for k, v in sorted(files.items()))
+    return hashlib.sha256(manifest.encode()).hexdigest()
+
+
 @runtime_checkable
 class ContainerRunner(Protocol):
-    def send_pulse(self, code_path: Path) -> PulseResult: ...
+    def send_pulse(self, files: dict[str, str]) -> PulseResult: ...
     def is_alive(self) -> bool: ...
     def start(self) -> None: ...
     def stop(self) -> None: ...
@@ -47,19 +56,18 @@ class PodmanOrchestrator:
         self._work_dir.mkdir(parents=True, exist_ok=True)
         self._started = False
 
-    def pulse(self, code: str) -> PhaseResult:
+    def pulse(self, files: "dict[str, str] | str") -> PhaseResult:
+        if isinstance(files, str):
+            files = {"test_pulse.py": files}
         if not self._started:
             self.start()
-        h_proposed = hashlib.sha256(code.encode()).hexdigest()
-        code_path = self._work_dir / "pulse_code.py"
-        code_path.write_text(code)
+        h_proposed = canonical_hash(files)
         try:
-            raw = self._runner.send_pulse(code_path)
+            raw = self._runner.send_pulse(files)
         except Exception:
             self.start()
-            raw = self._runner.send_pulse(code_path)
+            raw = self._runner.send_pulse(files)
         if raw.h_executed and raw.h_executed != h_proposed:
-            code_path.unlink(missing_ok=True)
             raise SecurityBreachError(
                 f"Hash mismatch: H_proposed={h_proposed} H_executed={raw.h_executed}"
             )

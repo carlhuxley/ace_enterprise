@@ -6,12 +6,13 @@ Requires podman in PATH. Tests skip gracefully when podman is absent.
 """
 import json
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 
-from src.agents.podman_orchestrator import ContainerRunner, PulseResult
+from src.agents.podman_orchestrator import ContainerRunner, PulseResult, canonical_hash
 
-_REMOTE_CODE_PATH = "/tmp/pulse_code.py"
+_REMOTE_WS = "/tmp/ws"
 
 
 class PodmanRunner:
@@ -20,8 +21,8 @@ class PodmanRunner:
 
     Lifecycle:
         runner = PodmanRunner()
-        runner.start()          # launches container, installs deps
-        result = runner.send_pulse(path)
+        runner.start()          # launches container
+        result = runner.send_pulse({"test.py": ..., "impl.py": ...})
         runner.stop()           # removes container
     """
 
@@ -68,35 +69,45 @@ class PodmanRunner:
         )
         return result.returncode == 0 and "running" in result.stdout
 
-    def send_pulse(self, code_path: Path) -> PulseResult:
-        subprocess.run(
-            ["podman", "cp", str(code_path), f"{self._name}:{_REMOTE_CODE_PATH}"],
-            check=True,
-            capture_output=True,
-        )
+    def send_pulse(self, files: dict[str, str]) -> PulseResult:
+        # Write files to a host temp dir, then cp the whole directory into the container
+        with tempfile.TemporaryDirectory() as local_ws:
+            local_ws_path = Path(local_ws)
+            for name, content in files.items():
+                (local_ws_path / name).write_text(content)
+
+            # Recreate workspace dir inside the container
+            subprocess.run(
+                ["podman", "exec", self._name, "rm", "-rf", _REMOTE_WS],
+                capture_output=True,
+            )
+            subprocess.run(
+                ["podman", "exec", self._name, "mkdir", "-p", _REMOTE_WS],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["podman", "cp", f"{local_ws}/.", f"{self._name}:{_REMOTE_WS}/"],
+                check=True,
+                capture_output=True,
+            )
 
         pytest_result = subprocess.run(
             ["podman", "exec", self._name,
-             "python", "-m", "pytest", _REMOTE_CODE_PATH, "-v", "--tb=short"],
+             "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short"],
             capture_output=True,
             text=True,
         )
 
         bandit_result = subprocess.run(
             ["podman", "exec", self._name,
-             "python", "-m", "bandit", "-r", _REMOTE_CODE_PATH, "--format", "json", "-q"],
+             "python", "-m", "bandit", "-r", _REMOTE_WS, "--format", "json", "-q"],
             capture_output=True,
             text=True,
         )
 
-        hash_result = subprocess.run(
-            ["podman", "exec", self._name,
-             "python", "-c",
-             f"import hashlib; print(hashlib.sha256(open('{_REMOTE_CODE_PATH}','rb').read()).hexdigest())"],
-            capture_output=True,
-            text=True,
-        )
-        h_executed = hash_result.stdout.strip()
+        # Read files back from container to compute h_executed from what actually ran
+        h_executed = self._compute_remote_hash(list(files.keys()))
 
         return PulseResult(
             exit_code=pytest_result.returncode,
@@ -105,6 +116,19 @@ class PodmanRunner:
             **_parse_bandit(bandit_result.stdout or bandit_result.stderr),
             h_executed=h_executed,
         )
+
+    def _compute_remote_hash(self, filenames: list[str]) -> str:
+        """Read each file from the container workspace and compute canonical_hash."""
+        executed_files: dict[str, str] = {}
+        for name in filenames:
+            result = subprocess.run(
+                ["podman", "exec", self._name, "cat", f"{_REMOTE_WS}/{name}"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                executed_files[name] = result.stdout
+        return canonical_hash(executed_files) if executed_files else ""
 
 
 def _parse_bandit(raw: str) -> dict:
