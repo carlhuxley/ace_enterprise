@@ -44,6 +44,7 @@ class PodmanOrchestrator:
     def __init__(self, runner: ContainerRunner, work_dir: Path | None = None) -> None:
         self._runner = runner
         self._work_dir = work_dir or Path(tempfile.mkdtemp(prefix="harness_pulse_"))
+        self._work_dir.mkdir(parents=True, exist_ok=True)
         self._started = False
 
     def pulse(self, code: str) -> PhaseResult:

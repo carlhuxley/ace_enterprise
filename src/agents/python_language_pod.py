@@ -2,17 +2,31 @@
 PythonLanguagePod — LanguagePod implementation for Python TDD cycles.
 
 Two construction paths:
-  PythonLanguagePod(agent)           — wraps AutonomousTDDAgent (original path)
-  PythonLanguagePod.from_worker(...) — uses WorkerAgent + subprocess pytest
+  PythonLanguagePod(agent)                        — wraps AutonomousTDDAgent (original path)
+  PythonLanguagePod.from_worker(..., orchestrator) — uses WorkerAgent + PodmanOrchestrator
 """
 import logging
+import os
 import re
-import subprocess
-import sys
+import tempfile
 
+from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
+from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
 
 logger = logging.getLogger(__name__)
+
+_import_filter = ImportFilter()
+
+
+def commit_to_disk(code: str, dst) -> None:
+    """Atomically write code to dst using os.replace."""
+    from pathlib import Path
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".tmp")
+    tmp.write_text(code)
+    os.replace(tmp, dst)
 
 
 class PythonLanguagePod:
@@ -27,17 +41,19 @@ class PythonLanguagePod:
     def __init__(self, agent) -> None:
         self._agent = agent
         self._worker = None
+        self._orchestrator = None
         self._project_root = None
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._intercept_tokens()
 
     @classmethod
-    def from_worker(cls, worker_agent, project_root):
-        """Construct a PythonLanguagePod backed by WorkerAgent + subprocess pytest."""
+    def from_worker(cls, worker_agent, project_root, orchestrator: PodmanOrchestrator):
+        """Construct a PythonLanguagePod backed by WorkerAgent + PodmanOrchestrator."""
         pod = cls.__new__(cls)
         pod._agent = None
         pod._worker = worker_agent
+        pod._orchestrator = orchestrator
         pod._project_root = project_root
         pod._token_log = []
         pod._cycle_tokens = 0
@@ -141,62 +157,63 @@ class PythonLanguagePod:
         try:
             existing = spec.test_file.read_text() if spec.test_file.exists() else ""
             code = self._worker.generate_test(spec, existing_code=existing)
-            spec.test_file.parent.mkdir(parents=True, exist_ok=True)
-            spec.test_file.write_text(code)
+            _import_filter.check(code)
+        except ForbiddenImportError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        result = self._run_pytest(spec)
+        try:
+            result = self._orchestrator.pulse(code)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+
+        if not _is_security_failure(result):
+            commit_to_disk(code, spec.test_file)
+
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
     def _worker_run_green(self, spec: PodSpec) -> PhaseResult:
-        error_output = ""
-        if spec.test_file.exists():
-            probe = self._run_pytest(spec)
-            error_output = probe.stderr or probe.stdout
+        try:
+            code = self._worker.generate_implementation(
+                spec,
+                error_output="",
+                failing_test_ids=[str(spec.test_file)],
+            )
+            _import_filter.check(code)
+        except ForbiddenImportError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+        except Exception as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=str(exc))
 
-        current = spec.implementation_file.read_text() if spec.implementation_file.exists() else ""
-        test_id = f"{spec.test_file}::*"
-        code = self._worker.generate_implementation(
-            spec,
-            error_output=error_output,
-            failing_test_ids=[str(spec.test_file)],
-        )
-        spec.implementation_file.parent.mkdir(parents=True, exist_ok=True)
-        spec.implementation_file.write_text(code)
+        try:
+            result = self._orchestrator.pulse(code)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
 
-        result = self._run_pytest(spec)
+        if result.passed:
+            commit_to_disk(code, spec.implementation_file)
+
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
     def _worker_run_refactor(self, spec: PodSpec) -> PhaseResult:
-        result = self._run_pytest(spec)
+        code = spec.test_file.read_text() if spec.test_file.exists() else ""
+        try:
+            result = self._orchestrator.pulse(code)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
-    def _run_pytest(self, spec: PodSpec):
-        import os
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(self._project_root)
-        return subprocess.run(
-            [sys.executable, "-m", "pytest", str(spec.test_file), "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-            cwd=self._project_root,
-            env=env,
-            timeout=30,
-        )
+
+def _is_security_failure(result: PhaseResult) -> bool:
+    return result.error is not None and result.error.startswith("Bandit gate:")
