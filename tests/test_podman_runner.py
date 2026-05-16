@@ -79,7 +79,7 @@ def test_stop_removes_container():
 # ---------------------------------------------------------------------------
 
 def test_send_pulse_passing_code_returns_exit_code_zero(shared_podman_runner, tmp_path):
-    files = {"pulse_code.py": "def test_ping():\n    assert True\n"}
+    files = {"test_ping.py": "def test_ping():\n    assert True\n"}
     result = shared_podman_runner.send_pulse(files)
     assert result.exit_code == 0
     assert "passed" in result.stdout
