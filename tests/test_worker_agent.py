@@ -168,53 +168,54 @@ class TestGenerateRefactor:
 # ---------------------------------------------------------------------------
 
 class TestPythonLanguagePodFromWorker:
-    def _make_pod(self, tmp_path, content="def test_foo(): pass"):
+    def _make_pod(self, tmp_path, content="def test_foo(): pass", green_passed=True):
         from src.agents.python_language_pod import PythonLanguagePod
         worker = WorkerAgent(_llm(content=content))
-        return PythonLanguagePod.from_worker(worker, project_root=tmp_path), worker
+        orchestrator = MagicMock()
+        # RED: pytest fails (correct TDD), no security error → test file committed
+        # GREEN: pytest passes → impl file committed
+        orchestrator.pulse.return_value = PhaseResult(
+            passed=green_passed,
+            output="1 passed" if green_passed else "FAILED",
+            error=None,
+        )
+        return PythonLanguagePod.from_worker(worker, project_root=tmp_path, orchestrator=orchestrator), worker
 
     def test_isinstance_language_pod(self, tmp_path):
         pod, _ = self._make_pod(tmp_path)
         assert isinstance(pod, LanguagePod)
 
     def test_run_red_returns_phase_result(self, tmp_path):
-        pod, _ = self._make_pod(tmp_path)
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="FAIL", stderr="")
-            result = pod.run_red(_spec(tmp_path))
+        pod, _ = self._make_pod(tmp_path, green_passed=False)
+        result = pod.run_red(_spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
     def test_run_red_writes_test_file(self, tmp_path):
-        pod, _ = self._make_pod(tmp_path)
+        pod, _ = self._make_pod(tmp_path, green_passed=False)
         s = _spec(tmp_path)
-        with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="")):
-            pod.run_red(s)
+        pod.run_red(s)
         assert s.test_file.exists()
 
     def test_run_green_returns_phase_result(self, tmp_path):
-        pod, _ = self._make_pod(tmp_path, content="def process(): pass")
-        with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="1 passed", stderr="")):
-            result = pod.run_green(_spec(tmp_path))
+        pod, _ = self._make_pod(tmp_path, content="def process(): pass", green_passed=True)
+        result = pod.run_green(_spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
     def test_run_green_writes_implementation_file(self, tmp_path):
-        pod, _ = self._make_pod(tmp_path, content="def process(): pass")
+        pod, _ = self._make_pod(tmp_path, content="def process(): pass", green_passed=True)
         s = _spec(tmp_path)
-        with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")):
-            pod.run_green(s)
+        pod.run_green(s)
         assert s.implementation_file.exists()
 
     def test_run_refactor_returns_phase_result(self, tmp_path):
-        pod, _ = self._make_pod(tmp_path)
-        with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="1 passed", stderr="")):
-            result = pod.run_refactor(_spec(tmp_path))
+        pod, _ = self._make_pod(tmp_path, green_passed=True)
+        result = pod.run_refactor(_spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
     def test_token_usage_tracks_llm_calls(self, tmp_path):
         from src.agents.language_pod import TokenUsage
-        pod, _ = self._make_pod(tmp_path)
-        with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="")):
-            pod.run_red(_spec(tmp_path, cycle=1))
+        pod, _ = self._make_pod(tmp_path, green_passed=False)
+        pod.run_red(_spec(tmp_path, cycle=1))
         usage = pod.token_usage()
         assert len(usage) == 1
         assert isinstance(usage[0], TokenUsage)
