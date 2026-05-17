@@ -30,9 +30,15 @@ class PodmanRunner:
         self,
         image: str = "localhost/ace-harness:latest",
         container_name: str | None = None,
+        cpus: str = "0.5",
+        memory: str = "256m",
+        test_timeout: int = 10,
     ) -> None:
         self._image = image
         self._name = container_name or f"harness_{uuid.uuid4().hex[:8]}"
+        self._cpus = cpus
+        self._memory = memory
+        self._test_timeout = test_timeout
         self._alive = False
 
     # ------------------------------------------------------------------
@@ -46,7 +52,14 @@ class PodmanRunner:
             capture_output=True,
         )
         subprocess.run(
-            ["podman", "run", "-d", "--name", self._name, self._image, "sleep", "infinity"],
+            [
+                "podman", "run", "-d",
+                "--name", self._name,
+                "--network", "none",
+                "--cpus", self._cpus,
+                "--memory", self._memory,
+                self._image, "sleep", "infinity",
+            ],
             check=True,
             capture_output=True,
         )
@@ -94,7 +107,8 @@ class PodmanRunner:
 
         pytest_result = subprocess.run(
             ["podman", "exec", self._name,
-             "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short"],
+             "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
+             f"--timeout={self._test_timeout}"],
             capture_output=True,
             text=True,
         )
