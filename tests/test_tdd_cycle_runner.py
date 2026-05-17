@@ -201,3 +201,51 @@ def test_token_usage_carried_in_result(tmp_path):
     assert result.token_usage[0].input_tokens == 50   # red
     assert result.token_usage[1].input_tokens == 150  # green
     assert result.token_usage[2].input_tokens == 80   # refactor
+
+
+# ---------------------------------------------------------------------------
+# Behavior 9: ExperimentLogger.log_tdd_cycle called after each cycle
+# ---------------------------------------------------------------------------
+
+def test_experiment_logger_called_on_success(tmp_path):
+    calls = []
+
+    class _Logger:
+        def log_tdd_cycle(self, **kwargs):
+            calls.append(kwargs)
+
+    spec = _spec(tmp_path)
+    spec.test_file.write_text("# test")
+    spec.implementation_file.write_text("# impl")
+
+    runner = TDDCycleRunner(ControlledPod(), experiment_logger=_Logger(), playbook_id="test-pb")
+    runner.run(spec)
+
+    assert len(calls) == 1
+    c = calls[0]
+    assert c["cycle_number"] == 1
+    assert c["requirement"] == "add two numbers"
+    assert c["green_passed"] is True
+    assert c["red_passed"] is False
+    assert c["playbook_id"] == "test-pb"
+    assert c["retry_count"] == 1
+
+
+def test_experiment_logger_called_on_red_abort(tmp_path):
+    calls = []
+
+    class _Logger:
+        def log_tdd_cycle(self, **kwargs):
+            calls.append(kwargs)
+
+    runner = TDDCycleRunner(AbortingRedPod(), experiment_logger=_Logger())
+    runner.run(_spec(tmp_path))
+
+    assert len(calls) == 1
+    assert calls[0]["green_passed"] is False
+
+
+def test_no_experiment_logger_does_not_raise(tmp_path):
+    runner = TDDCycleRunner(ControlledPod())   # no logger
+    result = runner.run(_spec(tmp_path))
+    assert result.success is True
