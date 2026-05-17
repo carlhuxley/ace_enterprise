@@ -44,7 +44,8 @@ class PythonLanguagePod:
         self._orchestrator = None
         self._project_root = None
         self._token_log: list[TokenUsage] = []
-        self._cycle_tokens: int = 0
+        self._prompt_tokens: int = 0
+        self._completion_tokens: int = 0
         self._intercept_tokens()
 
     @classmethod
@@ -56,7 +57,8 @@ class PythonLanguagePod:
         pod._orchestrator = orchestrator
         pod._project_root = project_root
         pod._token_log = []
-        pod._cycle_tokens = 0
+        pod._prompt_tokens = 0
+        pod._completion_tokens = 0
         pod._intercept_worker_tokens()
         return pod
 
@@ -126,17 +128,19 @@ class PythonLanguagePod:
     def _record_usage(self, cycle_number: int) -> None:
         self._token_log.append(TokenUsage(
             cycle_number=cycle_number,
-            input_tokens=self._cycle_tokens,
-            output_tokens=0,
+            input_tokens=self._prompt_tokens,
+            output_tokens=self._completion_tokens,
         ))
-        self._cycle_tokens = 0
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
 
     def _intercept_tokens(self) -> None:
         original = self._agent.llm_client.generate
 
         def _tracking_generate(*args, **kwargs):
             result = original(*args, **kwargs)
-            self._cycle_tokens += result.get("tokens_used", 0)
+            self._prompt_tokens += result.get("prompt_tokens") or result.get("tokens_used", 0)
+            self._completion_tokens += result.get("completion_tokens", 0)
             return result
 
         self._agent.llm_client.generate = _tracking_generate
@@ -146,7 +150,8 @@ class PythonLanguagePod:
 
         def _tracking_generate(*args, **kwargs):
             result = original(*args, **kwargs)
-            self._cycle_tokens += result.get("tokens_used", 0)
+            self._prompt_tokens += result.get("prompt_tokens") or result.get("tokens_used", 0)
+            self._completion_tokens += result.get("completion_tokens", 0)
             return result
 
         self._worker.llm_client.generate = _tracking_generate

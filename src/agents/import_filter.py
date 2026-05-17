@@ -20,11 +20,12 @@ class ImportFilter:
         )
 
     def check(self, code: str) -> None:
-        """Raise ForbiddenImportError if code contains forbidden imports or builtin calls."""
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as e:
-            raise ForbiddenImportError(f"Code failed to parse: {e}") from e
+        """Raise ForbiddenImportError if code contains forbidden imports or builtin calls.
+
+        Raises SyntaxError (not ForbiddenImportError) when the code cannot be parsed,
+        so callers can distinguish a policy violation from an LLM output failure.
+        """
+        tree = ast.parse(code)  # propagates SyntaxError directly
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

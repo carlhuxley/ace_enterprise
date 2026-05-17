@@ -54,6 +54,6 @@ def test_custom_blocklist():
     f.check("import os")
 
 
-def test_syntax_error_raises(f):
-    with pytest.raises(ForbiddenImportError, match="parse"):
+def test_syntax_error_raises_syntax_error_not_forbidden(f):
+    with pytest.raises(SyntaxError):
         f.check("def broken(:")

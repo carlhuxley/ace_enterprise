@@ -213,6 +213,8 @@ class LLMClient:
 
             return {
                 "content": data.get("response", ""),
+                "prompt_tokens": data.get("prompt_eval_count", 0),
+                "completion_tokens": data.get("eval_count", 0),
                 "tokens_used": data.get("eval_count", 0) + data.get("prompt_eval_count", 0),
             }
 
@@ -261,9 +263,12 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
 
+            usage = data["usage"]
             return {
                 "content": data["choices"][0]["message"]["content"],
-                "tokens_used": data["usage"]["total_tokens"],
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "tokens_used": usage["total_tokens"],
             }
 
         except httpx.HTTPError as e:
@@ -306,6 +311,8 @@ class LLMClient:
 
             return {
                 "content": data["content"][0]["text"],
+                "prompt_tokens": data["usage"]["input_tokens"],
+                "completion_tokens": data["usage"]["output_tokens"],
                 "tokens_used": data["usage"]["input_tokens"] + data["usage"]["output_tokens"],
             }
 
@@ -351,9 +358,12 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
 
+            usage = data["usage"]
             return {
                 "content": data["choices"][0]["message"]["content"],
-                "tokens_used": data["usage"]["total_tokens"],
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "tokens_used": usage["total_tokens"],
             }
 
         except httpx.HTTPError as e:
@@ -398,9 +408,12 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
 
+            usage = data["usage"]
             return {
                 "content": data["choices"][0]["message"]["content"],
-                "tokens_used": data["usage"]["total_tokens"],
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "tokens_used": usage["total_tokens"],
             }
 
         except httpx.HTTPError as e:
@@ -472,13 +485,16 @@ class LLMClient:
                         logger.warning(f"OpenRouter returned None content for {model}, trying fallback")
                         break  # Try next model
 
+                    usage = data.get("usage", {})
                     return {
                         "content": content,
-                        "tokens_used": data.get("usage", {}).get("total_tokens", 0),
-                        "actual_model": actual_model,  # The model that actually served the request
-                        "requested_model": self.model,  # The originally requested model
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "completion_tokens": usage.get("completion_tokens", 0),
+                        "tokens_used": usage.get("total_tokens", 0),
+                        "actual_model": actual_model,
+                        "requested_model": self.model,
                         "provider": data.get("provider", "unknown"),
-                        "cost_usd": data.get("usage", {}).get("cost"),  # OpenRouter includes cost
+                        "cost_usd": usage.get("cost"),
                     }
 
                 except httpx.HTTPStatusError as e:
