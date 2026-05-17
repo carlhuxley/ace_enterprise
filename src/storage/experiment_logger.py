@@ -3,15 +3,36 @@ Unified Experiment Logger for both TDD and ML experiments.
 
 Stores all experiments in PostgreSQL experiment_logs table with a consistent
 interface for both TDD cycles and ML training runs.
+
+Falls back to a local SQLite file (ace_experiments.db) when PostgreSQL is
+unavailable, so TDD cycles are always persisted even without a running DB.
 """
 import logging
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from src.storage.models import ExperimentLogModel
 from src.storage.repository import PlaybookRepository
 
 logger = logging.getLogger(__name__)
+
+
+class _SQLiteRepo:
+    """Minimal SQLite-backed repo that only manages ExperimentLogModel."""
+
+    def __init__(self, path: str = "ace_experiments.db"):
+        self.engine = create_engine(f"sqlite:///{path}")
+        ExperimentLogModel.__table__.create(bind=self.engine, checkfirst=True)
+        self.SessionLocal = sessionmaker(bind=self.engine)
+
+    def create_tables(self):
+        ExperimentLogModel.__table__.create(bind=self.engine, checkfirst=True)
+
+    def get_session(self):
+        return self.SessionLocal()
 
 
 class ExperimentLogger:
@@ -24,6 +45,8 @@ class ExperimentLogger:
     - Environment: What happened when we ran it?
     - Reflector: What did we learn from the result?
     - Curator: What should we add to the playbook?
+
+    Falls back to SQLite (ace_experiments.db) when PostgreSQL is unreachable.
     """
 
     def __init__(self, playbook_version: str, repository: PlaybookRepository | None = None):
@@ -32,14 +55,33 @@ class ExperimentLogger:
 
         Args:
             playbook_version: Current playbook version
-            repository: Optional repository instance
+            repository: Optional repository instance (defaults to PostgreSQL,
+                        falls back to SQLite if PostgreSQL is unavailable)
         """
         self.playbook_version = playbook_version
-        self.repo = repository or PlaybookRepository()
+        if repository is not None:
+            self.repo = repository
+            try:
+                self.repo.create_tables()
+            except Exception as exc:
+                logger.warning(f"ExperimentLogger: could not ensure tables exist: {exc}")
+        else:
+            self.repo = self._connect_with_fallback()
+
+    @staticmethod
+    def _connect_with_fallback():
+        """Try PostgreSQL; fall back to SQLite if the connection fails."""
         try:
-            self.repo.create_tables()
+            repo = PlaybookRepository()
+            repo.create_tables()
+            logger.info("ExperimentLogger: connected to PostgreSQL")
+            return repo
         except Exception as exc:
-            logger.warning(f"ExperimentLogger: could not ensure tables exist: {exc}")
+            logger.warning(
+                f"ExperimentLogger: PostgreSQL unavailable ({exc}), "
+                "falling back to SQLite (ace_experiments.db)"
+            )
+            return _SQLiteRepo()
 
     def log_experiment(
         self,
