@@ -150,6 +150,7 @@ class AutonomousTDDAgent:
         max_iterations: int = 20,
         review_threshold: float = 0.7,
         context_map: ContextMap | None = None,
+        temperature: float = 0.0,
     ):
         """
         Initialize Autonomous TDD Agent.
@@ -171,6 +172,7 @@ class AutonomousTDDAgent:
         self.src_dir = src_dir
         self.max_iterations = max_iterations
         self.review_threshold = review_threshold
+        self._temperature = temperature
 
         # Create LLM client for primary model
         provider, model = ensemble_learner.models[0][:2]
@@ -561,7 +563,7 @@ Output ONLY the pipe-separated lines (no explanations, no markdown, no extra tex
 """
 
         # Get proposal from primary model
-        response_dict = self.llm_client.generate(prompt)
+        response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
         response = response_dict["content"]
 
         # Parse response
@@ -964,7 +966,7 @@ Output EITHER:
 """
 
         # Get next increment from LLM
-        response_dict = self.llm_client.generate(prompt)
+        response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
         response = response_dict["content"].strip()
 
         # Check if complete
@@ -1532,7 +1534,7 @@ def test_add_returns_sum():
                 # Retry with quality feedback
                 full_prompt = f"{quality_validation_feedback}\n\n{prompt}"
 
-            response_dict = self.llm_client.generate(full_prompt)
+            response_dict = self.llm_client.generate(full_prompt, temperature=self._temperature)
             response = response_dict["content"]
 
             # Extract code from response
@@ -2536,7 +2538,7 @@ A test was written but passed immediately (RED phase violation), indicating the 
 
 Output ONLY the JSON, no other text."""
 
-        response_dict = self.llm_client.generate(prompt)
+        response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
         response = response_dict["content"].strip()
 
         # Parse JSON response
@@ -2666,7 +2668,7 @@ Refine the test to make it MORE SPECIFIC and STRICTER so it actually FAILS and d
 
 **Output the complete refined test function:**"""
 
-        response_dict = self.llm_client.generate(prompt)
+        response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
         refined_code = extract_code(response_dict["content"])
 
         return refined_code
@@ -2738,7 +2740,7 @@ After {attempts} implementation attempts, the test still fails. This suggests:
 Output ONLY the JSON, no other text."""
 
         try:
-            response_dict = self.llm_client.generate(prompt)
+            response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
             response = response_dict["content"].strip()
 
             # Parse JSON response
@@ -2834,7 +2836,7 @@ Output ONLY the JSON, no other text."""
 **Output the COMPLETE corrected test FUNCTION, nothing else.**"""
 
         try:
-            response_dict = self.llm_client.generate(prompt)
+            response_dict = self.llm_client.generate(prompt, temperature=self._temperature)
             corrected_code = response_dict["content"].strip()
 
             # Extract code from markdown if present
