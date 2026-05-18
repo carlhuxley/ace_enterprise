@@ -59,3 +59,35 @@ def test_experiment_logger_falls_back_to_sqlite_when_postgres_unavailable(tmp_pa
     logger = ExperimentLogger(playbook_version="1.0")
     assert len(created) == 1, "Should have fallen back to SQLite"
     assert isinstance(logger.repo, _CapturingSQLiteRepo)
+
+
+def test_log_tdd_cycle_upserts_on_duplicate_experiment_id(tmp_path):
+    """Second call with the same experiment_id must update, not raise."""
+    repo = _SQLiteRepo(path=str(tmp_path / "upsert.db"))
+    exp_logger = ExperimentLogger(playbook_version="1.0", repository=repo)
+
+    kwargs = dict(
+        cycle_number=1,
+        requirement="add two numbers",
+        test_name="test_add",
+        test_code="def test_add(): assert add(1,2)==3",
+        implementation_code="def add(a,b): return a+b",
+        red_passed=False,
+        green_passed=False,
+        red_output="1 failed",
+        green_output="1 failed",
+        learned_bullets=[],
+        playbook_id="upsert-test",
+        retry_count=1,
+    )
+    exp_logger.log_tdd_cycle(**kwargs)
+
+    # Second call — same experiment_id, updated outcome
+    exp_logger.log_tdd_cycle(**{**kwargs, "green_passed": True, "green_output": "1 passed"})
+
+    from src.storage.models import ExperimentLogModel
+    with repo.get_session() as session:
+        records = session.query(ExperimentLogModel).all()
+
+    assert len(records) == 1, "upsert must not create a duplicate row"
+    assert records[0].result == "SUCCESS"

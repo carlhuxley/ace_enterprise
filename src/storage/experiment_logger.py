@@ -103,22 +103,27 @@ class ExperimentLogger:
         """
         try:
             with self.repo.get_session() as session:
-                experiment = ExperimentLogModel(
-                    experiment_id=experiment_id,
-                    playbook_version=self.playbook_version,
-                    timestamp=datetime.utcnow(),
-                    task_data=task_data,
-                    generator_data=generator_data,
-                    environment_data=environment_data,
-                    result=result,
-                    reflector_data=reflector_data,
-                    curator_data=curator_data,
-                    playbook_updated=playbook_updated,
-                    performance_delta=performance_delta,
-                    checkpoint_created=checkpoint_created,
+                experiment = (
+                    session.query(ExperimentLogModel)
+                    .filter_by(experiment_id=experiment_id)
+                    .first()
                 )
+                if experiment is None:
+                    experiment = ExperimentLogModel(experiment_id=experiment_id)
+                    session.add(experiment)
 
-                session.add(experiment)
+                experiment.playbook_version = self.playbook_version
+                experiment.timestamp = datetime.utcnow()
+                experiment.task_data = task_data
+                experiment.generator_data = generator_data
+                experiment.environment_data = environment_data
+                experiment.result = result
+                experiment.reflector_data = reflector_data
+                experiment.curator_data = curator_data
+                experiment.playbook_updated = playbook_updated
+                experiment.performance_delta = performance_delta
+                experiment.checkpoint_created = checkpoint_created
+
                 session.commit()
                 session.refresh(experiment)
 
