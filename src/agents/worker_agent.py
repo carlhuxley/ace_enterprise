@@ -13,6 +13,23 @@ import re
 from src.agents.language_pod import PodSpec
 
 _PLAYBOOK_SECTION = "strategies_and_hard_rules"
+_TEST_RULES_SECTION = "test_assertion_rules"
+
+_DEFAULT_TEST_RULES = [
+    (
+        "Assert PROPERTIES not exact value when multiple correct outputs exist "
+        "(e.g. shortest paths, orderings, set members): use len(), structural validity loops, "
+        "membership checks like result[0]==start and result[-1]==end"
+    ),
+    (
+        "Use == equality on the full result only when there is provably ONE correct answer "
+        "(arithmetic, deterministic transformations, unique key lookup)"
+    ),
+    (
+        "Never assert a specific path or ordering when the algorithm may produce "
+        "any valid path of equal quality"
+    ),
+]
 
 
 class WorkerAgent:
@@ -60,19 +77,10 @@ class WorkerAgent:
             f"Write a failing pytest test for this feature: {spec.feature_requirement}",
             f"Test file: {spec.test_file.name}",
             "The test must fail before the implementation exists (RED phase).",
-            "",
-            "ASSERTION CONTRACT RULES — follow these exactly:",
-            "1. When multiple correct outputs exist (e.g. shortest paths, orderings, set members),",
-            "   assert PROPERTIES of the result, not its exact value. Examples:",
-            "   - Length/count:      assert len(result) == expected_length",
-            "   - Structural validity: check each step satisfies the transition rule",
-            "   - Membership:        assert result[0] == start and result[-1] == end",
-            "   - Bounds:            assert result >= 0",
-            "2. Only use equality on the full result (==) when there is provably ONE correct answer",
-            "   (e.g. arithmetic, deterministic transformations, lookup by unique key).",
-            "3. Never assert a specific path or ordering when the algorithm may produce",
-            "   any valid path or ordering of equal quality.",
         ]
+        rules = self._get_test_bullets()
+        if rules:
+            parts.append("\nAssertion contract rules:\n" + "\n".join(f"- {r}" for r in rules))
         if existing_code:
             parts.append(f"\nExisting tests:\n{existing_code}")
         parts.append("Output only valid Python code.")
@@ -119,6 +127,15 @@ class WorkerAgent:
             return self._playbook_manager.get_bullets(_PLAYBOOK_SECTION) or []
         except Exception:
             return []
+
+    def _get_test_bullets(self) -> list[str]:
+        if not self._playbook_manager:
+            return _DEFAULT_TEST_RULES
+        try:
+            bullets = self._playbook_manager.get_bullets(_TEST_RULES_SECTION) or []
+            return bullets if bullets else _DEFAULT_TEST_RULES
+        except Exception:
+            return _DEFAULT_TEST_RULES
 
     def _context_from_map(self, failing_test_ids: list[str]) -> str:
         try:

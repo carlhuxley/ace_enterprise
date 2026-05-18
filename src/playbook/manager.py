@@ -63,6 +63,7 @@ class PlaybookManager:
             metadata=PlaybookMetadata(domain=domain, base_model="", total_tokens=0, total_bullets=0),
             sections={
                 "strategies_and_hard_rules": [],
+                "test_assertion_rules": [],
                 "code_snippets": [],
                 "troubleshooting": [],
                 "domain_knowledge": [],
@@ -103,6 +104,7 @@ class PlaybookManager:
             metadata=metadata,
             sections={
                 "strategies_and_hard_rules": [],
+                "test_assertion_rules": [],
                 "code_snippets": [],
                 "troubleshooting": [],
                 "domain_knowledge": [],

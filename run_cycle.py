@@ -14,8 +14,10 @@ from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod
 from src.agents.tdd_cycle_runner import TDDCycleRunner
-from src.agents.worker_agent import WorkerAgent
+from src.agents.worker_agent import WorkerAgent, _DEFAULT_TEST_RULES, _TEST_RULES_SECTION
+from src.playbook.manager import PlaybookManager
 from src.storage.experiment_logger import ExperimentLogger
+from src.storage.schemas import BulletCreate
 from src.utils.llm_client import LLMClient
 
 FEATURE = (
@@ -38,7 +40,18 @@ def main():
     print()
 
     llm = LLMClient(provider="openrouter", model=MODEL)
-    worker = WorkerAgent(llm)
+
+    playbook_manager = PlaybookManager()
+    playbook = playbook_manager.get_or_create_playbook(PLAYBOOK_ID)
+    if not playbook.sections.get(_TEST_RULES_SECTION):
+        for rule in _DEFAULT_TEST_RULES:
+            playbook_manager.add_bullet(
+                PLAYBOOK_ID,
+                BulletCreate(content=rule, section=_TEST_RULES_SECTION),
+            )
+        print(f"Seeded {len(_DEFAULT_TEST_RULES)} assertion rules into playbook.")
+
+    worker = WorkerAgent(llm, playbook_manager=playbook_manager)
     experiment_logger = ExperimentLogger(playbook_version="1.0.0")
 
     runner_container = PodmanRunner(container_name="ace_e2e_cycle")
