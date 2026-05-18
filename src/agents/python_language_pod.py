@@ -162,6 +162,7 @@ class PythonLanguagePod:
         try:
             existing = spec.test_file.read_text() if spec.test_file.exists() else ""
             code = self._worker.generate_test(spec, existing_code=existing)
+            code = _ensure_test_import(code, spec.implementation_file.stem)
             _import_filter.check(code)
         except ForbiddenImportError as exc:
             self._record_usage(spec.cycle_number)
@@ -233,3 +234,21 @@ class PythonLanguagePod:
 
 def _is_security_failure(result: PhaseResult) -> bool:
     return result.error is not None and result.error.startswith("Bandit gate:")
+
+
+def _ensure_test_import(code: str, module_name: str) -> str:
+    """Prepend 'from <module_name> import *' if the module isn't imported at all."""
+    import ast
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == module_name:
+                    return code
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] == module_name:
+                return code
+    return f"from {module_name} import *\n" + code

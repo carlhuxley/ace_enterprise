@@ -57,9 +57,21 @@ class WorkerAgent:
 
     def _test_prompt(self, spec: PodSpec, existing_code: str) -> str:
         parts = [
-            f"Write a failing test for this feature: {spec.feature_requirement}",
+            f"Write a failing pytest test for this feature: {spec.feature_requirement}",
             f"Test file: {spec.test_file.name}",
             "The test must fail before the implementation exists (RED phase).",
+            "",
+            "ASSERTION CONTRACT RULES — follow these exactly:",
+            "1. When multiple correct outputs exist (e.g. shortest paths, orderings, set members),",
+            "   assert PROPERTIES of the result, not its exact value. Examples:",
+            "   - Length/count:      assert len(result) == expected_length",
+            "   - Structural validity: check each step satisfies the transition rule",
+            "   - Membership:        assert result[0] == start and result[-1] == end",
+            "   - Bounds:            assert result >= 0",
+            "2. Only use equality on the full result (==) when there is provably ONE correct answer",
+            "   (e.g. arithmetic, deterministic transformations, lookup by unique key).",
+            "3. Never assert a specific path or ordering when the algorithm may produce",
+            "   any valid path or ordering of equal quality.",
         ]
         if existing_code:
             parts.append(f"\nExisting tests:\n{existing_code}")
@@ -117,5 +129,14 @@ class WorkerAgent:
 
 
 def _extract_code(content: str) -> str:
-    match = re.search(r"```(?:python)?\n(.*?)```", content, re.DOTALL)
-    return match.group(1).strip() if match else content.strip()
+    match = re.search(r"```python\n(.*?)```", content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"```\w*\n(.*?)```", content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    # Unclosed fence (model truncated before closing ```)
+    match = re.search(r"```(?:\w+)?\n(.*?)$", content, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return content.strip()
