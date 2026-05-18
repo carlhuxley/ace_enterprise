@@ -19,12 +19,15 @@ from src.storage.experiment_logger import ExperimentLogger
 from src.utils.llm_client import LLMClient
 
 FEATURE = (
-    "a function called `slugify` that converts a string to a URL-friendly slug: "
-    "lowercase, words separated by hyphens, non-alphanumeric characters removed"
+    "a function called `word_ladder(start: str, end: str, word_list: list[str]) -> list[str]` "
+    "that returns the shortest list of words transforming `start` into `end`, where each "
+    "adjacent pair differs by exactly one character and every word except `start` must appear "
+    "in `word_list`. Return an empty list if no transformation exists. "
+    "If `start == end` return `[start]`."
 )
 MODEL = "deepseek/deepseek-v4-flash"
-OUTPUT_DIR = Path("output/slugify")
-PLAYBOOK_ID = "slugify_run_1"
+OUTPUT_DIR = Path("output/word_ladder")
+PLAYBOOK_ID = "word_ladder_run_1"
 
 
 def main():
@@ -51,14 +54,14 @@ def main():
 
         spec = PodSpec(
             feature_requirement=FEATURE,
-            test_file=OUTPUT_DIR / "test_slugify.py",
-            implementation_file=OUTPUT_DIR / "slugify.py",
+            test_file=OUTPUT_DIR / "test_word_ladder.py",
+            implementation_file=OUTPUT_DIR / "word_ladder.py",
             cycle_number=1,
         )
 
         runner = TDDCycleRunner(
             pod,
-            max_green_attempts=3,
+            max_green_attempts=5,
             experiment_logger=experiment_logger,
             playbook_id=PLAYBOOK_ID,
         )
