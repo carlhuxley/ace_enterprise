@@ -249,3 +249,122 @@ def test_no_experiment_logger_does_not_raise(tmp_path):
     runner = TDDCycleRunner(ControlledPod())   # no logger
     result = runner.run(_spec(tmp_path))
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Behavior 10: Reflector + Curator learning loop
+# ---------------------------------------------------------------------------
+
+class _FakeDeltaBullet:
+    def __init__(self, content, section="strategies_and_hard_rules"):
+        self.content = content
+        self.section = section
+
+
+class _FakeReflectorOutput:
+    pass
+
+
+class _FakeCuratorOutput:
+    def __init__(self, bullets):
+        self.delta_bullets = bullets
+        self.reasoning = "test reasoning"
+
+
+class _SpyReflector:
+    def __init__(self):
+        self.calls = []
+
+    def reflect(self, task, generator_output, environment_feedback):
+        self.calls.append((task, generator_output, environment_feedback))
+        return _FakeReflectorOutput()
+
+
+class _SpyCurator:
+    def __init__(self, bullets=None):
+        self.curate_calls = []
+        self.apply_calls = []
+        self._bullets = bullets or [_FakeDeltaBullet("always use pathlib")]
+
+    def curate(self, reflector_output, playbook_id, task_context=None):
+        self.curate_calls.append((reflector_output, playbook_id))
+        return _FakeCuratorOutput(self._bullets)
+
+    def apply_updates(self, playbook_id, curator_output):
+        self.apply_calls.append((playbook_id, curator_output))
+
+
+def test_reflector_and_curator_called_on_success(tmp_path):
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ControlledPod(),
+        reflector=reflector,
+        curator=curator,
+        playbook_id="test-pb",
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is True
+    assert len(reflector.calls) == 1
+    assert len(curator.curate_calls) == 1
+    assert curator.curate_calls[0][1] == "test-pb"
+    assert len(curator.apply_calls) == 1
+
+
+def test_learned_bullets_in_cycle_result(tmp_path):
+    curator = _SpyCurator(bullets=[
+        _FakeDeltaBullet("use dataclasses for value objects"),
+        _FakeDeltaBullet("avoid mutable defaults"),
+    ])
+    runner = TDDCycleRunner(ControlledPod(), reflector=_SpyReflector(), curator=curator)
+    result = runner.run(_spec(tmp_path))
+
+    assert len(result.learned_bullets) == 2
+    assert result.learned_bullets[0].content == "use dataclasses for value objects"
+
+
+def test_learning_skipped_on_green_failure(tmp_path):
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ControlledPod(green_pass_on=999),
+        max_green_attempts=1,
+        reflector=reflector,
+        curator=curator,
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert len(reflector.calls) == 0
+    assert len(curator.curate_calls) == 0
+    assert result.learned_bullets == []
+
+
+def test_learning_skipped_on_red_abort(tmp_path):
+    reflector = _SpyReflector()
+    runner = TDDCycleRunner(AbortingRedPod(), reflector=reflector, curator=_SpyCurator())
+    runner.run(_spec(tmp_path))
+    assert len(reflector.calls) == 0
+
+
+def test_learning_failure_does_not_crash_cycle(tmp_path):
+    class _BrokenCurator(_SpyCurator):
+        def curate(self, *args, **kwargs):
+            raise RuntimeError("DB connection lost")
+
+    runner = TDDCycleRunner(
+        ControlledPod(),
+        reflector=_SpyReflector(),
+        curator=_BrokenCurator(),
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is True          # cycle still succeeds
+    assert result.learned_bullets == []    # bullets empty on error
+
+
+def test_no_reflector_leaves_learned_bullets_empty(tmp_path):
+    runner = TDDCycleRunner(ControlledPod())   # neither reflector nor curator
+    result = runner.run(_spec(tmp_path))
+    assert result.learned_bullets == []
