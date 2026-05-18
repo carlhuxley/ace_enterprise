@@ -23,14 +23,15 @@ class WorkerAgent:
     and generate_refactor for REFACTOR. All methods return raw code strings.
     """
 
-    def __init__(self, llm_client, playbook_manager=None, context_map=None) -> None:
+    def __init__(self, llm_client, playbook_manager=None, context_map=None, temperature: float = 0.0) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
         self._context_map = context_map
+        self._temperature = temperature
 
     def generate_test(self, spec: PodSpec, existing_code: str = "") -> str:
         prompt = self._test_prompt(spec, existing_code)
-        response = self.llm_client.generate(prompt)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
     def generate_implementation(
@@ -44,12 +45,12 @@ class WorkerAgent:
             module_context = self._context_from_map(failing_test_ids)
         bullets = self._get_bullets()
         prompt = self._impl_prompt(spec, error_output, module_context, bullets)
-        response = self.llm_client.generate(prompt)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
     def generate_refactor(self, spec: PodSpec, current_code: str = "") -> str:
         prompt = self._refactor_prompt(spec, current_code)
-        response = self.llm_client.generate(prompt)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
     # --- prompt builders ---
