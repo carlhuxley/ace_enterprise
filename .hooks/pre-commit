@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PYTHON="$REPO_ROOT/.venv/bin/python"
+SCRIPT="$REPO_ROOT/generate_live_docs.py"
+
+if [[ ! -x "$PYTHON" ]]; then
+  echo "pre-commit: .venv/bin/python not found, skipping live docs generation" >&2
+  exit 0
+fi
+
+if [[ ! -f "$SCRIPT" ]]; then
+  echo "pre-commit: generate_live_docs.py not found, skipping" >&2
+  exit 0
+fi
+
+echo "pre-commit: regenerating docs/SYSTEM_ARCHITECTURE.md..."
+if "$PYTHON" "$SCRIPT"; then
+  git add "$REPO_ROOT/docs/SYSTEM_ARCHITECTURE.md"
+  echo "pre-commit: docs staged"
+else
+  echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+fi
+
+exit 0

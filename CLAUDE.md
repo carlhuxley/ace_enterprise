@@ -53,17 +53,26 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+# Install dependencies
+pip install -r requirements.txt
+
+# Install the git pre-commit hook (one-time, per clone)
+cp .hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 ```
+
+The pre-commit hook runs `generate_live_docs.py` before every commit and
+auto-stages `docs/SYSTEM_ARCHITECTURE.md` so the architecture docs stay in
+sync with the code. If the LLM call fails the commit still goes through.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+See [`docs/SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) — generated
+from the live source tree, do not edit by hand. Regenerate manually with:
+
+```bash
+.venv/bin/python generate_live_docs.py
+```
 
 ## Conventions & Patterns
 
