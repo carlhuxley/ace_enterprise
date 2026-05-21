@@ -27,15 +27,26 @@ fi
 if git diff --cached --name-only | grep -qE '^src/.*\.py$|^run_cycle\.py$'; then
   _ace_repo="$(git rev-parse --show-toplevel)"
   _ace_python="$_ace_repo/.venv/bin/python"
-  _ace_script="$_ace_repo/generate_live_docs.py"
 
-  if [ -x "$_ace_python" ] && [ -f "$_ace_script" ]; then
-    echo "pre-commit: src changes detected, regenerating docs/SYSTEM_ARCHITECTURE.md..."
-    if "$_ace_python" "$_ace_script"; then
-      git add "$_ace_repo/docs/SYSTEM_ARCHITECTURE.md"
-      echo "pre-commit: docs staged"
-    else
-      echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+  if [ -x "$_ace_python" ]; then
+    if [ -f "$_ace_repo/generate_live_docs.py" ]; then
+      echo "pre-commit: src changes detected, regenerating docs/SYSTEM_ARCHITECTURE.md..."
+      if "$_ace_python" "$_ace_repo/generate_live_docs.py"; then
+        git add "$_ace_repo/docs/SYSTEM_ARCHITECTURE.md"
+        echo "pre-commit: SYSTEM_ARCHITECTURE.md staged"
+      else
+        echo "pre-commit: WARNING — SYSTEM_ARCHITECTURE.md generation failed" >&2
+      fi
+    fi
+
+    if [ -f "$_ace_repo/generate_live_context.py" ]; then
+      echo "pre-commit: src changes detected, updating CONTEXT.md..."
+      if "$_ace_python" "$_ace_repo/generate_live_context.py"; then
+        git add "$_ace_repo/CONTEXT.md"
+        echo "pre-commit: CONTEXT.md staged"
+      else
+        echo "pre-commit: WARNING — CONTEXT.md generation failed" >&2
+      fi
     fi
   fi
 fi

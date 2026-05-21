@@ -74,6 +74,14 @@ from the live source tree, do not edit by hand. Regenerate manually with:
 .venv/bin/python generate_live_docs.py
 ```
 
+[`CONTEXT.md`](CONTEXT.md) — domain glossary and architectural decisions,
+kept in sync with the live source. Preserves existing definitions; adds new
+concepts on each commit. Regenerate manually with:
+
+```bash
+.venv/bin/python generate_live_context.py
+```
+
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
