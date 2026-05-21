@@ -107,7 +107,9 @@ Output EXACTLY two sections with NO preamble, no explanation, no extra text:
 SECTION 1 — a markdown table:
 | Component | Module | Role |
 |-----------|--------|------|
-(one row per significant class in the codebase)
+Include ONLY classes with meaningful behaviour (orchestrators, agents, runners, managers, clients,
+analyzers, routers, stores). EXCLUDE pure data containers: @dataclass types, result/metrics/config
+structs, Pydantic schemas, SQLAlchemy models, and enums. Aim for 20-35 rows maximum.
 
 SECTION 2 — a fenced Mermaid sequence diagram showing the core data flow:
 ```mermaid
@@ -148,7 +150,7 @@ def main() -> None:
 
     print(f"Calling {PROVIDER}/{MODEL}...")
     client = LLMClient(provider=PROVIDER, model=MODEL)
-    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=4096)
+    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=8192)
 
     content = _strip_outer_fence(result["content"].strip())
     tokens = result.get("tokens_used", "?")
