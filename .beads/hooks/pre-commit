@@ -22,3 +22,21 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.0.4 ---
+
+# --- BEGIN ACE LIVE DOCS ---
+if git diff --cached --name-only | grep -qE '^src/.*\.py$|^run_cycle\.py$'; then
+  _ace_repo="$(git rev-parse --show-toplevel)"
+  _ace_python="$_ace_repo/.venv/bin/python"
+  _ace_script="$_ace_repo/generate_live_docs.py"
+
+  if [ -x "$_ace_python" ] && [ -f "$_ace_script" ]; then
+    echo "pre-commit: src changes detected, regenerating docs/SYSTEM_ARCHITECTURE.md..."
+    if "$_ace_python" "$_ace_script"; then
+      git add "$_ace_repo/docs/SYSTEM_ARCHITECTURE.md"
+      echo "pre-commit: docs staged"
+    else
+      echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+    fi
+  fi
+fi
+# --- END ACE LIVE DOCS ---
