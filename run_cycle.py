@@ -21,15 +21,25 @@ from src.storage.schemas import BulletCreate
 from src.utils.llm_client import LLMClient
 
 FEATURE = (
-    "a function called `word_ladder(start: str, end: str, word_list: list[str]) -> list[str]` "
-    "that returns the shortest list of words transforming `start` into `end`, where each "
-    "adjacent pair differs by exactly one character and every word except `start` must appear "
-    "in `word_list`. Return an empty list if no transformation exists. "
-    "If `start == end` return `[start]`."
+    "A function called `migrate_and_sanitize_payload(raw_json_str: str, target_schema_version: int) -> dict`. "
+    "It must: "
+    "(1) Parse `raw_json_str`, which may contain trailing commas, single-quoted strings, or other minor "
+    "JSON syntax errors — use a best-effort parser (try json.loads first, then fall back to ast.literal_eval "
+    "after normalising quotes, then return {} on total failure); "
+    "(2) Strip any keys not in the whitelist ALLOWED_KEYS = {'user_id', 'email', 'name', 'age', 'address', "
+    "'preferences', 'schema_version', 'created_at', 'updated_at'} — recursively for nested dicts; "
+    "(3) Apply v1→v2 field renames when target_schema_version == 2: rename 'username' → 'name', "
+    "'addr' → 'address', 'prefs' → 'preferences' (before the whitelist pass, so renamed keys survive); "
+    "(4) Apply fallback defaults for missing top-level keys: "
+    "name defaults to 'anonymous', age defaults to 0, preferences defaults to {}; "
+    "(5) Set 'schema_version' in the output to target_schema_version; "
+    "SECURITY INVARIANT: the key 'password', 'token', 'secret', and 'ssn' must NEVER appear "
+    "anywhere in the returned dict, even if nested. "
+    "The function must never raise — all errors are swallowed and produce a safe partial result."
 )
 MODEL = "deepseek/deepseek-v4-flash"
-OUTPUT_DIR = Path("output/word_ladder")
-PLAYBOOK_ID = "word_ladder_run_1"
+OUTPUT_DIR = Path("output/json_migrator")
+PLAYBOOK_ID = "json_migrator_run_1"
 
 
 def main():
@@ -67,8 +77,8 @@ def main():
 
         spec = PodSpec(
             feature_requirement=FEATURE,
-            test_file=OUTPUT_DIR / "test_word_ladder.py",
-            implementation_file=OUTPUT_DIR / "word_ladder.py",
+            test_file=OUTPUT_DIR / "test_json_migrator.py",
+            implementation_file=OUTPUT_DIR / "json_migrator.py",
             cycle_number=1,
         )
 
