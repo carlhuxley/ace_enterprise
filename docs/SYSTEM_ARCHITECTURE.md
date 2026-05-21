@@ -62,11 +62,7 @@ sequenceDiagram
             Orch-->>Pod: PhaseResult
             deactivate Pod
             Pod-->>Runner: green_result
-            alt green passed or abort
-                break
-            else
-                update error_feedback
-            end
+            Note right of Runner: exit loop if passed or abort
         end
     end
 

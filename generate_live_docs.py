@@ -115,6 +115,14 @@ sequenceDiagram
     ...
 ```
 
+STRICT MERMAID RULES — violating any of these produces a parse error in GitHub:
+- Use ONLY these block types: alt/else/end, opt/end, loop/end, Note
+- NEVER use: break, par, par_over, critical, rect — they are unsupported or context-restricted
+- `break` is NOT a keyword inside alt/opt/loop — use `Note right of X: exits if ...` instead
+- `else` is ONLY valid as part of `alt ... else ... end`, never standalone
+- Every `activate` must have a matching `deactivate`
+- Participant aliases must not contain spaces or special characters
+
 Start immediately with the table header. Nothing before it. Nothing after the closing fence."""
 
 
