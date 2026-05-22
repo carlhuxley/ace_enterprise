@@ -74,16 +74,22 @@ class WorkerAgent:
 
     def _test_prompt(self, spec: PodSpec, existing_code: str) -> str:
         parts = [
-            f"Write a failing pytest test for this feature: {spec.feature_requirement}",
+            f"Add ONE new failing pytest test for: {spec.feature_requirement}",
             f"Test file: {spec.test_file.name}",
-            "The test must fail before the implementation exists (RED phase).",
+            "The new test must FAIL before any implementation exists (RED phase).",
+            "Do NOT duplicate or overlap with any existing test.",
         ]
         rules = self._get_test_bullets()
         if rules:
             parts.append("\nAssertion contract rules:\n" + "\n".join(f"- {r}" for r in rules))
         if existing_code:
-            parts.append(f"\nExisting tests:\n{existing_code}")
-        parts.append("Output only valid Python code.")
+            parts.append(
+                f"\nExisting tests (KEEP ALL of these unchanged):\n{existing_code}"
+                "\n\nOutput the COMPLETE test file: all existing tests preserved, "
+                "plus exactly ONE new failing test function appended at the end."
+            )
+        else:
+            parts.append("Output only valid Python code.")
         return "\n".join(parts)
 
     def _impl_prompt(
