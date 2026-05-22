@@ -60,11 +60,23 @@ class IterativeTDDRunner:
             curator=curator,
         )
 
+    def run_from_feature(self, feature_path: "Path | str") -> IterativeResult:
+        """Parse a Gherkin .feature file and run the iterative TDD loop."""
+        from pathlib import Path as _Path
+        from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+        feature_path = _Path(feature_path)
+        spec = GherkinFeatureBridge.parse(feature_path)
+        return self.run(
+            requirement=spec.as_requirement(),
+            gherkin_context=feature_path.read_text(encoding="utf-8"),
+            gherkin_scenarios=spec.scenarios,
+        )
+
     def run(
         self,
         requirement: str,
         gherkin_context: str | None = None,
-        gherkin_scenarios: list[dict] | None = None,
+        gherkin_scenarios=None,
     ) -> IterativeResult:
         results: list[CycleResult] = []
         cycle_number = 1

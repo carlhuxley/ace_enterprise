@@ -73,6 +73,24 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **BulletCreate** — Input schema for adding a bullet via PlaybookManager. Contains content, section, tags, and optional fields for provenance (model, provider, license) and contextual retrieval (confidence, domains, projects).
 
+**CGR³ (Context Graph Retrieve-Rank-Reason)** — A retrieval system that scores bullets against request context across multiple dimensions (temporal validity, team locality, tech stack compatibility, project relevance, domain relevance) and issues a verdict (`APPLY`, `ASK_FIRST`, `SKIP`). Core components: `ContextGraphRetriever`, `ContextScorer`, `InstitutionalKnowledgeService`.
+
+**InstitutionalKnowledgeService** — Central knowledge retrieval service for all code generation activities. Wraps `BulletRetriever` and `CGR³` to return guidance, anti-patterns, and context-aware suggestions.
+
+**DistillationRouter** — Routes tasks to domain-specific distillation playbooks for cross-model knowledge transfer. Uses `DomainRegistry` to classify query domains and `Provenance` to filter bullets by supplier, license, and model origin, ensuring appropriate knowledge flow between student and teacher models.
+
+**Provenance** — Tracks the origin of a bullet or model (name, provider, license category). Used by `DistillationRouter` to determine whether a bullet (teacher) can teach a student model based on cross-supplier proprietary rules.
+
+**DomainRegistry** — Maintains a registry of domains and their playbook signatures. Aggregates playbook embeddings to compute domain centroids for query classification.
+
+**PlaybookReliabilityAnalyzer** — Correlates bullet retrieval with first-pass GREEN success across TDD cycles. Computes per-bullet first-pass rates to identify which bullets most improve outcomes.
+
+**TDDCycleAnalyzer** — Measures first-pass GREEN rate over time, split into configurable time periods, to detect improvement or regression in TDD cycle efficiency.
+
+**BulletDeduplicator** — Handles semantic deduplication of bullets using embedding similarity (cosine distance). Supports configurable thresholds and duplicate-preservation strategies.
+
+**BulletClusterer** — DBSCAN-based clustering for playbook bullets. Groups semantically related bullets and selects representatives by helpful ratio, centrality, or recency.
+
 ---
 
 ## Architectural Decisions
@@ -93,6 +111,12 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 - **Generator retrieval modes**: The Generator supports both model-specific retrieval (single playbook) and cross-model hybrid retrieval (primary playbook + domain-related playbooks from other models), controlled by `settings.retrieval_mode`.
 
-- **Bullet deduplication with embedding fallback**: `PlaybookManager` uses exact-match deduplication by default, with a placeholder for future semantic similarity checking via embeddings.
+- **Bullet deduplication with embedding fallback**: `PlaybookManager` uses exact-match deduplication by default, with a placeholder for future semantic similarity checking via embeddings. The `BulletDeduplicator` class provides a dedicated semantic deduplication interface.
 
 - **WorkerAgent as prompt builder**: `WorkerAgent` encapsulates all prompt construction and LLM calling. It accepts `PodSpec`, error feedback, and optional AST context map; returns raw code strings. File I/O remains the caller's (`LanguagePod`) responsibility.
+
+- **CGR³ context-aware retrieval**: Bullets are scored against request context (temporal, team, tech stack, project, domain) and a verdict is issued (`APPLY`, `ASK_FIRST`, `SKIP`). This enables fine-grained, context-sensitive knowledge application. Used by `InstitutionalKnowledgeService` for all code generation queries.
+
+- **Distillation Router for cross-model knowledge**: A `DistillationRouter` routes tasks to domain-specific distillation playbooks, filtering bullets by provenance (model supplier, license) to ensure appropriate knowledge transfer between models. This prevents proprietary knowledge from leaking across suppliers.
+
+- **Reliability analysis as a feedback loop**: `PlaybookReliabilityAnalyzer` and `TDDCycleAnalyzer` compute first-pass GREEN rates per bullet and over time, enabling data-driven refinement of playbook quality and TDD process improvement.

@@ -241,7 +241,7 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
     def _build_gherkin_section(
         self,
         gherkin_context: str | None,
-        gherkin_scenarios: list[dict] | None,
+        gherkin_scenarios,
     ) -> str:
         if not gherkin_context:
             return ""
@@ -250,9 +250,14 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
 
         scenario_lines = []
         for i, s in enumerate(gherkin_scenarios, 1):
-            scenario_lines.append(f"{i}. **{s['name']}**")
-            for step in s["steps"]:
-                scenario_lines.append(f"   {step['type']}: {step['text']}")
+            # Handle both ScenarioSpec objects and plain dicts
+            name = s["name"] if isinstance(s, dict) else s.name
+            steps = s["steps"] if isinstance(s, dict) else s.steps
+            scenario_lines.append(f"{i}. **{name}**")
+            for step in steps:
+                # Steps may be plain strings or dicts with type/text keys
+                line = f"{step['type']}: {step['text']}" if isinstance(step, dict) else step
+                scenario_lines.append(f"   {line}")
 
         return (
             f"\n**🎯 GHERKIN-DRIVEN ATDD:**\n"
