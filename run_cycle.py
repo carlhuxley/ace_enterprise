@@ -1,7 +1,7 @@
-"""End-to-end TDD cycle run with real LLM + real Podman container.
+"""End-to-end iterative TDD cycle run with real LLM + real Podman container.
 
-Uses TDDCycleRunner (RED → GREEN with retry → REFACTOR) wired to
-ExperimentLogger (SQLite fallback when Postgres is unavailable).
+Uses IterativeTDDRunner (IncrementalPlanner → TDDCycleRunner loop) for
+Kent Beck-style RED→GREEN→REFACTOR until the planner says COMPLETE.
 
 Usage:
     .venv/bin/python run_cycle.py
@@ -9,11 +9,11 @@ Usage:
 import sys
 from pathlib import Path
 
-from src.agents.language_pod import PodSpec
+from src.agents.incremental_planner import IncrementalPlanner
+from src.agents.iterative_tdd_runner import IterativeTDDRunner
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod
-from src.agents.tdd_cycle_runner import TDDCycleRunner
 from src.agents.worker_agent import WorkerAgent, _DEFAULT_TEST_RULES, _TEST_RULES_SECTION
 from src.playbook.manager import PlaybookManager
 from src.storage.experiment_logger import ExperimentLogger
@@ -40,12 +40,13 @@ FEATURE = (
 MODEL = "deepseek/deepseek-v4-flash"
 OUTPUT_DIR = Path("output/json_migrator")
 PLAYBOOK_ID = "json_migrator_run_1"
+MAX_ITERATIONS = 8
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Model  : {MODEL}")
-    print(f"Feature: {FEATURE}")
+    print(f"Feature: {FEATURE[:80]}...")
     print(f"Output : {OUTPUT_DIR.resolve()}")
     print()
 
@@ -64,6 +65,14 @@ def main():
     worker = WorkerAgent(llm, playbook_manager=playbook_manager)
     experiment_logger = ExperimentLogger(playbook_version="1.0.0")
 
+    planner = IncrementalPlanner(
+        llm_client=llm,
+        test_dir=OUTPUT_DIR,
+        src_dir=OUTPUT_DIR,
+        playbook_manager=playbook_manager,
+        playbook_id=PLAYBOOK_ID,
+    )
+
     runner_container = PodmanRunner(container_name="ace_e2e_cycle")
     runner_container.start()
     print("Container started.")
@@ -75,46 +84,33 @@ def main():
         )
         pod = PythonLanguagePod(worker, OUTPUT_DIR, orchestrator)
 
-        spec = PodSpec(
-            feature_requirement=FEATURE,
-            test_file=OUTPUT_DIR / "test_json_migrator.py",
-            implementation_file=OUTPUT_DIR / "json_migrator.py",
-            cycle_number=1,
-        )
-
-        runner = TDDCycleRunner(
-            pod,
+        runner = IterativeTDDRunner(
+            pod=pod,
+            planner=planner,
+            max_iterations=MAX_ITERATIONS,
             max_green_attempts=5,
             experiment_logger=experiment_logger,
             playbook_id=PLAYBOOK_ID,
         )
 
-        print("Running TDD cycle...")
+        print(f"Running iterative TDD (max {MAX_ITERATIONS} cycles)...")
         sys.stdout.flush()
-        result = runner.run(spec)
+        result = runner.run(FEATURE)
 
         print(f"\n=== RESULT ===")
+        print(f"Complete      : {result.complete}")
         print(f"Success       : {result.success}")
-        print(f"GREEN attempts: {result.green_attempts}")
-        if result.error:
-            print(f"Error         : {result.error}")
+        print(f"Cycles run    : {result.iterations}")
 
-        print(f"\nRED   passed={result.red_result.passed}  error={result.red_result.error}")
-        print(f"GREEN passed={result.green_result.passed}  error={result.green_result.error}")
-        if result.refactor_result:
-            print(f"REFAC passed={result.refactor_result.passed}  error={result.refactor_result.error}")
+        for i, cycle in enumerate(result.cycles, 1):
+            status = "✓" if cycle.success else "✗"
+            req = cycle.feature_requirement[:60]
+            attempts = cycle.green_attempts
+            print(f"  {status} Cycle {i}: {req}  (GREEN in {attempts} attempt{'s' if attempts != 1 else ''})")
 
-        total_input = sum(u.input_tokens for u in result.token_usage)
-        total_output = sum(u.output_tokens for u in result.token_usage)
-        print(f"\nTokens in={total_input}  out={total_output}")
-
-        if spec.test_file.exists():
-            print(f"\n--- generated test ({spec.test_file.stat().st_size} bytes) ---")
-            print(spec.test_file.read_text())
-
-        if spec.implementation_file.exists():
-            print(f"\n--- generated implementation ({spec.implementation_file.stat().st_size} bytes) ---")
-            print(spec.implementation_file.read_text())
+        total_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
+        total_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
+        print(f"\nTokens in={total_in}  out={total_out}")
 
         print(f"\nOutput files in: {OUTPUT_DIR.resolve()}")
         for f in sorted(OUTPUT_DIR.glob("*.py")):
