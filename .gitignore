@@ -84,6 +84,9 @@ temp/
 .DS_Store
 Thumbs.db
 
+# TDD cycle output (generated artifacts, not source)
+output/
+
 # ACE Runtime Data
 data/playbooks/*.json
 data/playbooks_untracked/*.json
