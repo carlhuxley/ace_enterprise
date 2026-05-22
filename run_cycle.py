@@ -73,7 +73,7 @@ def main():
             runner=runner_container,
             work_dir=OUTPUT_DIR / "harness",
         )
-        pod = PythonLanguagePod.from_worker(worker, OUTPUT_DIR, orchestrator)
+        pod = PythonLanguagePod(worker, OUTPUT_DIR, orchestrator)
 
         spec = PodSpec(
             feature_requirement=FEATURE,

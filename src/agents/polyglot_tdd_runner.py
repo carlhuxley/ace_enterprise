@@ -48,7 +48,11 @@ class PodFactory:
     def create(language: str, **kwargs):
         if language == "python":
             from src.agents.python_language_pod import PythonLanguagePod
-            return PythonLanguagePod(kwargs["agent"])
+            return PythonLanguagePod(
+                worker_agent=kwargs["worker"],
+                project_root=kwargs["project_root"],
+                orchestrator=kwargs["orchestrator"],
+            )
         if language == "go":
             from src.agents.go_language_pod import GoLanguagePod
             return GoLanguagePod(
