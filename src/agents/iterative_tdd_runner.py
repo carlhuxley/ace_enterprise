@@ -124,14 +124,18 @@ class IterativeTDDRunner:
             sname = scenario.name if hasattr(scenario, "name") else scenario.get("name", f"scenario_{i}")
             logger.info("IterativeTDDRunner [gherkin]: cycle %d — %s", i, sname)
 
-            increment = self._planner.next_increment_for_scenario(
-                requirement=requirement,
-                cycle_number=i,
-                scenario=scenario,
-                gherkin_context=gherkin_context,
-                test_file=pinned_test_file,
-                impl_file=pinned_impl_file,
-            )
+            try:
+                increment = self._planner.next_increment_for_scenario(
+                    requirement=requirement,
+                    cycle_number=i,
+                    scenario=scenario,
+                    gherkin_context=gherkin_context,
+                    test_file=pinned_test_file,
+                    impl_file=pinned_impl_file,
+                )
+            except Exception as exc:
+                logger.warning("IterativeTDDRunner: planner error on scenario %d — %s", i, exc)
+                increment = None
 
             if increment is None:
                 logger.warning("IterativeTDDRunner: parse error for scenario %d, skipping", i)

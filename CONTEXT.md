@@ -250,3 +250,9 @@ Use these terms exactly in code, docs, and architecture discussions.
 **ADR-017: WorkerAgent Prompt Construction** — `WorkerAgent` builds phase-specific prompts internally using `_test_prompt`, `_impl_prompt`, and `_refactor_prompt`. The test prompt includes existing test code and assertion rules; the implementation prompt includes error output from previous GREEN attempts, module context from the AST context map, and playbook guidance; the refactor prompt includes the current implementation code. All prompts instruct the LLM to output only valid Python code, and `_extract_code` strips markdown fences from the response.
 
 **ADR-018: Code Extraction with Truncation Handling** — `WorkerAgent._extract_code` handles LLM responses that may be truncated (missing closing ``` fence) by matching an unclosed code fence pattern as a fallback. This ensures partial responses from models that hit token limits still yield usable code.
+
+**ADR-019: PlaybookManager.get_bullets() Cross-Playbook Retrieval** — `PlaybookManager.get_bullets(section)` returns bullet content strings from all loaded playbooks for a given section, not just a single playbook. This enables the WorkerAgent to access assertion rules and guidance across all playbooks without specifying a playbook ID.
+
+**ADR-020: TDDCycleRunner Learning Loop with UUID Task IDs** — The learning loop in `TDDCycleRunner._learn()` generates unique task IDs using `uuid.uuid4().hex[:8]` to avoid collisions when multiple cycles produce learning artifacts. The task ID format is `tdd_{cycle_number}_{short_uuid}`.
+
+**ADR-021: PythonLanguagePod Existing Implementation Preservation** — During the RED phase, `PythonLanguagePod.run_red()` includes the existing implementation file in the pulse if it exists, preventing workspace-clear operations from breaking imports when the implementation already exists from a prior cycle.
