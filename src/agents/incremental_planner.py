@@ -115,10 +115,16 @@ class IncrementalPlanner:
 
 test_name | description | test_file_path | impl_file_path
 
-**Example progression:**
-Cycle 1: test_can_be_created | Create instance | tests/test_widget.py | src/widget.py
-Cycle 2: test_has_add_method | Widget has add method | tests/test_widget.py | src/widget.py
-Cycle 3: test_add_returns_sum | add(2,3) returns 5 | tests/test_widget.py | src/widget.py
+**Description field rules (CRITICAL — this is the ONLY context the code writer sees):**
+- MUST include the exact function/method signature being tested
+- MUST include concrete input values AND the exact expected output
+- If from a Gherkin scenario, embed the precise numbers: e.g. "calculate_bill(consumption=40, standing_charge=5.0, baseline_rate=0.15, baseline_limit=100) returns 11.0"
+- Do NOT use vague phrases like "basic test" or "check feature" — be a specification
+
+**Example progression (note specific values in description):**
+Cycle 1: test_can_be_created | Widget() creates instance without error | tests/test_widget.py | src/widget.py
+Cycle 2: test_add_returns_sum | Widget.add(2, 3) returns 5 | tests/test_widget.py | src/widget.py
+Cycle 3: test_add_with_negatives | Widget.add(-1, 1) returns 0 | tests/test_widget.py | src/widget.py
 
 What is the next test for cycle {cycle_number}?
 Output EITHER "COMPLETE" or ONE pipe-delimited line.

@@ -1,18 +1,21 @@
 """
 PodmanRunner — production ContainerRunner backed by rootless Podman.
 
-Runs a persistent sidecar container (start once, exec per pulse).
-Requires podman in PATH. Tests skip gracefully when podman is absent.
+Hot sandbox: one persistent container per session (podman run -d sleep infinity).
+Workspace is a host-side directory bind-mounted into the container at /workspace.
+On Linux the host directory lives under /dev/shm (tmpfs), so file writes from the
+host are instantly visible inside the container with zero copy overhead.
+Tests skip gracefully when podman is absent.
 """
 import json
+import shutil
 import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 
 from src.agents.podman_orchestrator import ContainerRunner, PulseResult, canonical_hash
 
-_REMOTE_WS = "/tmp/ws"
+_REMOTE_WS = "/workspace"
 
 
 class PodmanRunner:
@@ -21,9 +24,9 @@ class PodmanRunner:
 
     Lifecycle:
         runner = PodmanRunner()
-        runner.start()          # launches container
+        runner.start()          # launches container with tmpfs workspace mounted
         result = runner.send_pulse({"test.py": ..., "impl.py": ...})
-        runner.stop()           # removes container
+        runner.stop()           # removes container and workspace
     """
 
     def __init__(
@@ -40,13 +43,21 @@ class PodmanRunner:
         self._memory = memory
         self._test_timeout = test_timeout
         self._alive = False
+        self._host_ws: Path | None = None
 
     # ------------------------------------------------------------------
     # ContainerRunner protocol
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        # Clean up any leftover container from a previous session
+        # Host-side workspace: prefer /dev/shm (always tmpfs), fall back to /tmp
+        shm = Path("/dev/shm")
+        base = shm if shm.is_dir() else Path("/tmp")
+        self._host_ws = base / f"ace_ws_{self._name}"
+        if self._host_ws.exists():
+            shutil.rmtree(self._host_ws)
+        self._host_ws.mkdir(parents=True)
+
         subprocess.run(
             ["podman", "rm", "-f", self._name],
             capture_output=True,
@@ -58,6 +69,10 @@ class PodmanRunner:
                 "--network", "none",
                 "--cpus", self._cpus,
                 "--memory", self._memory,
+                # Bind-mount the host tmpfs dir as the container workspace
+                "-v", f"{self._host_ws}:{_REMOTE_WS}:z",
+                # Container's own /tmp on RAM too
+                "--mount", "type=tmpfs,dst=/tmp",
                 self._image, "sleep", "infinity",
             ],
             check=True,
@@ -70,6 +85,8 @@ class PodmanRunner:
             ["podman", "rm", "-f", self._name],
             capture_output=True,
         )
+        if self._host_ws and self._host_ws.exists():
+            shutil.rmtree(self._host_ws, ignore_errors=True)
         self._alive = False
 
     def is_alive(self) -> bool:
@@ -83,45 +100,38 @@ class PodmanRunner:
         return result.returncode == 0 and "running" in result.stdout
 
     def send_pulse(self, files: dict[str, str]) -> PulseResult:
-        # Write files to a host temp dir, then cp the whole directory into the container
-        with tempfile.TemporaryDirectory() as local_ws:
-            local_ws_path = Path(local_ws)
-            for name, content in files.items():
-                (local_ws_path / name).write_text(content)
-
-            # Recreate workspace dir inside the container
-            subprocess.run(
-                ["podman", "exec", self._name, "rm", "-rf", _REMOTE_WS],
-                capture_output=True,
-            )
-            subprocess.run(
-                ["podman", "exec", self._name, "mkdir", "-p", _REMOTE_WS],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["podman", "cp", f"{local_ws}/.", f"{self._name}:{_REMOTE_WS}/"],
-                check=True,
-                capture_output=True,
-            )
+        # Clear workspace then write exactly the pulse's files directly to the
+        # bind-mounted host path — visible in the container immediately, no copy.
+        for existing in self._host_ws.iterdir():
+            if existing.is_dir():
+                shutil.rmtree(existing)
+            else:
+                existing.unlink()
+        for name, content in files.items():
+            (self._host_ws / name).write_text(content)
 
         pytest_result = subprocess.run(
-            ["podman", "exec", self._name,
-             "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
-             f"--timeout={self._test_timeout}"],
+            [
+                "podman", "exec", "--workdir", _REMOTE_WS, self._name,
+                "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
+                f"--timeout={self._test_timeout}",
+            ],
             capture_output=True,
             text=True,
         )
 
         bandit_result = subprocess.run(
-            ["podman", "exec", self._name,
-             "python", "-m", "bandit", "-r", _REMOTE_WS, "--format", "json", "-q"],
+            [
+                "podman", "exec", self._name,
+                "python", "-m", "bandit", "-r", _REMOTE_WS,
+                "--format", "json", "-q",
+            ],
             capture_output=True,
             text=True,
         )
 
-        # Read files back from container to compute h_executed from what actually ran
-        h_executed = self._compute_remote_hash(list(files.keys()))
+        # Hash computed from host-side files (same bytes as container via bind mount)
+        h_executed = self._compute_workspace_hash(list(files.keys()))
 
         return PulseResult(
             exit_code=pytest_result.returncode,
@@ -131,18 +141,18 @@ class PodmanRunner:
             h_executed=h_executed,
         )
 
-    def _compute_remote_hash(self, filenames: list[str]) -> str:
-        """Read each file from the container workspace and compute canonical_hash."""
-        executed_files: dict[str, str] = {}
+    # ------------------------------------------------------------------
+    # Private
+    # ------------------------------------------------------------------
+
+    def _compute_workspace_hash(self, filenames: list[str]) -> str:
+        """Read the named files from the host workspace and compute canonical_hash."""
+        executed: dict[str, str] = {}
         for name in filenames:
-            result = subprocess.run(
-                ["podman", "exec", self._name, "cat", f"{_REMOTE_WS}/{name}"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                executed_files[name] = result.stdout
-        return canonical_hash(executed_files) if executed_files else ""
+            path = self._host_ws / name
+            if path.exists():
+                executed[name] = path.read_text()
+        return canonical_hash(executed) if executed else ""
 
 
 def _parse_bandit(raw: str) -> dict:

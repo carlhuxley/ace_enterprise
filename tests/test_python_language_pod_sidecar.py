@@ -111,7 +111,7 @@ def make_pod(tmp_path: Path, runner=None, impl_code: str = IMPL_ONLY) -> tuple[P
     runner = runner or HashingSubprocessRunner()
     orchestrator = PodmanOrchestrator(runner=runner, work_dir=tmp_path / "sidecar")
     worker = make_worker(impl_code=impl_code)
-    pod = PythonLanguagePod.from_worker(worker, tmp_path, orchestrator)
+    pod = PythonLanguagePod(worker, tmp_path, orchestrator)
     return pod, make_spec(tmp_path)
 
 

@@ -60,8 +60,14 @@ class PythonLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
+        # Include existing implementation so the workspace-clear in send_pulse
+        # doesn't break imports when the impl already exists from a prior cycle.
+        pulse_files: dict[str, str] = {spec.test_file.name: code}
+        if spec.implementation_file.exists():
+            pulse_files[spec.implementation_file.name] = spec.implementation_file.read_text()
+
         try:
-            result = self._orchestrator.pulse({spec.test_file.name: code})
+            result = self._orchestrator.pulse(pulse_files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")

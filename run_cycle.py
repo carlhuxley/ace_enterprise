@@ -20,10 +20,10 @@ from src.storage.experiment_logger import ExperimentLogger
 from src.storage.schemas import BulletCreate
 from src.utils.llm_client import LLMClient
 
-FEATURE_FILE = Path("features/query_string_parser.feature")
+FEATURE_FILE = Path("features/tiered_energy_tariff.feature")
 MODEL = "deepseek/deepseek-v4-flash"
-OUTPUT_DIR = Path("output/query_string_parser")
-PLAYBOOK_ID = "query_string_parser_run_1"
+OUTPUT_DIR = Path("output/tiered_energy_tariff")
+PLAYBOOK_ID = "tiered_energy_tariff_run_1"
 MAX_ITERATIONS = 8
 
 
@@ -65,6 +65,7 @@ def main():
         orchestrator = PodmanOrchestrator(
             runner=runner_container,
             work_dir=OUTPUT_DIR / "harness",
+            started=True,
         )
         pod = PythonLanguagePod(worker, OUTPUT_DIR, orchestrator)
 

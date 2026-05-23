@@ -7,204 +7,162 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 ## Core Concepts
 
-**Playbook** — A persistent, versioned collection of bullets (learned patterns) scoped to a domain or model. The central knowledge store that guides generation.
-
-**Bullet** — A single actionable piece of learned knowledge stored in a Playbook. Organised into sections: `strategies_and_hard_rules`, `code_snippets`, `troubleshooting`, `domain_knowledge`, `test_assertion_rules`, `session-wins`, `global-go-bullets`.
-
 **ACE Pipeline** — The three-module learning loop: Generator → Reflector → Curator. Generator produces output using playbook guidance; Reflector analyses failures; Curator writes insights back as bullets.
 
-**Generator** — ACE pipeline module. Retrieves relevant bullets from the Playbook and uses them to guide LLM code generation. Interface: `execute(task, playbook_id) → GeneratorOutput`.
-
-**Reflector** — ACE pipeline module. Analyses task failures and extracts structured insights (`error_identification`, `root_cause`, `correct_approach`, `key_insight`). Interface: `reflect(task, generator_output, environment_feedback) → ReflectorOutput`.
-
-**Curator** — ACE pipeline module. Synthesises Reflector insights into delta bullets and applies them to the Playbook with deduplication and token-budget enforcement. Interface: `curate(reflector_output, playbook_id) → CuratorOutput`, `apply_updates(playbook_id, curator_output) → list[str]`.
-
-**Ensemble** — Multi-model consensus system. Multiple LLMs vote on outputs; `EnsembleLearner` aggregates results and calls the ACE pipeline to commit learned patterns.
-
-**TDD Cycle** — The four-phase loop: RED (write failing test) → GREEN (write minimal code to pass) → REFACTOR (improve quality) → LEARN (extract patterns via ACE pipeline or Ensemble).
-
-**AutonomousTDDAgent** — The primary TDD entry point. Plans incremental tests using Ensemble, executes TDD cycles, and learns via the ACE pipeline. GREEN phase uses Generator for playbook-guided generation; retry learning routes through Curator.
-
-**ModuleTDDBuilder** — Contract-driven TDD executor. Takes a `ModuleContract` from `ModuleArchitect` and builds each function via TDD. Emits audit events per function. Does not use the ACE pipeline directly.
-
-**ModuleContract** — A structured specification of a module: its functions (`FunctionSpec`), shared state, integration tests, and complexity score. Produced by `ModuleArchitect`.
-
-**Audit** — Append-only event log. Every TDD cycle emits `CYCLE_COMPLETED` events recording which model was used, success/failure, and cycle counts. Used for model attribution and performance aggregation. Events are stored with hash chain integrity via `AuditStore`.
-
-**LanguagePod** — Language-agnostic protocol for TDD execution. Each pod implements `run_red`, `run_green`, `run_refactor`, and `token_usage`. Implementations include `PythonLanguagePod` and `GoLanguagePod`.
-
-**PodSpec** — Everything a pod needs to execute one phase: `feature_requirement`, `test_file`, `implementation_file`, `cycle_number`, `error_output` (feedback from a previous failed GREEN, set by TDDCycleRunner).
-
-**PhaseResult** — Outcome of a single phase (RED, GREEN, or REFACTOR). Contains `passed` (bool), `output` (str), and optional `error` (str).
-
-**CycleResult** — Outcome of a complete TDD cycle. Contains `success`, `feature_requirement`, `red_result`, `green_result`, `refactor_result`, `green_attempts`, `token_usage`, `error`, and `learned_bullets` (list of DeltaBullet).
-
-**TDDCycleRunner** — Orchestrates RED → GREEN → REFACTOR for one feature. Handles GREEN retries with error feedback and aborts on security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate). Optionally runs Reflector/Curator learning loop after successful cycles via `_learn()`.
-
-**WorkerAgent** — Standalone LLM code-generation component. Separates prompt-building and LLM-calling from TDD loop orchestration. Returns raw code strings; file I/O and test execution are the caller's responsibility. Also supports fetching playbook guidance for strategies and test assertion rules.
-
-**IncrementalPlanner** — Determines the next test increment by asking the LLM what single test to write next, given current test and implementation files and playbook guidance. Interface: `next_increment(requirement, cycle_number, ...) → TestIncrement`.
-
-**IterativeTDDRunner** — Kent Beck-style iterative TDD loop. Uses an `IncrementalPlanner` to get the next test increment, then `TDDCycleRunner` to execute RED→GREEN→REFACTOR. Repeats until the planner signals COMPLETE or max iterations reached. Returns `IterativeResult`.
-
-**TestIncrement** — One planned test step: contains `feature_requirement` and file path for the new test.
-
-**IterativeResult** — Outcome of a full iterative TDD session. Contains `complete` (bool), `success` (bool), `iterations` (int), and list of `cycles` (each with cycle details).
-
-**FeatureSpec** — Parsed representation of a Gherkin `.feature` file. Contains the feature description, scenarios, and steps. Provides `as_requirement()` to produce a single string for the TDD loop. Created by `GherkinFeatureBridge`.
-
-**GherkinFeatureBridge** — Parses a Gherkin `.feature` file into a `FeatureSpec`. Used by `IterativeTDDRunner` to feed structured requirements into `IncrementalPlanner`.
-
-**PodmanOrchestrator** — Stateless sidecar execution layer for the Clean Room harness. Runs code in isolated Podman containers with security breach detection via canonical hashing (SHA-256 over sorted filename+content pairs). Raises `SecurityBreachError` if the proposed hash differs from the executed hash.
-
-**SecurityBreachError** — Raised when the code that ran in the container does not match the code that was sent (canonical hash mismatch). Indicates the container executed different code than expected.
-
-**ContainerRunner** (Protocol) — Abstract interface for container lifecycle and pulse execution. Methods: `start()`, `stop()`, `is_alive()`, `send_pulse(files)`. Implemented by `PodmanRunner`.
-
-**PodmanRunner** — Production ContainerRunner backed by rootless Podman. Manages container lifecycle, file transfer, and test execution with timeout and bandit security scanning.
-
-**ImportFilter** — Scans generated code for forbidden imports (e.g., `subprocess`, `os.system`) and blocked builtin calls (e.g., `eval`, `exec`). Raises `ForbiddenImportError` if policy violates.
-
-**ForbiddenImportError** — Security exception raised by ImportFilter when generated code contains a blocked import or builtin.
-
-**ImportValidator** — Validates and automatically corrects import paths in generated code against the project's module structure. Uses a cached module tree to fix incorrect import paths produced by the LLM.
-
-**ContextMap** — A mapping of source files to AST signatures (function/class definitions and their parameters). Built by `ContextMapBuilder` from existing code files. Provides `nodes_relevant_to(test_ids)` to return signatures referenced by given pytest test IDs, enabling the WorkerAgent to include relevant module context during GREEN phase.
-
-**ExperimentLogger** — Unified logger for TDD and ML experiments. Stores experiments in PostgreSQL with fallback to SQLite (`ace_experiments.db`). Logs task, generator, environment, reflector, and curator data per cycle.
-
-**PlaybookManager** — Core playbook operations: creation, updates, merging, and retrieval. Supports incremental delta updates, semantic deduplication, fine-grained retrieval, and token budget management. Also provides `get_bullets(section)` to return bullet content strings from all loaded playbooks.
-
-**BulletRetriever** — Hybrid retrieval system for selecting relevant bullets from playbooks. Supports cross-model retrieval and contextual filtering (by confidence, domain, project).
-
-**DeltaBullet** — A new bullet to add to a playbook, produced by the Curator. Contains content, section, and tags. Has a `content_hash` method for fast deduplication.
-
-**BulletCreate** — Input schema for adding a bullet via PlaybookManager. Contains content, section, tags, and optional fields for provenance (model, provider, license) and contextual retrieval (confidence, domains, projects).
-
-**CGR³ (Context Graph Retrieve-Rank-Reason)** — A retrieval system that scores bullets against request context across multiple dimensions (temporal validity, team locality, tech stack compatibility, project relevance, domain relevance) and issues a verdict (`APPLY`, `ASK_FIRST`, `SKIP`). Core components: `ContextGraphRetriever`, `ContextScorer`, `InstitutionalKnowledgeService`.
-
-**InstitutionalKnowledgeService** — Central knowledge retrieval service for all code generation activities. Wraps `BulletRetriever` and `CGR³` to return guidance, anti-patterns, and context-aware suggestions.
-
-**DistillationRouter** — Routes tasks to domain-specific distillation playbooks for cross-model knowledge transfer. Uses `DomainRegistry` to classify query domains and `Provenance` to filter bullets by supplier, license, and model origin, ensuring appropriate knowledge flow between student and teacher models.
-
-**Provenance** — Tracks the origin of a bullet or model (name, provider, license category). Used by `DistillationRouter` to determine whether a bullet (teacher) can teach a student model based on cross-supplier proprietary rules.
-
-**DomainRegistry** — Maintains a registry of domains and their playbook signatures. Aggregates playbook embeddings to compute domain centroids for query classification.
-
-**PlaybookReliabilityAnalyzer** — Correlates bullet retrieval with first-pass GREEN success across TDD cycles. Computes per-bullet first-pass rates to identify which bullets most improve outcomes.
-
-**TDDCycleAnalyzer** — Measures first-pass GREEN rate over time, split into configurable time periods, to detect improvement or regression in TDD cycle efficiency.
-
-**BulletDeduplicator** — Handles semantic deduplication of bullets using embedding similarity (cosine distance). Supports configurable thresholds and duplicate-preservation strategies.
-
-**BulletClusterer** — DBSCAN-based clustering for playbook bullets. Groups semantically related bullets and selects representatives by helpful ratio, centrality, or recency.
-
-**EmbeddingService** — Generates embeddings for playbook bullets using a local sentence-transformers model. Used for semantic similarity in deduplication and retrieval. Singleton accessed via `get_embedding_service()`.
-
-**ModuleArchitect** — Generates module-level contracts for stateful systems. Produces a `ModuleContract` containing `FunctionSpec`s, shared state, integration tests, and complexity score. Used by `ModuleTDDBuilder`.
-
-**ContractArchitect** — Generates interface contracts from natural language requirements. Decomposes requirements into `InterfaceContract` objects and emits audit events for contract generation and decomposition.
-
-**ContractOrchestrator** — Orchestrates contract-driven development: registers contracts, provides implementation prompts via `get_implementation_prompt()`, and validates submitted implementations against test cases.
-
-**PolyglotTDDRunner** — Orchestrates TDD cycles across multiple `LanguagePod`s (languages) and reports token efficiency comparison. Uses a `PodFactory` to create language-specific pods.
-
-**GoLanguagePod** — LanguagePod implementation for Go TDD cycles. Generates Go test code, compiles and runs tests with `go test` in a Podman container.
-
-**SuccessRateCalculator** — Measures experiment success rates across experiment types, playbook versions, and time windows. Used to track improvement over time.
-
-**CostQualityAnalyzer** — Analyzes cost-quality tradeoffs for ML model performance data. Computes cost efficiency metrics, Pareto frontiers, and suggests best model for given complexity.
-
-**TokenEfficiencyReporter** — Computes token efficiency scores from LanguagePod run data. Generates cross-language comparisons and efficiency reports for the PolyglotTDDRunner.
-
-**ProductionDataAnalyzer** — Analyzes quality data from experiment logs to extract model performance metrics, backfill quality scores via BlindEvaluator, and generate production reports.
-
-**ModelAttributionTracker** — Tracks OpenRouter model attribution: records both the requested model and the actual model that served the request. Computes per-model success rates, latency, and cost metrics.
-
-**PerformanceAggregator** — Aggregates performance metrics from the audit trail to compute success rates, latency, cost, and reliability scores per agent. Supports Bayesian estimation and regression detection via `RegressionDetector`.
+**ACEMLflowCallback** — An MLflow callback that captures ACE knowledge (decisions and patterns) during ML training runs. Stores knowledge in a local file (`knowledge/`) and integrates with MLflow run IDs. A PostgreSQL-backed variant (`PostgresACEMLflowCallback`) stores knowledge directly in the experiment_logs table.
 
 **AdaptiveBroker** — Routes tasks to the best agent based on historical performance using configurable strategies (budget, balanced, Pareto). Falls back to a default agent when no history exists.
 
-**CapabilityRegistry** — Anonymous registry of agent capabilities with proficiency ratings. Used by `BrokerAdvisor` to recommend agents by capability fit.
+**AgentPerformanceMetrics** — Performance metrics for an agent (anonymized by agent_ref). Includes success rate, reliability score, variance-adjusted reliability, and complexity handling.
 
-**RegressionDetector** — Tracks quality scores by (model_id, version) and detects regressions between consecutive versions using CUSUM change-point detection. Fires `RegressionAlert` when a regression is detected.
+**ASTSignature** — A compact representation of a function or class definition (name, parameters, decorators) extracted from source code. Used by ContextMap to provide the LLM with relevant module context during GREEN phase.
 
-**BlindEvaluator** — Evaluates submissions without disclosing which agent produced them. Supports rubric-based scoring for code, tests, documentation, and analysis using domain-specific rubrics (e.g., `CodeGenerationRubric`, `TestWritingRubric`).
+**Audit** — Append-only event log. Every TDD cycle emits `CYCLE_COMPLETED` events recording which model was used, success/failure, and cycle counts. Used for model attribution and performance aggregation. Events are stored with hash chain integrity via `AuditStore`.
 
 **AuditClient** — Write-only client for emitting audit events. Supports remote (HTTP via `AuditStore`) and local (SQLite) backends, plus a `NoOpAuditClient` for testing.
 
-**AuditStore** — Append-only audit event store with hash chain integrity. Stores events in PostgreSQL and supports querying, chain verification, and statistics.
-
 **AuditDashboard** — Dashboard for analyzing audit data: computes agent performance, cost analysis, task type strengths, and optimal team suggestions. Supports benchmark comparison.
 
-**RedundancyPreChecker** — Pre-checks proposed tests for redundancy against existing tests before the RED phase. Uses keyword extraction and synonym mapping to detect implicit coverage.
+**AuditStore** — Append-only audit event store with hash chain integrity. Stores events in PostgreSQL and supports querying, chain verification, and statistics.
 
-**TestReviewAgent** — Validates test quality after writing in the RED phase. Checks test structure, naming, assertions, and edge cases. Can use LLM for deep analysis. Returns `TestReviewResult` with a quality score.
+**AutonomousTDDAgent** — The primary TDD entry point. Plans incremental tests using Ensemble, executes TDD cycles, and learns via the ACE pipeline. GREEN phase uses Generator for playbook-guided generation; retry learning routes through Curator. After a successful GREEN phase, promotes session-wins bullets to the playbook. If a test passes unexpectedly during RED phase (i.e., doesn't fail), attempts to refine it so it actually fails before proceeding.
 
-**TDDFailureRecorder** — Records TDD failures with full context and automatically adds troubleshooting bullets to the playbook. Part of the self-healing automation.
+**BlindEvaluator** — Evaluates submissions without disclosing which agent produced them. Supports rubric-based scoring for code, tests, documentation, and analysis using domain-specific rubrics (e.g., `CodeGenerationRubric`, `TestWritingRubric`).
 
-**TDDLessonInjector** — Injects formatted TDD lessons into LLM prompts based on the development phase (RED, GREEN, REFACTOR). Lessons are derived from `TDDFailureRecorder` and static anti-patterns.
+**BrokerAdvisor** — Advises on agent selection by capability fit. Uses `CapabilityRegistry` to recommend agents for a task.
 
-**LessonExtractor** — Extracts TDD lessons from resolved beads issues. Categorises failures and creates reusable lesson records.
+**BrokerConfig** — Configuration for `AdaptiveBroker`, including routing strategy, budget cap, and latency limits.
 
-**PlaybookEnforcer** — Enforces playbook edit ratio rules (ace-006) to maintain a high frequency of feedback compared to code changes. Checks if an edit is allowed based on session metrics.
+**Bullet** — A single actionable piece of learned knowledge stored in a Playbook. Organised into sections: `strategies_and_hard_rules`, `code_snippets`, `troubleshooting`, `domain_knowledge`, `test_assertion_rules`, `session-wins`, `global-go-bullets`.
 
-**SessionLog** — Simple session tracker that logs file edits and test runs during a dogfooding session. Used by `PlaybookEnforcer` to compute edit-to-test ratios.
+**BulletClusterer** — DBSCAN-based clustering for playbook bullets. Groups semantically related bullets and selects representatives by helpful ratio, centrality, or recency.
+
+**BulletCreate** — Input schema for adding a bullet via PlaybookManager. Contains content, section, tags, and optional fields for provenance (model, provider, license) and contextual retrieval (confidence, domains, projects).
+
+**BulletDeduplicator** — Handles semantic deduplication of bullets using embedding similarity (cosine distance). Supports configurable thresholds and duplicate-preservation strategies.
+
+**BulletLineage** — Tracks relationships between bullets for knowledge lineage (e.g., superseded-by, derived-from).
+
+**BulletReliability** — The first-pass GREEN success rate for a specific bullet across TDD cycles. Computed by `PlaybookReliabilityAnalyzer`.
+
+**BulletRetriever** — Hybrid retrieval system for selecting relevant bullets from playbooks. Supports cross-model retrieval and contextual filtering (by confidence, domain, project).
+
+**CapabilityRegistry** — Anonymous registry of agent capabilities with proficiency ratings. Used by `BrokerAdvisor` to recommend agents by capability fit.
+
+**CGR³ (Context Graph Retrieve-Rank-Reason)** — A retrieval system that scores bullets against request context across multiple dimensions (temporal validity, team locality, tech stack compatibility, project relevance, domain relevance) and issues a verdict (`APPLY`, `ASK_FIRST`, `SKIP`). Core components: `ContextGraphRetriever`, `ContextScorer`, `InstitutionalKnowledgeService`.
+
+**CodeAnalysis** — Result of analyzing a Python source file: extracted classes, methods, imports, and type annotations. Produced by `CodeAnalyzer` in the Gherkin extraction process.
+
+**CodeGenerationRubric** — A domain-specific evaluation rubric for Python code output. Scores syntax, structure, test compatibility, and security.
+
+**CodeReuseDetector** — Detects opportunities for code reuse in the project by analyzing feature requirements and suggesting existing utilities, base classes, and imports.
+
+**CodeAnalyzer** — Analyzes Python code to extract method signatures, class structures, and type annotations. Used by `GherkinExtractionAgent`.
+
+**ConsensusBuilder** — Clusters similar bullet proposals from multiple models and builds consensus by merging or selecting the best representative.
+
+**ContextMap** — A mapping of source files to AST signatures (function/class definitions and their parameters). Built by `ContextMapBuilder` from existing code files. Provides `nodes_relevant_to(test_ids)` to return signatures referenced by given pytest test IDs, enabling the WorkerAgent to include relevant module context during GREEN phase.
+
+**ContextScorer** — Scores bullets against request context across five dimensions: temporal validity, team locality, tech stack compatibility, project relevance, and domain relevance.
+
+**ContractArchitect** — Generates interface contracts from natural language requirements. Decomposes requirements into `InterfaceContract` objects and emits audit events for contract generation and decomposition.
+
+**ContractDecomposer** — Breaks user specifications into structured `InterfaceContract` objects. Supports YAML-based contract definitions and LLM-assisted decomposition.
+
+**ContractOrchestrator** — Orchestrates contract-driven development: registers contracts, provides implementation prompts via `get_implementation_prompt()`, and validates submitted implementations against test cases.
+
+**ContractSpec** — A single contract specification loaded from YAML. Contains method signatures, input/output schemas, and test cases.
+
+**ContractValidator** — Validates an implementation against a contract by running the contract's test cases against the provided code.
+
+**CostQualityAnalyzer** — Analyzes cost-quality tradeoffs for ML model performance data. Computes cost efficiency metrics, Pareto frontiers, and suggests best model for given complexity.
+
+**Curator** — ACE pipeline module. Synthesises Reflector insights into delta bullets and applies them to the Playbook with deduplication and token-budget enforcement. Interface: `curate(reflector_output, playbook_id) → CuratorOutput`, `apply_updates(playbook_id, curator_output) → list[str]`.
+
+**CyclePeriod** — A time window (start, end) used by `TDDCycleAnalyzer` to compute first-pass rates over equal-width periods.
+
+**CycleResult** — Outcome of a complete TDD cycle. Contains `success`, `feature_requirement`, `red_result`, `green_result`, `refactor_result`, `green_attempts`, `token_usage`, `error`, and `learned_bullets` (list of DeltaBullet).
+
+**DeltaBullet** — A new bullet to add to a playbook, produced by the Curator. Contains content, section, and tags. Has a `content_hash` method for fast deduplication.
+
+**DistillationRouter** — Routes tasks to domain-specific distillation playbooks for cross-model knowledge transfer. Uses `DomainRegistry` to classify query domains and `Provenance` to filter bullets by supplier, license, and model origin, ensuring appropriate knowledge flow between student and teacher models.
+
+**DocumentationRubric** — A domain-specific evaluation rubric for Markdown documentation. Scores completeness, clarity, examples, and formatting.
+
+**DomainRegistry** — Maintains a registry of domains and their playbook signatures. Aggregates playbook embeddings to compute domain centroids for query classification.
+
+**EffGenAdapter** — Connects small language models (via MCP protocol) to the Capability Broker, registering them as agents with health checks and task execution.
+
+**EfficiencyReport** — Token efficiency report from `TokenEfficiencyReporter`, containing per-language scores and cross-language comparisons.
+
+**EmbeddingService** — Generates embeddings for playbook bullets using a local sentence-transformers model. Used for semantic similarity in deduplication and retrieval. Singleton accessed via `get_embedding_service()`.
+
+**Ensemble** — Multi-model consensus system. Multiple LLMs vote on outputs; `EnsembleLearner` aggregates results and calls the ACE pipeline to commit learned patterns.
+
+**EnsembleLearner** — Orchestrates multiple models in parallel, executes the ACE pipeline (Generator → Reflector → Curator) for each, votes on proposed bullets, and commits approved patterns to the playbook.
+
+**EnvironmentFeedback** — Feedback from task execution environment. Contains result (SUCCESS/FAILED), actual output, expected output, error messages, and test reports.
+
+**ExperimentKnowledge** — Structured knowledge base for ML experiments, integrating decisions and patterns with MLflow run tracking. Persisted to JSON files.
+
+**ExperimentLogger** — Unified logger for TDD and ML experiments. Stores experiments in PostgreSQL with fallback to SQLite (`ace_experiments.db`). Logs task, generator, environment, reflector, and curator data per cycle.
+
+**FeatureSpec** — Parsed representation of a Gherkin `.feature` file. Contains the feature description, scenarios, and steps. Provides `as_requirement()` to produce a single string for the TDD loop. Created by `GherkinFeatureBridge`.
+
+**FeedbackCollector** — Stores human quality ratings for evaluated outputs and derives blended scores and drift measurements. Supports multiple raters per evaluation and configurable blending weights.
+
+**FileDrift** — Detects unintended changes to locked files during TDD execution. Used by `FileLockContext` to ensure generated code is not modified externally.
+
+**ForbiddenImportError** — Security exception raised by ImportFilter when generated code contains a blocked import or builtin.
+
+**FunctionSpec** — Specification for a single function within a module contract, including name, parameters, return type, and behavior.
+
+**Generator** — ACE pipeline module. Retrieves relevant bullets from the Playbook and uses them to guide LLM code generation. Interface: `execute(task, playbook_id) → GeneratorOutput`.
+
+**GeneratorOutput** — Output from the Generator module: reasoning trajectory, solution, list of bullet IDs used, bullet feedback map, latency, and token count.
 
 **GherkinExtractionAgent** — Reverse engineers Gherkin scenarios from existing code and tests. Extracts method signatures and test assertions to produce Gherkin feature files and step definitions.
 
----
+**GherkinFeatureBridge** — Parses a Gherkin `.feature` file into a `FeatureSpec`. Used by `IterativeTDDRunner` to feed structured requirements into `IncrementalPlanner`.
 
-## Architectural Decisions
+**GoLanguagePod** — LanguagePod implementation for Go TDD cycles. Generates Go test code, compiles and runs tests with `go test` in a Podman container.
 
-- **Podman isolation with canonical hashing**: All generated code executes in rootless Podman containers. The `PodmanOrchestrator` computes a deterministic SHA-256 hash over the workspace files before sending; the `PodmanRunner` computes the same hash inside the container. A mismatch (`SecurityBreachError`) aborts the cycle immediately.
+**GoStepGenerator** — Generates Go step definitions for Gherkin scenarios. Takes a feature file and produces corresponding Go code with regex patterns for each step.
 
-- **Language-agnostic LanguagePod protocol**: Each language (Python, Go) provides its own `LanguagePod` implementation that handles code generation, file I/O, and test execution. The TDD loop code (`TDDCycleRunner`, `IterativeTDDRunner`) is language-agnostic.
+**HumanDecisionInterface** — Provides humans with full decision context (agent profiles, costs, capabilities) and records their assignment decisions for audit and analysis.
 
-- **Iterative TDD via IncrementalPlanner + TDDCycleRunner**: Rather than planning all tests upfront, `IncrementalPlanner` queries the LLM for the single next test to write, given current progress. This enables adaptive, step-by-step development.
+**ImportFilter** — Scans generated code for forbidden imports (e.g., `subprocess`, `os.system`) and blocked builtin calls (e.g., `eval`, `exec`). Raises `ForbiddenImportError` if policy violates.
 
-- **Security-first abort policy**: `TDDCycleRunner` treats `ForbiddenImportError`, `SecurityBreachError`, and `Bandit gate:` errors as non-retryable. Any such failure ends the cycle immediately without further attempts.
+**ImportValidator** — Validates and automatically corrects import paths in generated code against the project's module structure. Uses a cached module tree to fix incorrect import paths produced by the LLM.
 
-- **Learning loop after successful GREEN**: When a `Reflector` and `Curator` are provided, `TDDCycleRunner` runs the ACE pipeline (reflect → curate → apply) after each successful cycle. Learned patterns are written back to the playbook for future cycles.
+**IncrementalPlanner** — Determines the next test increment by asking the LLM what single test to write next, given current test and implementation files and playbook guidance. Interface: `next_increment(requirement, cycle_number, ...) → TestIncrement`.
 
-- **Experiment persistence with PostgreSQL/SQLite fallback**: `ExperimentLogger` tries PostgreSQL first; if unavailable, it falls back to a local SQLite file so that TDD cycles are never lost.
+**InstitutionalKnowledgeService** — Central knowledge retrieval service for all code generation activities. Wraps `BulletRetriever` and `CGR³` to return guidance, anti-patterns, and context-aware suggestions.
 
-- **PlaybookManager file-based persistence**: Playbooks are stored as JSON files in `data/playbooks/`. The manager loads all on startup and saves on each write (unless auto-save is disabled for batch operations).
+**IntegrationTest** — A test that exercises multiple functions within a module to verify shared state and end-to-end behavior.
 
-- **Generator retrieval modes**: The Generator supports both model-specific retrieval (single playbook) and cross-model hybrid retrieval (primary playbook + domain-related playbooks from other models), controlled by `settings.retrieval_mode`.
+**InterfaceContract** — Defines what needs to be implemented: method signatures, input/output schemas, test cases, and fixtures. Produced by `ContractArchitect` and `ContractDecomposer`.
 
-- **Bullet deduplication with embedding fallback**: `PlaybookManager` uses exact-match deduplication by default, with a placeholder for future semantic similarity checking via embeddings. The `BulletDeduplicator` class provides a dedicated semantic deduplication interface.
+**IterativeResult** — Outcome of a full iterative TDD session. Contains `complete` (bool), `success` (bool), `iterations` (int), and list of `cycles` (each with cycle details).
 
-- **WorkerAgent as prompt builder**: `WorkerAgent` encapsulates all prompt construction and LLM calling. It accepts `PodSpec`, error feedback, and optional AST context map; returns raw code strings. File I/O remains the caller's (`LanguagePod`) responsibility.
+**IterativeTDDRunner** — Kent Beck-style iterative TDD loop. Uses an `IncrementalPlanner` to get the next test increment, then `TDDCycleRunner` to execute RED→GREEN→REFACTOR. Repeats until the planner signals COMPLETE or max iterations reached. Returns `IterativeResult`.
 
-- **CGR³ context-aware retrieval**: Bullets are scored against request context (temporal, team, tech stack, project, domain) and a verdict is issued (`APPLY`, `ASK_FIRST`, `SKIP`). This enables fine-grained, context-sensitive knowledge application. Used by `InstitutionalKnowledgeService` for all code generation queries.
+**LanguagePod** — Language-agnostic protocol for TDD execution. Each pod implements `run_red`, `run_green`, `run_refactor`, and `token_usage`. Implementations include `PythonLanguagePod` and `GoLanguagePod`.
 
-- **Distillation Router for cross-model knowledge**: A `DistillationRouter` routes tasks to domain-specific distillation playbooks, filtering bullets by provenance (model supplier, license) to ensure appropriate knowledge transfer between models. This prevents proprietary knowledge from leaking across suppliers.
+**LanguageScore** — Token efficiency metrics for one language's run of a feature (total tokens, cycles, efficiency score).
 
-- **Reliability analysis as a feedback loop**: `PlaybookReliabilityAnalyzer` and `TDDCycleAnalyzer` compute first-pass GREEN rates per bullet and over time, enabling data-driven refinement of playbook quality and TDD process improvement.
+**LessonExtractor** — Extracts TDD lessons from resolved beads issues. Categorises failures and creates reusable lesson records.
 
-- **GherkinFeatureBridge for iterative TDD**: `IterativeTDDRunner` uses `GherkinFeatureBridge` to parse `.feature` files into `FeatureSpec` objects, feeding structured requirements to the planner.
+**LicenseCategory** — Classification of a model's license (open_source, permissive, proprietary, unknown). Used by `DistillationRouter` for provenance-based filtering.
 
-- **ContextMap for AST-aware generation**: `WorkerAgent` uses `ContextMap` to provide the LLM with function signatures and imports from existing code during the GREEN phase, reducing integration errors.
+**MLflowKnowledgeQuery** — Unified interface to query MLflow runs enriched with ACE knowledge (decisions and patterns).
 
-- **PodFactory for polyglot TDD**: `PolyglotTDDRunner` uses a `PodFactory` to create language-specific `LanguagePod` instances, enabling the same TDD loop across Python, Go, and other languages. Token efficiency is reported via `TokenEfficiencyReporter`.
+**ModelAttributionTracker** — Tracks OpenRouter model attribution: records both the requested model and the actual model that served the request. Computes per-model success rates, latency, and cost metrics.
 
-- **Redundancy pre-check before RED**: `RedundancyPreChecker` compares proposed tests against existing tests using keyword extraction and synonym mapping to avoid writing redundant tests.
+**ModelFamilyMetrics** — Aggregated performance metrics for a model family (e.g., all `qwen/` models).
 
-- **Test review after RED**: `TestReviewAgent` validates test quality after writing, scoring structure, naming, assertions, and edge cases before proceeding to GREEN.
+**ModelProfile** — Strength/weakness profile derived from per-model task-type metrics. Used by `BrokerAdvisor`.
 
-- **TDD lesson injection into prompts**: `TDDLessonInjector` formats lessons from past failures captured by `TDDFailureRecorder` and injects them into LLM prompts per phase to avoid repeating mistakes.
+**ModuleArchitect** — Generates module-level contracts for stateful systems. Produces a `ModuleContract` containing `FunctionSpec`s, shared state, integration tests, and complexity score. Used by `ModuleTDDBuilder`.
 
-- **TDDFailureRecorder self-healing**: Records failures and automatically adds troubleshooting bullets to the playbook via `PlaybookManager`, reducing future failure rates.
-
-- **Edit-to-test ratio enforcement**: `PlaybookEnforcer` enforces a maximum edit-to-test ratio during dogfooding sessions tracked by `SessionLog`, ensuring high feedback frequency.
-
-- **PostgreSQL audit store with hash chain**: `AuditStore` stores events immutably with SHA-256 hash chain verification, supporting append-only storage and integrity checking. `AuditClient` provides a write-only client with local and remote backends.
-
-- **Performance aggregator for adaptive routing**: `PerformanceAggregator` feeds metrics into `AdaptiveBroker`, which routes tasks to the best-performing agent using configurable strategies (budget, balanced, Pareto). `CapabilityRegistry` and `BrokerAdvisor` support anonymous capability-based recommendations.
-
-- **Blind evaluation with domain rubrics**: `BlindEvaluator` scores outputs without agent identity, using rubric-based evaluation for code (`CodeGenerationRubric`), tests (`TestWritingRubric`), documentation (`DocumentationRubric`), and analysis (`AnalysisRubric`).
-
-- **Model attribution tracking**: `ModelAttributionTracker` records both the requested and actual model (from OpenRouter) for accurate per-model performance metrics. Used by `ProductionDataAnalyzer` and `CostQualityAnalyzer` to drive cost-aware routing.
-
-- **Contract-driven development**: `ContractArchitect` and `ContractOrchestrator` enable contract-driven development alongside TDD. Contracts are generated from requirements, then used to validate implementations. `ModuleArchitect` extends this to stateful modules with shared state and integration tests.
+**ModuleContract** — A structured specification of a module: its functions (`FunctionSpec`), shared state, integration tests,
