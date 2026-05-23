@@ -154,6 +154,90 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
             implementation_file=self._src_dir / Path(impl_file_str).name,
         )
 
+    def next_increment_for_scenario(
+        self,
+        requirement: str,
+        cycle_number: int,
+        scenario,
+        gherkin_context: str,
+        *,
+        test_file: "Path | None" = None,
+        impl_file: "Path | None" = None,
+    ) -> "TestIncrement | None":
+        """
+        Plan ONE test for a specific Gherkin scenario.
+
+        Unlike next_increment(), the LLM does not choose which behaviour to
+        test next — the caller supplies the scenario. Returns None on a parse
+        error (caller should skip this scenario).
+        """
+        name = scenario.name if hasattr(scenario, "name") else scenario["name"]
+        steps = scenario.steps if hasattr(scenario, "steps") else scenario["steps"]
+        if steps and isinstance(steps[0], str):
+            step_lines = "\n".join(f"  {s}" for s in steps)
+        else:
+            step_lines = "\n".join(f"  {s['type']}: {s['text']}" for s in steps)
+
+        test_ctx = self._format_test_context()
+        impl_ctx = self._format_impl_context()
+
+        path_instructions = (
+            f"\nUse these file paths:\n"
+            f"  test file: {test_file}\n"
+            f"  impl file: {impl_file}\n"
+            if test_file and impl_file
+            else ""
+        )
+
+        prompt = f"""You are writing TDD tests for: "{requirement}"
+
+Write ONE failing pytest test for this SPECIFIC Gherkin scenario:
+
+  Scenario: {name}
+{step_lines}
+
+Full feature file for reference:
+```gherkin
+{gherkin_context}
+```
+
+{test_ctx or "No tests written yet."}
+{impl_ctx or "No implementation yet."}
+{path_instructions}
+The test MUST:
+1. Use the EXACT input values and expected outputs stated in the scenario above
+2. FAIL against the current implementation (RED phase)
+3. NOT duplicate any existing test
+4. Be API-compatible with existing tests — if existing tests assert a scalar return value,
+   this test must also assert a scalar; do NOT introduce a dict/tuple/dataclass return
+   type unless an existing test already uses one
+5. Assert the FINAL output value (e.g. total bill amount); do NOT assert intermediate
+   computation steps unless the scenario explicitly names them as separate return values
+
+Output ONE pipe-delimited line:
+test_name | description with exact values | test_file_path | impl_file_path
+"""
+
+        response = self._llm.generate(prompt, temperature=self._temperature)["content"].strip()
+
+        lines = [l.strip() for l in response.split("\n") if "|" in l and not l.startswith("#")]
+        if not lines:
+            logger.warning("IncrementalPlanner: could not parse scenario increment from: %s", response)
+            return None
+
+        parts = [_strip_markdown(p) for p in lines[0].split("|")]
+        if len(parts) != 4:
+            logger.warning("IncrementalPlanner: invalid scenario increment format: %s", lines[0])
+            return None
+
+        test_name, description, test_file_str, impl_file_str = parts
+        return TestIncrement(
+            test_name=test_name,
+            description=description,
+            test_file=test_file or (self._test_dir / Path(test_file_str).name),
+            implementation_file=impl_file or (self._src_dir / Path(impl_file_str).name),
+        )
+
     def record_test_written(
         self, test_file: Path, test_name: str, test_code: str, cycle_number: int
     ) -> None:

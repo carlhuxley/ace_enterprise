@@ -1,9 +1,16 @@
 """
 IterativeTDDRunner — Kent Beck-style RED→GREEN→REFACTOR loop.
 
-Uses IncrementalPlanner to decide what test to write next, then delegates
-each cycle to TDDCycleRunner. Continues until the planner returns COMPLETE
-or max_iterations is reached.
+Two execution modes:
+
+  Gherkin-driven  (when gherkin_scenarios is supplied):
+    Iterates one scenario per cycle in declaration order. File paths are
+    pinned from the first planning call so all scenarios write into the
+    same test / impl files.
+
+  Planner-driven  (plain requirement string, no scenarios):
+    IncrementalPlanner freely chooses the next test increment each cycle
+    until it returns COMPLETE or max_iterations is reached.
 """
 import logging
 from dataclasses import dataclass, field
@@ -33,9 +40,9 @@ class IterativeTDDRunner:
     """
     Iterative TDD loop: plan → RED → GREEN → REFACTOR → repeat.
 
-    Wraps TDDCycleRunner with an IncrementalPlanner that determines each
-    next test increment. After each successful cycle the planner is updated
-    with the new test so it knows what's already covered.
+    When gherkin_scenarios is supplied, each scenario becomes exactly one
+    cycle (Gherkin-driven mode). Otherwise, IncrementalPlanner chooses the
+    next test each cycle until COMPLETE (planner-driven mode).
     """
 
     def __init__(
@@ -61,15 +68,22 @@ class IterativeTDDRunner:
         )
 
     def run_from_feature(self, feature_path: "Path | str") -> IterativeResult:
-        """Parse a Gherkin .feature file and run the iterative TDD loop."""
+        """Parse a Gherkin .feature file and run in Gherkin-driven mode.
+
+        File paths are derived from the feature file stem so all scenarios
+        write into the same consistently-named test / impl files.
+        """
         from pathlib import Path as _Path
         from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
         feature_path = _Path(feature_path)
         spec = GherkinFeatureBridge.parse(feature_path)
+        stem = feature_path.stem
         return self.run(
             requirement=spec.as_requirement(),
             gherkin_context=feature_path.read_text(encoding="utf-8"),
             gherkin_scenarios=spec.scenarios,
+            test_file=self._planner._test_dir / f"test_{stem}.py",
+            impl_file=self._planner._src_dir / f"{stem}.py",
         )
 
     def run(
@@ -77,6 +91,93 @@ class IterativeTDDRunner:
         requirement: str,
         gherkin_context: str | None = None,
         gherkin_scenarios=None,
+        test_file: "Path | None" = None,
+        impl_file: "Path | None" = None,
+    ) -> IterativeResult:
+        if gherkin_scenarios:
+            return self._run_gherkin_driven(
+                requirement, gherkin_context, gherkin_scenarios,
+                test_file=test_file, impl_file=impl_file,
+            )
+        return self._run_planner_driven(requirement, gherkin_context, gherkin_scenarios)
+
+    # ------------------------------------------------------------------
+    # Gherkin-driven: one scenario per cycle
+    # ------------------------------------------------------------------
+
+    def _run_gherkin_driven(
+        self,
+        requirement: str,
+        gherkin_context: str,
+        gherkin_scenarios,
+        *,
+        test_file: "Path | None" = None,
+        impl_file: "Path | None" = None,
+    ) -> IterativeResult:
+        results: list[CycleResult] = []
+        # Pre-pin paths when supplied (e.g. derived from feature file name in
+        # run_from_feature). If not supplied, pin from the first planning call.
+        pinned_test_file: Path | None = test_file
+        pinned_impl_file: Path | None = impl_file
+
+        for i, scenario in enumerate(gherkin_scenarios, 1):
+            sname = scenario.name if hasattr(scenario, "name") else scenario.get("name", f"scenario_{i}")
+            logger.info("IterativeTDDRunner [gherkin]: cycle %d — %s", i, sname)
+
+            increment = self._planner.next_increment_for_scenario(
+                requirement=requirement,
+                cycle_number=i,
+                scenario=scenario,
+                gherkin_context=gherkin_context,
+                test_file=pinned_test_file,
+                impl_file=pinned_impl_file,
+            )
+
+            if increment is None:
+                logger.warning("IterativeTDDRunner: parse error for scenario %d, skipping", i)
+                continue
+
+            # Pin file paths from first planning call when not pre-supplied
+            if pinned_test_file is None:
+                pinned_test_file = increment.test_file
+                pinned_impl_file = increment.implementation_file
+
+            spec = PodSpec(
+                feature_requirement=increment.description,
+                test_file=increment.test_file,
+                implementation_file=increment.implementation_file,
+                cycle_number=i,
+                gherkin_context=gherkin_context,
+            )
+
+            runner = TDDCycleRunner(self._pod, **self._runner_kwargs)
+            result = runner.run(spec)
+            results.append(result)
+
+            if result.red_result.passed is False and result.green_result.passed:
+                if spec.test_file.exists():
+                    self._planner.record_test_written(
+                        test_file=spec.test_file,
+                        test_name=increment.test_name,
+                        test_code=spec.test_file.read_text(),
+                        cycle_number=i,
+                    )
+
+            if not result.success:
+                logger.warning("IterativeTDDRunner: scenario %d failed — %s", i, result.error)
+
+        complete = len(results) == len(gherkin_scenarios) and all(r.success for r in results)
+        return IterativeResult(cycles=results, complete=complete, iterations=len(gherkin_scenarios))
+
+    # ------------------------------------------------------------------
+    # Planner-driven: free-choice increments until COMPLETE
+    # ------------------------------------------------------------------
+
+    def _run_planner_driven(
+        self,
+        requirement: str,
+        gherkin_context: str | None,
+        gherkin_scenarios,
     ) -> IterativeResult:
         results: list[CycleResult] = []
         cycle_number = 1
@@ -113,7 +214,6 @@ class IterativeTDDRunner:
             results.append(result)
 
             if result.red_result.passed is False and result.green_result.passed:
-                # RED produced a test file — record it for future planning context
                 if spec.test_file.exists():
                     self._planner.record_test_written(
                         test_file=spec.test_file,

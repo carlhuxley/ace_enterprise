@@ -199,7 +199,7 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **TDDCycleAnalyzer** — Measures first-pass GREEN rate and whether it improves over time. Computes `CyclePeriod`-based trends from experiment logs.
 
-**TDDCycleRunner** — Orchestrates one complete TDD cycle: RED → GREEN (with retry) → REFACTOR. GREEN is retried up to `max_green_attempts` times, passing previous failure output back to the pod. Security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate) abort immediately. Optionally runs the ACE learning loop (Reflector → Curator) after successful cycles.
+**TDDCycleRunner** — Orchestrates one complete TDD cycle: RED → GREEN (with retry) → REFACTOR. GREEN is retried up to `max_green_attempts` times, passing previous failure output back to the pod. Security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate) abort immediately without retrying. Optionally runs the ACE learning loop (Reflector → Curator) after successful cycles.
 
 **TDDLessonInjector** — Injects TDD lessons into agent prompts based on development phase. Uses static lessons from `tdd_lessons.py` and dynamic lessons from `LessonExtractor`.
 
@@ -244,3 +244,9 @@ Use these terms exactly in code, docs, and architecture discussions.
 **ADR-014: Token Usage Tracking via Interception** — `PythonLanguagePod` intercepts the LLM client's `generate` method to track prompt and completion tokens per cycle. Token usage is recorded as `TokenUsage` objects and reset after each phase, providing per-cycle token accounting.
 
 **ADR-015: Default Test Assertion Rules** — `WorkerAgent` maintains a set of default test assertion rules (`_DEFAULT_TEST_RULES`) that are seeded into the playbook's `test_assertion_rules` section on first use. These rules guide the LLM to write property-based assertions instead of exact-value assertions when multiple correct outputs exist.
+
+**ADR-016: TDDCycleRunner Learning Loop Integration** — The `TDDCycleRunner` optionally runs the ACE learning loop (Reflector → Curator) after each successful cycle. The learning loop constructs `TaskInput`, `GeneratorOutput`, and `EnvironmentFeedback` from the cycle's artifacts, calls the reflector to analyze the outcome, then the curator to synthesize delta bullets, and writes them to the playbook via `apply_updates`. Failures in the learning step are logged as warnings and do not abort the cycle.
+
+**ADR-017: WorkerAgent Prompt Construction** — `WorkerAgent` builds phase-specific prompts internally using `_test_prompt`, `_impl_prompt`, and `_refactor_prompt`. The test prompt includes existing test code and assertion rules; the implementation prompt includes error output from previous GREEN attempts, module context from the AST context map, and playbook guidance; the refactor prompt includes the current implementation code. All prompts instruct the LLM to output only valid Python code, and `_extract_code` strips markdown fences from the response.
+
+**ADR-018: Code Extraction with Truncation Handling** — `WorkerAgent._extract_code` handles LLM responses that may be truncated (missing closing ``` fence) by matching an unclosed code fence pattern as a fallback. This ensures partial responses from models that hit token limits still yield usable code.
