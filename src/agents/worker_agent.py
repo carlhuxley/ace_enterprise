@@ -57,11 +57,12 @@ class WorkerAgent:
         error_output: str = "",
         module_context: str = "",
         failing_test_ids: list[str] | None = None,
+        test_code: str = "",
     ) -> str:
         if not module_context and self._context_map and failing_test_ids:
             module_context = self._context_from_map(failing_test_ids)
         bullets = self._get_bullets()
-        prompt = self._impl_prompt(spec, error_output, module_context, bullets)
+        prompt = self._impl_prompt(spec, error_output, module_context, bullets, test_code)
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
@@ -103,12 +104,14 @@ class WorkerAgent:
         error_output: str,
         module_context: str,
         bullets: list[str],
+        test_code: str = "",
     ) -> str:
         parts = [
-            "Write minimal implementation to make the tests pass.",
-            f"Feature: {spec.feature_requirement}",
+            "Write minimal implementation to make the failing tests pass.",
             f"Implementation file: {spec.implementation_file.name}",
         ]
+        if test_code:
+            parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
         if error_output:
             parts.append(f"\nTest failure output:\n{error_output}")
         if module_context:

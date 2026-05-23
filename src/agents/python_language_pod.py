@@ -79,11 +79,13 @@ class PythonLanguagePod:
         return result
 
     def run_green(self, spec: PodSpec) -> PhaseResult:
+        test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
         try:
             impl_code = self._worker.generate_implementation(
                 spec,
                 error_output=spec.error_output,
                 failing_test_ids=[str(spec.test_file)],
+                test_code=test_code,
             )
             _import_filter.check(impl_code)
         except ForbiddenImportError as exc:
@@ -92,8 +94,6 @@ class PythonLanguagePod:
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
-
-        test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
         files = {
             spec.test_file.name: test_code,
             spec.implementation_file.name: impl_code,
@@ -107,8 +107,6 @@ class PythonLanguagePod:
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
-
-        self._record_usage(spec.cycle_number)
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
