@@ -161,4 +161,30 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **LanguageScore** — Token efficiency metrics for one language's run of a feature (total tokens, cycles, efficiency score).
 
-**LessonExtractor** — Extracts TDD lessons from resolved beads issues. Categorises failures and creates reusable lesson records
+**LessonExtractor** — Extracts TDD lessons from resolved beads issues. Categorises failures and creates reusable lesson records.
+
+**LLMClient** — Unified LLM client supporting multiple providers (OpenAI, Anthropic, DeepSeek, Together AI, OpenRouter, Ollama, vLLM). Used by all ACE modules for LLM interactions.
+
+**ModelAttributionTracker** — Tracks OpenRouter model attribution in performance metrics. Records which model actually served each request (actual_model vs requested_model) for accurate performance analysis.
+
+**ModuleArchitect** — Generates module-level contracts for stateful systems with shared state, database schemas, and integration tests.
+
+**ModuleTDDBuilder** — Builds module implementations using TDD methodology. Builds each function in a module contract via TDD-style iteration, then runs integration tests.
+
+**PhaseResult** — Outcome of a single TDD phase (RED, GREEN, or REFACTOR). Contains `passed` (bool), `output` (str), and `error` (str | None).
+
+**Playbook** — A collection of learned knowledge organized into sections. Each playbook has a unique ID, version, metadata (domain, base_model), and sections containing bullets.
+
+**PlaybookManager** — Manages playbook operations: creation, updates, merging, and retrieval. Supports incremental delta updates, semantic deduplication, token budget management, and file-based persistence.
+
+**PlaybookReliabilityAnalyzer** — Correlates bullet retrieval with first-pass GREEN outcomes. Computes `BulletReliability` for each bullet in a playbook.
+
+**PodSpec** — Everything a pod needs to execute one phase. Contains `feature_requirement`, `test_file`, `implementation_file`, `cycle_number`, `error_output`, and `gherkin_context`.
+
+**PodmanOrchestrator** — Stateless sidecar execution layer for the Clean Room harness. Sends code to a Podman container for isolated execution and verifies code integrity via `canonical_hash`. Raises `SecurityBreachError` when the container ran different code than was sent.
+
+**PodmanRunner** — Production `ContainerRunner` backed by rootless Podman. Manages container lifecycle (start, stop, send_pulse) and computes workspace hashes.
+
+**PolyglotTDDRunner** — Orchestrates RED→GREEN→REFACTOR across multiple LanguagePods for the same feature. Produces `PolyglotRunResult` with per-language results and token efficiency comparison.
+
+**PostgresACEMLflowCallback** — PostgreSQL
