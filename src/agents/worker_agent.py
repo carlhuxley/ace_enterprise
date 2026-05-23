@@ -79,6 +79,11 @@ class WorkerAgent:
             "The new test must FAIL before any implementation exists (RED phase).",
             "Do NOT duplicate or overlap with any existing test.",
         ]
+        if spec.gherkin_context:
+            parts.append(
+                f"\nAcceptance criteria (Gherkin — use exact values from relevant scenarios):\n"
+                f"```gherkin\n{spec.gherkin_context}\n```"
+            )
         rules = self._get_test_bullets()
         if rules:
             parts.append("\nAssertion contract rules:\n" + "\n".join(f"- {r}" for r in rules))

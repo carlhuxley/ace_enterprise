@@ -165,4 +165,82 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ModuleArchitect** — Generates module-level contracts for stateful systems. Produces a `ModuleContract` containing `FunctionSpec`s, shared state, integration tests, and complexity score. Used by `ModuleTDDBuilder`.
 
-**ModuleContract** — A structured specification of a module: its functions (`FunctionSpec`), shared state, integration tests,
+**ModuleContract** — A structured specification of a module: its functions (`FunctionSpec`), shared state, integration tests, and complexity score. Produced by `ModuleArchitect`.
+
+**ModuleTDDBuilder** — Builds module implementations using TDD methodology. Iterates over `FunctionSpec`s from a `ModuleContract`, building each function via TDD-style cycles.
+
+**PerformanceAggregator** — Aggregates performance metrics from the audit trail. Computes `AgentPerformanceMetrics`, `ModelProfile`, Bayesian success-rate estimates, and latency-quality reports for each agent.
+
+**PhaseResult** — Outcome of a single TDD phase (RED, GREEN, or REFACTOR). Contains `passed` (bool), `output` (str), and optional `error` (str).
+
+**Playbook** — A structured knowledge store organized into sections. Each section contains a list of `Bullet` objects. Persisted to JSON files in `data/playbooks/`.
+
+**PlaybookManager** — Core playbook operations: creation, delta updates, semantic deduplication, token budget enforcement, and file-based persistence. Manages playbooks in memory and on disk.
+
+**PlaybookReliabilityAnalyzer** — Correlates bullet retrieval with first-pass GREEN outcomes. Computes `BulletReliability` for each bullet in a playbook.
+
+**PodSpec** — Input specification for a single TDD phase execution. Contains `feature_requirement`, `test_file`, `implementation_file`, `cycle_number`, optional `error_output` for GREEN retries, and optional `gherkin_context`.
+
+**PodmanOrchestrator** — Stateless sidecar execution layer for the Clean Room harness. Sends code files to a container via `pulse()`, runs tests, and returns `PhaseResult`. Raises `SecurityBreachError` when the container runs different code than was sent (hash mismatch).
+
+**PodmanRunner** — Production `ContainerRunner` backed by rootless Podman. Manages container lifecycle (start, stop, send_pulse). Computes workspace hashes for integrity verification.
+
+**PolyglotTDDRunner** — Drives RED→GREEN→REFACTOR loops across multiple `LanguagePod` implementations for the same feature. Produces `PolyglotRunResult` with per-language outcomes and token efficiency comparison.
+
+**PostgresACEMLflowCallback** — PostgreSQL-backed variant of `ACEMLflowCallback`. Stores decisions and patterns directly in the `experiment_logs` table instead of local JSON files.
+
+**Provenance** — Model/bullet provenance for ownership-aware matching in `DistillationRouter`. Tracks supplier, license category, and model origin. Determines whether a teacher model's knowledge can be transferred to a student model.
+
+**PythonLanguagePod** — `LanguagePod` implementation for Python TDD cycles. Delegates code generation to `WorkerAgent` and test execution to `PodmanOrchestrator`. Uses atomic file writes via `commit_to_disk()`.
+
+**Reflector** — ACE pipeline module. Analyses task outcomes, extracts error patterns and root causes, tags bullets as helpful/harmful/neutral, and generates key insights. Supports iterative refinement up to N rounds. Interface: `reflect(task, generator_output, environment_feedback) → ReflectorOutput`.
+
+**SecurityBreachError** — Raised by `PodmanOrchestrator` when the container ran different code than was sent (H_proposed ≠ H_executed). Indicates a hash chain integrity violation.
+
+**TDDCycleAnalyzer** — Measures first-pass GREEN rate and whether it improves over time. Computes `CyclePeriod`-based trends from experiment logs.
+
+**TDDCycleRunner** — Orchestrates one complete TDD cycle: RED → GREEN (with retry) → REFACTOR. GREEN is retried up to `max_green_attempts` times, passing previous failure output back to the pod. Security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate) abort immediately. Optionally runs the ACE learning loop (Reflector → Curator) after successful cycles.
+
+**TDDLessonInjector** — Injects TDD lessons into agent prompts based on development phase. Uses static lessons from `tdd_lessons.py` and dynamic lessons from `LessonExtractor`.
+
+**TestIncrement** — One planned test step in the TDD loop. Contains the test name, description, and expected behavior. Produced by `IncrementalPlanner`.
+
+**TokenEfficiencyReporter** — Computes token efficiency scores from `LanguagePod` run data. Produces `EfficiencyReport` with per-language scores and cross-language comparisons.
+
+**TokenUsage** — Token consumption for one complete TDD cycle. Contains `cycle_number`, `input_tokens`, and `output_tokens`.
+
+**WorkerAgent** — Standalone LLM code-generation component. Separates prompt-building and LLM-calling from TDD loop orchestration. Receives `PodSpec` and optional context (playbook bullets, AST context map) explicitly; returns code strings. Provides `generate_test()`, `generate_implementation()`, and `generate_refactor()` methods.
+
+---
+
+## Architectural Decisions
+
+**ADR-001: LanguagePod Protocol** — Each target language has a `LanguagePod` implementation that handles RED, GREEN, and REFACTOR phases. The pod is responsible for code generation, execution, and token tracking. The TDD loop orchestration (`TDDCycleRunner`, `IterativeTDDRunner`) is language-agnostic and delegates to pods via the `LanguagePod` protocol.
+
+**ADR-002: WorkerAgent as Pure Generator** — `WorkerAgent` is a pure code-generation component with no file I/O or test execution responsibility. It receives all context explicitly (PodSpec, playbook bullets, AST context map) and returns code strings. File I/O and test execution are the caller's (pod's) responsibility. This separation allows pods to control execution isolation (e.g., Podman containers) independently of generation.
+
+**ADR-003: TDDCycleRunner with Retry and Abort** — GREEN phase retries up to `max_green_attempts` times, passing previous failure output as `error_output` in the PodSpec. Security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate) abort the cycle immediately without retrying. The learning loop (Reflector → Curator) runs only after GREEN passes, ensuring there is real code to reflect on.
+
+**ADR-004: Podman Clean Room Execution** — All test execution happens inside a Podman container via `PodmanOrchestrator`. The orchestrator sends code files as a pulse, the container runs tests, and returns results. Hash chain integrity (`canonical_hash`) ensures the container ran exactly the code that was sent. `SecurityBreachError` is raised on hash mismatch.
+
+**ADR-005: Iterative TDD with IncrementalPlanner** — `IterativeTDDRunner` uses `IncrementalPlanner` to determine the next test increment, then delegates to `TDDCycleRunner` for execution. The planner asks the LLM what single test to write next, given current test and implementation files and playbook guidance. The loop repeats until the planner signals COMPLETE or max iterations reached.
+
+**ADR-006: ExperimentLogger with PostgreSQL Fallback** — `ExperimentLogger` stores all TDD and ML experiments in PostgreSQL. If PostgreSQL is unavailable, it falls back to a local SQLite file (`ace_experiments.db`), ensuring TDD cycles are always persisted. The logger uses the ACE architecture (Task, Generator, Environment, Reflector, Curator) for structured experiment data.
+
+**ADR-007: PlaybookManager with File Persistence** — `PlaybookManager` stores playbooks in memory and persists them as JSON files in `data/playbooks/`. Supports incremental delta updates, semantic deduplication, token budget enforcement, and section-based organization. Bullets include provenance metadata (model, provider, license) and contextual retrieval fields (confidence, domains, projects).
+
+**ADR-008: Reflector with Iterative Refinement** — The `Reflector` module supports iterative refinement of analysis up to `max_refinement_rounds`. Each iteration produces a quality score; refinement stops when quality >= 0.8 or max rounds reached. The reflector tags bullets as helpful/harmful/neutral based on task outcome and generator feedback.
+
+**ADR-009: Curator with LLM Synthesis** — The `Curator` module uses an LLM to synthesize reflector insights into delta bullets. It parses the LLM response for section-organized bullet content and applies updates via `PlaybookManager.apply_delta()`. Supports redundancy checking and token budget enforcement.
+
+**ADR-010: Generator with Cross-Model Retrieval** — The `Generator` module supports two retrieval modes: model-specific (single playbook) and cross-model hybrid (primary + domain playbooks). Cross-model retrieval uses `BulletRetriever.retrieve_cross_model()` with configurable secondary weight. The generator builds prompts with playbook context organized by section.
+
+**ADR-011: ImportFilter for Security** — All generated code passes through `ImportFilter` before execution. The filter blocks forbidden imports (e.g., `subprocess`, `os.system`) and dangerous builtins (e.g., `eval`, `exec`). Violations raise `ForbiddenImportError`, which triggers immediate cycle abort in `TDDCycleRunner`.
+
+**ADR-012: Atomic File Writes** — `PythonLanguagePod` uses `commit_to_disk()` for atomic file writes: write to a `.tmp` file, then `os.replace()` to the target path. This prevents partial writes from corrupting test or implementation files during concurrent or interrupted cycles.
+
+**ADR-013: Test Import Auto-Injection** — `PythonLanguagePod` automatically prepends `from <module_name> import *` to test files if the implementation module is not already imported. This ensures tests can reference implementation functions without explicit import management by the LLM.
+
+**ADR-014: Token Usage Tracking via Interception** — `PythonLanguagePod` intercepts the LLM client's `generate` method to track prompt and completion tokens per cycle. Token usage is recorded as `TokenUsage` objects and reset after each phase, providing per-cycle token accounting.
+
+**ADR-015: Default Test Assertion Rules** — `WorkerAgent` maintains a set of default test assertion rules (`_DEFAULT_TEST_RULES`) that are seeded into the playbook's `test_assertion_rules` section on first use. These rules guide the LLM to write property-based assertions instead of exact-value assertions when multiple correct outputs exist.

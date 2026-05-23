@@ -105,6 +105,7 @@ class IterativeTDDRunner:
                 test_file=increment.test_file,
                 implementation_file=increment.implementation_file,
                 cycle_number=cycle_number,
+                gherkin_context=gherkin_context,
             )
 
             runner = TDDCycleRunner(self._pod, **self._runner_kwargs)
