@@ -52,12 +52,14 @@ class IncrementalPlanner:
         playbook_manager=None,
         playbook_id: str = "default",
         temperature: float = 0.0,
+        target_language: str = "python",
     ) -> None:
         self._llm = llm_client
         self._test_dir = test_dir
         self._src_dir = src_dir
         self._playbook_manager = playbook_manager
         self._playbook_id = playbook_id
+        self._target_language = target_language
         self._temperature = temperature
         # {test_file_str: [{"name": str, "code": str, "cycle": int}]}
         self._test_functions: dict[str, list[dict]] = {}
@@ -189,9 +191,10 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
             else ""
         )
 
-        prompt = f"""You are writing TDD tests for: "{requirement}"
+        framework = "vitest" if self._target_language == "typescript" else "pytest"
+        prompt = f"""You are planning TDD tests for: "{requirement}"
 
-Write ONE failing pytest test for this SPECIFIC Gherkin scenario:
+Plan ONE failing {framework} test for this SPECIFIC Gherkin scenario:
 
   Scenario: {name}
 {step_lines}
@@ -214,7 +217,7 @@ The test MUST:
 5. Assert the FINAL output value (e.g. total bill amount); do NOT assert intermediate
    computation steps unless the scenario explicitly names them as separate return values
 
-Output ONE pipe-delimited line:
+⚠️  DO NOT write any test code. Output ONLY one pipe-delimited line — nothing else:
 test_name | description with exact values | test_file_path | impl_file_path
 """
 

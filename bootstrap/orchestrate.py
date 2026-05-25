@@ -174,7 +174,7 @@ def main() -> None:
 
 def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog) -> None:
     import subprocess
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     def _git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -198,6 +198,14 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
         print("  Nothing new to commit — public repo already up to date.")
         return
 
+    # Audit manifest — every file about to be committed, with sha256
+    manifest = {}
+    for f in sorted(oss_dir.rglob("*")):
+        if f.is_file() and ".git" not in f.parts:
+            manifest[str(f.relative_to(oss_dir))] = BootstrapAuditLog.sha256(f)
+    log.record("REPO_CONTENTS", oss_dir=str(oss_dir), file_count=len(manifest), files=manifest)
+
+    from datetime import timezone
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if is_new:
         msg = f"Initial clean-room synthesized release ({module_count} modules, {ts})"
@@ -364,6 +372,7 @@ def _synthesis_loop_ts(
                 src_dir=out_dir,
                 playbook_manager=playbook_manager,
                 playbook_id=playbook_id,
+                target_language="typescript",
             )
             orchestrator = PodmanOrchestrator(
                 runner=container,
@@ -387,6 +396,11 @@ def _synthesis_loop_ts(
 
             token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
             token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
+
+            # Remove any stale .py files the planner may have written before
+            # the TypeScript path normalisation kicked in.
+            for stale in out_dir.glob("*.py"):
+                stale.unlink()
 
             for synth_file in sorted(out_dir.glob("*.ts")):
                 cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
