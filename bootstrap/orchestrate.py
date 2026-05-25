@@ -71,6 +71,38 @@ MODEL_PASS2   = "anthropic/claude-sonnet-4-5"   # Pass 2: fallback on failure
 # ---------------------------------------------------------------------------
 
 
+def _check_openrouter_credits() -> None:
+    """Fail fast if OpenRouter balance is zero or the key is invalid."""
+    import os
+    import urllib.request
+    import json as _json
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        print("[WARN] OPENROUTER_API_KEY not set — skipping credit check")
+        return
+
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/auth/key",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read())["data"]
+        limit = data.get("limit")
+        usage = data.get("usage", 0.0)
+        if limit is not None:
+            remaining = limit - usage
+            if remaining <= 0:
+                print(f"ERROR: OpenRouter credit exhausted (limit={limit}, usage={usage})", file=sys.stderr)
+                sys.exit(1)
+            print(f"OpenRouter credits OK — ${remaining:.4f} remaining (limit=${limit}, used=${usage:.4f})")
+        else:
+            print(f"OpenRouter credits OK — unlimited key (used=${usage:.4f})")
+    except Exception as exc:
+        print(f"[WARN] Credit check failed ({exc}) — continuing anyway")
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="Bootstrap pipeline: private → Gherkin → public AGPLv3 repo")
     parser.add_argument(
@@ -80,18 +112,23 @@ def _parse_args():
         "--lang", choices=["python", "typescript"], default="python",
         help="Target synthesis language (default: python)"
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-synthesise modules that already have output files in the OSS dir"
+    )
     args = parser.parse_args()
     if args.file:
         p = Path(args.file)
         if not p.exists():
             print(f"Error: {p} not found", file=sys.stderr)
             sys.exit(1)
-        return [p], args.lang
-    return get_target_modules(PRIVATE_SRC_ROOT, args.lang), args.lang
+        return [p], args.lang, args.force
+    return get_target_modules(PRIVATE_SRC_ROOT, args.lang), args.lang, args.force
 
 
 def main() -> None:
-    source_files, lang = _parse_args()
+    source_files, lang, force = _parse_args()
+    _check_openrouter_credits()
     OSS_DIR.mkdir(parents=True, exist_ok=True)
     log = BootstrapAuditLog(AUDIT_LOG_PATH)
 
@@ -131,9 +168,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     print(f"\n=== Stage 2+3: Synthesize & Verify ({len(feature_files)} features) ===")
     if lang == "typescript":
-        passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log)
+        passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force)
     else:
-        passed, failed = _synthesis_loop(feature_files, OSS_DIR, log)
+        passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force)
     print(f"  passed={passed}  blocked={failed}")
 
     # ------------------------------------------------------------------
@@ -224,6 +261,8 @@ def _synthesis_loop(
     feature_files: list[Path],
     oss_dir: Path,
     log: BootstrapAuditLog,
+    *,
+    force: bool = False,
 ) -> tuple[int, int]:
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.iterative_tdd_runner import IterativeTDDRunner
@@ -250,72 +289,88 @@ def _synthesis_loop(
         for feature_file in feature_files:
             stem = feature_file.stem
             out_dir = oss_dir / stem
+
+            # Resume: skip if output already exists and --force not set
+            if not force and out_dir.exists() and any(out_dir.glob("*.py")):
+                existing = list(out_dir.glob("*.py"))
+                print(f"  [{stem}] skipping — {len(existing)} .py file(s) already present (--force to re-run)")
+                log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
+                           existing_files=[f.name for f in existing])
+                passed += len(existing)
+                continue
+
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            playbook_id = f"bootstrap_{stem}"
-            pb = playbook_manager.get_or_create_playbook(playbook_id)
-            if not pb.sections.get(_TEST_RULES_SECTION):
-                for rule in _DEFAULT_TEST_RULES:
-                    playbook_manager.add_bullet(
-                        playbook_id, BulletCreate(content=rule, section=_TEST_RULES_SECTION)
-                    )
+            try:
+                playbook_id = f"bootstrap_{stem}"
+                pb = playbook_manager.get_or_create_playbook(playbook_id)
+                if not pb.sections.get(_TEST_RULES_SECTION):
+                    for rule in _DEFAULT_TEST_RULES:
+                        playbook_manager.add_bullet(
+                            playbook_id, BulletCreate(content=rule, section=_TEST_RULES_SECTION)
+                        )
 
-            worker = WorkerAgent(llm, playbook_manager=playbook_manager)
-            planner = IncrementalPlanner(
-                llm_client=llm_fast,
-                test_dir=out_dir,
-                src_dir=out_dir,
-                playbook_manager=playbook_manager,
-                playbook_id=playbook_id,
-            )
-            orchestrator = PodmanOrchestrator(
-                runner=container,
-                work_dir=out_dir / "harness",
-                started=True,
-            )
-            pod = PythonLanguagePod(worker, out_dir, orchestrator)
-            runner = IterativeTDDRunner(
-                pod=pod,
-                planner=planner,
-                max_iterations=10,
-                max_green_attempts=5,
-                experiment_logger=experiment_logger,
-                playbook_id=playbook_id,
-            )
-
-            print(f"  [{stem}] synthesizing...", end=" ", flush=True)
-            result = runner.run_from_feature(feature_file)
-            status = "✓" if result.success else "✗"
-            print(f"{status} ({result.iterations} cycles)")
-
-            token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
-            token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
-
-            for synth_file in sorted(out_dir.glob("*.py")):
-                cr = verify_clean_room(synth_file, PRIVATE_SRC_ROOT)
-                event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
-                log.record(
-                    event,
-                    feature=str(feature_file),
-                    file=str(synth_file),
-                    sha256=BootstrapAuditLog.sha256(synth_file),
-                    model=MODEL_PASS1,
-                    input_tokens=token_in,
-                    output_tokens=token_out,
-                    payload=cr.as_log_payload(
-                        module=synth_file.stem,
-                        input_language="Python (Source AST)",
-                        output_language="Python (Target AST)",
-                    ),
+                worker = WorkerAgent(llm, playbook_manager=playbook_manager)
+                planner = IncrementalPlanner(
+                    llm_client=llm,
+                    test_dir=out_dir,
+                    src_dir=out_dir,
+                    playbook_manager=playbook_manager,
+                    playbook_id=playbook_id,
                 )
-                if not cr.passed:
-                    print(f"    [BLOCKED] {synth_file.name}")
-                    for v in cr.violations:
-                        print(f"      {v}")
-                    synth_file.unlink()
-                    failed += 1
-                else:
-                    passed += 1
+                orchestrator = PodmanOrchestrator(
+                    runner=container,
+                    work_dir=out_dir / "harness",
+                    started=True,
+                )
+                pod = PythonLanguagePod(worker, out_dir, orchestrator)
+                runner = IterativeTDDRunner(
+                    pod=pod,
+                    planner=planner,
+                    max_iterations=10,
+                    max_green_attempts=5,
+                    experiment_logger=experiment_logger,
+                    playbook_id=playbook_id,
+                )
+
+                print(f"  [{stem}] synthesizing...", end=" ", flush=True)
+                result = runner.run_from_feature(feature_file)
+                status = "✓" if result.success else "✗"
+                print(f"{status} ({result.iterations} cycles)")
+
+                token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
+                token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
+
+                for synth_file in sorted(out_dir.glob("*.py")):
+                    cr = verify_clean_room(synth_file, PRIVATE_SRC_ROOT)
+                    event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
+                    log.record(
+                        event,
+                        feature=str(feature_file),
+                        file=str(synth_file),
+                        sha256=BootstrapAuditLog.sha256(synth_file),
+                        model=MODEL_PASS1,
+                        input_tokens=token_in,
+                        output_tokens=token_out,
+                        payload=cr.as_log_payload(
+                            module=synth_file.stem,
+                            input_language="Python (Source AST)",
+                            output_language="Python (Target AST)",
+                        ),
+                    )
+                    if not cr.passed:
+                        print(f"    [BLOCKED] {synth_file.name}")
+                        for v in cr.violations:
+                            print(f"      {v}")
+                        synth_file.unlink()
+                        failed += 1
+                    else:
+                        passed += 1
+
+            except Exception as exc:
+                reason = str(exc)
+                print(f"  [{stem}] SKIPPED — {reason[:120]}")
+                log.record("SYNTHESIS_SKIP", feature=str(feature_file), reason=reason)
 
     finally:
         container.stop()
@@ -328,6 +383,8 @@ def _synthesis_loop_ts(
     feature_files: list[Path],
     oss_dir: Path,
     log: BootstrapAuditLog,
+    *,
+    force: bool = False,
 ) -> tuple[int, int]:
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.iterative_tdd_runner import IterativeTDDRunner
@@ -358,75 +415,91 @@ def _synthesis_loop_ts(
         for feature_file in feature_files:
             stem = feature_file.stem
             out_dir = oss_dir / stem
+
+            # Resume: skip if output already exists and --force not set
+            if not force and out_dir.exists() and any(out_dir.glob("*.ts")):
+                existing = list(out_dir.glob("*.ts"))
+                print(f"  [{stem}] skipping — {len(existing)} .ts file(s) already present (--force to re-run)")
+                log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
+                           existing_files=[f.name for f in existing])
+                passed += len(existing)
+                continue
+
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            playbook_id = f"bootstrap_ts_{stem}"
-            playbook_manager.get_or_create_playbook(playbook_id)
+            try:
+                playbook_id = f"bootstrap_ts_{stem}"
+                playbook_manager.get_or_create_playbook(playbook_id)
 
-            worker = TypeScriptWorkerAgent(
-                llm_fast, playbook_manager=playbook_manager, fallback_client=llm_fallback
-            )
-            planner = IncrementalPlanner(
-                llm_client=llm_fast,
-                test_dir=out_dir,
-                src_dir=out_dir,
-                playbook_manager=playbook_manager,
-                playbook_id=playbook_id,
-                target_language="typescript",
-            )
-            orchestrator = PodmanOrchestrator(
-                runner=container,
-                work_dir=out_dir / "harness",
-                started=True,
-            )
-            pod = TypeScriptLanguagePod(worker, out_dir, orchestrator)
-            runner = IterativeTDDRunner(
-                pod=pod,
-                planner=planner,
-                max_iterations=10,
-                max_green_attempts=5,
-                experiment_logger=experiment_logger,
-                playbook_id=playbook_id,
-            )
-
-            print(f"  [{stem}] synthesizing (TypeScript)...", end=" ", flush=True)
-            result = runner.run_from_feature(feature_file)
-            status = "✓" if result.success else "✗"
-            print(f"{status} ({result.iterations} cycles)")
-
-            token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
-            token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
-
-            # Remove any stale .py files the planner may have written before
-            # the TypeScript path normalisation kicked in.
-            for stale in out_dir.glob("*.py"):
-                stale.unlink()
-
-            for synth_file in sorted(out_dir.glob("*.ts")):
-                cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
-                event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
-                log.record(
-                    event,
-                    feature=str(feature_file),
-                    file=str(synth_file),
-                    sha256=BootstrapAuditLog.sha256(synth_file),
-                    model=MODEL_PASS1,
-                    input_tokens=token_in,
-                    output_tokens=token_out,
-                    payload=cr.as_log_payload(
-                        module=synth_file.stem,
-                        input_language="Python (Source AST)",
-                        output_language="TypeScript (Target AST via Vitest)",
-                    ),
+                worker = TypeScriptWorkerAgent(
+                    llm_fast, playbook_manager=playbook_manager, fallback_client=llm_fallback
                 )
-                if not cr.passed:
-                    print(f"    [BLOCKED] {synth_file.name}")
-                    for v in cr.violations:
-                        print(f"      {v}")
-                    synth_file.unlink()
-                    failed += 1
-                else:
-                    passed += 1
+                planner = IncrementalPlanner(
+                    llm_client=llm_fast,
+                    test_dir=out_dir,
+                    src_dir=out_dir,
+                    playbook_manager=playbook_manager,
+                    playbook_id=playbook_id,
+                    target_language="typescript",
+                )
+                orchestrator = PodmanOrchestrator(
+                    runner=container,
+                    work_dir=out_dir / "harness",
+                    started=True,
+                )
+                pod = TypeScriptLanguagePod(worker, out_dir, orchestrator)
+                runner = IterativeTDDRunner(
+                    pod=pod,
+                    planner=planner,
+                    max_iterations=10,
+                    max_green_attempts=5,
+                    experiment_logger=experiment_logger,
+                    playbook_id=playbook_id,
+                )
+
+                print(f"  [{stem}] synthesizing (TypeScript)...", end=" ", flush=True)
+                result = runner.run_from_feature(feature_file)
+                status = "✓" if result.success else "✗"
+                print(f"{status} ({result.iterations} cycles)")
+
+                token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
+                token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
+
+                # Remove any stale .py files the planner may have written before
+                # the TypeScript path normalisation kicked in.
+                for stale in out_dir.glob("*.py"):
+                    stale.unlink()
+
+                for synth_file in sorted(out_dir.glob("*.ts")):
+                    cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
+                    event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
+                    log.record(
+                        event,
+                        feature=str(feature_file),
+                        file=str(synth_file),
+                        sha256=BootstrapAuditLog.sha256(synth_file),
+                        model=MODEL_PASS1,
+                        input_tokens=token_in,
+                        output_tokens=token_out,
+                        payload=cr.as_log_payload(
+                            module=synth_file.stem,
+                            input_language="Python (Source AST)",
+                            output_language="TypeScript (Target AST via Vitest)",
+                        ),
+                    )
+                    if not cr.passed:
+                        print(f"    [BLOCKED] {synth_file.name}")
+                        for v in cr.violations:
+                            print(f"      {v}")
+                        synth_file.unlink()
+                        failed += 1
+                    else:
+                        passed += 1
+
+            except Exception as exc:
+                reason = str(exc)
+                print(f"  [{stem}] SKIPPED — {reason[:120]}")
+                log.record("SYNTHESIS_SKIP", feature=str(feature_file), reason=reason)
 
     finally:
         container.stop()
