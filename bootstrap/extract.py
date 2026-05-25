@@ -15,7 +15,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bootstrap.audit_log import BootstrapAuditLog
-from src.utils.llm_client import LLMClient
 
 _EXTRACTION_PROMPT = """\
 You are a behavior analyst performing a clean-room specification extraction.
@@ -46,10 +45,13 @@ def extract_features(
     src_files: list[Path],
     features_dir: Path,
     log: BootstrapAuditLog,
-    model: str = "deepseek/deepseek-v4-flash",
+    model: str | None = None,
+    llm_client=None,
 ) -> list[Path]:
     """Generate a .feature file for each source file. Returns paths of produced files."""
-    llm = LLMClient(provider="openrouter", model=model)
+    if llm_client is None:
+        from src.utils.claude_cli_client import ClaudeCliClient
+        llm_client = ClaudeCliClient()
     features_dir.mkdir(parents=True, exist_ok=True)
     produced: list[Path] = []
 
@@ -66,7 +68,7 @@ def extract_features(
         )
 
         prompt = _EXTRACTION_PROMPT.format(filename=src_file.name, source=source)
-        response = llm.generate(prompt, temperature=0.0)
+        response = llm_client.generate(prompt, temperature=0.0)
         gherkin = _strip_fences(response.get("content", "").strip())
 
         if not gherkin.startswith("Feature:"):
@@ -82,7 +84,7 @@ def extract_features(
             src_file=str(src_file),
             feature_file=str(feature_path),
             sha256=BootstrapAuditLog.sha256(feature_path),
-            model=model,
+            model=model or "claude-cli",
             prompt_sha256=BootstrapAuditLog.sha256_str(prompt),
         )
 
