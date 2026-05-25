@@ -86,10 +86,16 @@ class TypeScriptRunner(PodmanRunner):
         for name, content in files.items():
             (self._host_ws / name).write_text(content)
 
-        # Run vitest from the pre-built project dir with config in /workspace
+        # Run vitest from the pre-built project dir with config in /workspace.
+        # NODE_PATH ensures the config's `import from 'vitest/config'` resolves
+        # against /opt/ts-project/node_modules even when the .timestamp mjs file
+        # is compiled from /workspace.
         vitest_proc = subprocess.run(
             [
-                "podman", "exec", "--workdir", _TS_PROJECT, self._name,
+                "podman", "exec",
+                "--workdir", _TS_PROJECT,
+                "--env", f"NODE_PATH={_TS_PROJECT}/node_modules",
+                self._name,
                 "node", _VITEST_BIN,
                 "run",
                 "--config", f"{_REMOTE_WS}/vitest.config.ts",

@@ -225,9 +225,9 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ProjectArchitecture** — Manages cached project architecture information, including folder purposes for intelligent file placement in TDD cycles.
 
-**ProjectDetector** — Detects and analyzes Python project structure (root, src, test directories, project type, package manager) from a starting directory.
-
 **ProjectConfig** — Manages ACE project configuration via `.ace/config.yml`. Provides `load`, `save`, `initialize`, and `get_or_create` methods.
+
+**ProjectDetector** — Detects and analyzes Python project structure (root, src, test directories, project type, package manager) from a starting directory.
 
 **Provenance** — Model/bullet provenance tracking for ownership-aware knowledge transfer. Used by `DistillationRouter` to filter bullets by supplier, license, and model origin.
 
