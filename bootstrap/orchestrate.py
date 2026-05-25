@@ -124,6 +124,14 @@ def main() -> None:
     else:
         print(f"\n[WARN] Audit chain mismatch at: {mismatch}")
 
+    # ------------------------------------------------------------------
+    # Publish audit log into the public repo
+    # ------------------------------------------------------------------
+    import shutil
+    dest = OSS_DIR / "audit.jsonl"
+    shutil.copy2(AUDIT_LOG_PATH, dest)
+    print(f"Audit log copied → {dest}")
+
     print(f"\nDone. Public repo: {OSS_DIR.resolve()}")
 
 
