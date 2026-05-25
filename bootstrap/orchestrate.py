@@ -64,9 +64,9 @@ FEATURES_DIR = BOOTSTRAP_DIR / "features"
 AUDIT_LOG_PATH = BOOTSTRAP_DIR / "audit.jsonl"
 
 # Model roster — Pass 1 is cheap/fast; Pass 2 escalates on failure
-MODEL_EXTRACT = "google/gemini-2.5-flash-preview"  # Stage 1: Gherkin extraction
-MODEL_PASS1   = "google/gemini-2.5-flash-preview"  # Pass 1: fast synthesis
-MODEL_PASS2   = "anthropic/claude-3.5-sonnet"      # Pass 2: fallback on failure
+MODEL_EXTRACT = "google/gemini-3.5-flash"       # Stage 1: Gherkin extraction
+MODEL_PASS1   = "google/gemini-3.5-flash"       # Pass 1: fast synthesis
+MODEL_PASS2   = "anthropic/claude-sonnet-4-5"   # Pass 2: fallback on failure
 
 # ---------------------------------------------------------------------------
 

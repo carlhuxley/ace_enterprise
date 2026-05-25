@@ -51,7 +51,7 @@ def extract_features(
     """Generate a .feature file for each source file. Returns paths of produced files."""
     if llm_client is None:
         from src.utils.llm_client import LLMClient
-        llm_client = LLMClient(provider="openrouter", model=model or "google/gemini-2.5-flash-preview")
+        llm_client = LLMClient(provider="openrouter", model=model or "google/gemini-3.5-flash")
     features_dir.mkdir(parents=True, exist_ok=True)
     produced: list[Path] = []
 
