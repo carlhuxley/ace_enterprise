@@ -39,7 +39,32 @@ class TypeScriptLanguagePod:
         self._completion_tokens: int = 0
         self._intercept_tokens()
 
+    @staticmethod
+    def _ts_spec(spec: PodSpec) -> PodSpec:
+        """Normalise PodSpec file paths to TypeScript extensions.
+
+        The planner is language-agnostic and may return Python-style paths
+        (test_foo.py / foo.py). Convert them to vitest convention (foo.test.ts / foo.ts).
+        """
+        import re as _re
+        from dataclasses import replace
+
+        impl = spec.implementation_file
+        test = spec.test_file
+
+        # impl: anything.py → anything.ts
+        if impl.suffix == ".py":
+            impl = impl.with_suffix(".ts")
+
+        # test: test_foo.py or foo_test.py → foo.test.ts; foo.py → foo.test.ts
+        if test.suffix == ".py":
+            stem = _re.sub(r"^test_|_test$", "", test.stem)
+            test = test.parent / f"{stem}.test.ts"
+
+        return replace(spec, test_file=test, implementation_file=impl)
+
     def run_red(self, spec: PodSpec) -> PhaseResult:
+        spec = self._ts_spec(spec)
         try:
             existing = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
             code = self._worker.generate_test(spec, existing_code=existing)
@@ -63,6 +88,7 @@ class TypeScriptLanguagePod:
         return result
 
     def run_green(self, spec: PodSpec) -> PhaseResult:
+        spec = self._ts_spec(spec)
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
         try:
             impl_code = self._worker.generate_implementation(
@@ -90,6 +116,7 @@ class TypeScriptLanguagePod:
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
+        spec = self._ts_spec(spec)
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
         impl_code = spec.implementation_file.read_text(encoding="utf-8") if spec.implementation_file.exists() else ""
         files = {
