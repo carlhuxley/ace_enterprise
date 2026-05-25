@@ -3,7 +3,14 @@
     "allow": [
       "Bash(uv add *)",
       "Bash(uv run *)",
-      "Bash(wait)"
+      "Bash(wait)",
+      "Bash(.venv/bin/pytest tests/test_podman_orchestrator.py -v)",
+      "Bash(.venv/bin/pytest tests/test_bandit_gate.py::test_clean_passing_code_returns_passed -v)",
+      "Bash(.venv/bin/pytest tests/test_hash_lock.py::test_matching_hashes_return_phase_result -v)",
+      "Bash(.venv/bin/pytest tests/test_python_language_pod_sidecar.py::test_green_clean_code_returns_passed_and_commits_file -v)",
+      "Bash(.venv/bin/pytest tests/test_python_language_pod_sidecar.py::test_green_failing_pytest_does_not_commit_file -v)",
+      "Bash(.venv/bin/pytest tests/test_python_language_pod_sidecar.py::test_green_hash_mismatch_surfaces_as_failed_phase_result -v)",
+      "Bash(.venv/bin/python *)"
     ]
   },
   "enableAllProjectMcpServers": true,

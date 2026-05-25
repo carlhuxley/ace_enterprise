@@ -63,6 +63,11 @@ BOOTSTRAP_DIR = Path("bootstrap")
 FEATURES_DIR = BOOTSTRAP_DIR / "features"
 AUDIT_LOG_PATH = BOOTSTRAP_DIR / "audit.jsonl"
 
+# Model roster — Pass 1 is cheap/fast; Pass 2 escalates on failure
+MODEL_EXTRACT = "google/gemini-2.5-flash-preview"  # Stage 1: Gherkin extraction
+MODEL_PASS1   = "google/gemini-2.5-flash-preview"  # Pass 1: fast synthesis
+MODEL_PASS2   = "anthropic/claude-3.5-sonnet"      # Pass 2: fallback on failure
+
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +99,8 @@ def main() -> None:
         "RUN_START",
         private_src=str(PRIVATE_SRC_ROOT),
         oss_dir=str(OSS_DIR),
-        model="claude-cli",
+        model_pass1=MODEL_PASS1,
+        model_pass2=MODEL_PASS2,
         lang=lang,
         source_file_count=len(source_files),
     )
@@ -111,6 +117,7 @@ def main() -> None:
         src_files=source_files,
         features_dir=FEATURES_DIR,
         log=log,
+        model=MODEL_EXTRACT,
     )
     print(f"  {len(feature_files)} feature files written to {FEATURES_DIR}/")
 
@@ -219,9 +226,9 @@ def _synthesis_loop(
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
     from src.storage.schemas import BulletCreate
-    from src.utils.claude_cli_client import ClaudeCliClient
+    from src.utils.llm_client import LLMClient
 
-    llm = ClaudeCliClient()
+    llm = LLMClient(provider="openrouter", model=MODEL_PASS1)
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-1.0")
 
@@ -247,7 +254,7 @@ def _synthesis_loop(
 
             worker = WorkerAgent(llm, playbook_manager=playbook_manager)
             planner = IncrementalPlanner(
-                llm_client=llm,
+                llm_client=llm_fast,
                 test_dir=out_dir,
                 src_dir=out_dir,
                 playbook_manager=playbook_manager,
@@ -284,7 +291,7 @@ def _synthesis_loop(
                     feature=str(feature_file),
                     file=str(synth_file),
                     sha256=BootstrapAuditLog.sha256(synth_file),
-                    model="claude-cli",
+                    model=MODEL_PASS1,
                     input_tokens=token_in,
                     output_tokens=token_out,
                     payload=cr.as_log_payload(
@@ -322,13 +329,14 @@ def _synthesis_loop_ts(
     from src.agents.typescript_worker_agent import TypeScriptWorkerAgent
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
-    from src.utils.claude_cli_client import ClaudeCliClient
+    from src.utils.llm_client import LLMClient
 
     print("  Building TypeScript harness image...")
     build_ts_image()
     print("  Image ready.")
 
-    llm = ClaudeCliClient()
+    llm_fast     = LLMClient(provider="openrouter", model=MODEL_PASS1)
+    llm_fallback = LLMClient(provider="openrouter", model=MODEL_PASS2)
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-ts-1.0")
 
@@ -347,9 +355,11 @@ def _synthesis_loop_ts(
             playbook_id = f"bootstrap_ts_{stem}"
             playbook_manager.get_or_create_playbook(playbook_id)
 
-            worker = TypeScriptWorkerAgent(llm, playbook_manager=playbook_manager)
+            worker = TypeScriptWorkerAgent(
+                llm_fast, playbook_manager=playbook_manager, fallback_client=llm_fallback
+            )
             planner = IncrementalPlanner(
-                llm_client=llm,
+                llm_client=llm_fast,
                 test_dir=out_dir,
                 src_dir=out_dir,
                 playbook_manager=playbook_manager,
@@ -386,7 +396,7 @@ def _synthesis_loop_ts(
                     feature=str(feature_file),
                     file=str(synth_file),
                     sha256=BootstrapAuditLog.sha256(synth_file),
-                    model="claude-cli",
+                    model=MODEL_PASS1,
                     input_tokens=token_in,
                     output_tokens=token_out,
                     payload=cr.as_log_payload(

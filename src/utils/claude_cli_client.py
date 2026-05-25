@@ -10,6 +10,7 @@ Architecture contract:
 The container remains a pure execution sandbox with --network none.
 No API keys, no external billing — uses the active Claude Code session.
 """
+import os
 import subprocess
 from typing import Any
 
@@ -21,16 +22,20 @@ class ClaudeCliClient:
     TypeScriptWorkerAgent, IncrementalPlanner, and extract.py need no changes.
     """
 
-    def __init__(self, timeout: int = 120) -> None:
+    def __init__(self, timeout: int = 300) -> None:
         self._timeout = timeout
 
     def generate(self, prompt: str, temperature: float = 0.0) -> dict[str, Any]:
         """Run claude -p with prompt, return {"content": <response>}."""
+        # Strip CLAUDE* vars so the subprocess doesn't detect a nested session
+        # and refuse to run (CLAUDECODE=1 causes exit 1 when nested).
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
         result = subprocess.run(
             ["claude", "--print", "--output-format", "text", prompt],
             capture_output=True,
             text=True,
             timeout=self._timeout,
+            env=env,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()

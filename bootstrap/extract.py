@@ -50,8 +50,8 @@ def extract_features(
 ) -> list[Path]:
     """Generate a .feature file for each source file. Returns paths of produced files."""
     if llm_client is None:
-        from src.utils.claude_cli_client import ClaudeCliClient
-        llm_client = ClaudeCliClient()
+        from src.utils.llm_client import LLMClient
+        llm_client = LLMClient(provider="openrouter", model=model or "google/gemini-2.5-flash-preview")
     features_dir.mkdir(parents=True, exist_ok=True)
     produced: list[Path] = []
 
@@ -71,7 +71,10 @@ def extract_features(
         response = llm_client.generate(prompt, temperature=0.0)
         gherkin = _strip_fences(response.get("content", "").strip())
 
-        if not gherkin.startswith("Feature:"):
+        # Trim any prose preamble — find the first Feature: line
+        if "Feature:" in gherkin:
+            gherkin = gherkin[gherkin.index("Feature:"):]
+        else:
             print(f"  [skip] no Feature: header for {src_file.name}")
             log.record("GHERKIN_SKIP", file=str(src_file), reason="no Feature: header in response")
             continue

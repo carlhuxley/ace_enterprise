@@ -30,12 +30,27 @@ _DEFAULT_TEST_RULES = [
 
 
 class TypeScriptWorkerAgent:
-    """Generates TypeScript code for each TDD phase given a PodSpec."""
+    """Generates TypeScript code for each TDD phase given a PodSpec.
 
-    def __init__(self, llm_client, playbook_manager=None, temperature: float = 0.0) -> None:
+    Supports a two-pass escalation strategy: the first `escalate_after` green
+    attempts use `llm_client` (fast/cheap); subsequent attempts use
+    `fallback_client` (more capable) if one is provided.
+    """
+
+    def __init__(
+        self,
+        llm_client,
+        playbook_manager=None,
+        temperature: float = 0.0,
+        fallback_client=None,
+        escalate_after: int = 2,
+    ) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
         self._temperature = temperature
+        self._fallback_client = fallback_client
+        self._escalate_after = escalate_after
+        self._impl_attempts: dict[str, int] = {}
 
     def generate_test(self, spec: PodSpec, existing_code: str = "") -> str:
         prompt = self._test_prompt(spec, existing_code)
@@ -48,8 +63,16 @@ class TypeScriptWorkerAgent:
         error_output: str = "",
         test_code: str = "",
     ) -> str:
+        key = spec.test_file.name
+        attempts = self._impl_attempts.get(key, 0)
+        client = (
+            self._fallback_client
+            if self._fallback_client and attempts >= self._escalate_after
+            else self.llm_client
+        )
+        self._impl_attempts[key] = attempts + 1
         prompt = self._impl_prompt(spec, error_output, test_code)
-        response = self.llm_client.generate(prompt, temperature=self._temperature)
+        response = client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
     def generate_refactor(self, spec: PodSpec, current_code: str = "") -> str:
@@ -97,7 +120,9 @@ class TypeScriptWorkerAgent:
         if test_code:
             parts.append(f"\nTest file to satisfy:\n```typescript\n{test_code}\n```")
         if error_output:
-            parts.append(f"\nTest failure output:\n{error_output}")
+            # Truncate to avoid recursive prompt explosion when errors contain the prior prompt
+            truncated = error_output[:3000] + "\n[truncated]" if len(error_output) > 3000 else error_output
+            parts.append(f"\nTest failure output:\n{truncated}")
         parts.append("Output only valid TypeScript code.")
         return "\n".join(parts)
 

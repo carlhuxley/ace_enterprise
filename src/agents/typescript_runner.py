@@ -14,12 +14,28 @@ from src.agents.podman_runner import PodmanRunner
 
 _TS_PROJECT = "/opt/ts-project"
 _VITEST_BIN = f"{_TS_PROJECT}/node_modules/.bin/vitest"
-_VITEST_CFG = f"{_TS_PROJECT}/vitest.config.ts"
 _RESULTS_JSON = "/tmp/vitest-results.json"
 _REMOTE_WS = "/workspace"
 
 # Injected alongside every pulse so vitest knows this is an ESM workspace
 _WORKSPACE_PACKAGE_JSON = '{"type":"module","name":"pulse"}'
+
+# Vitest config written to /workspace each pulse so Vite can write its timestamp
+# cache alongside it (ace user owns /workspace, not /opt/ts-project)
+_WORKSPACE_VITEST_CONFIG = """\
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node',
+    root: '/workspace',
+    include: ['**/*.{test,spec}.ts', '**/test_*.ts'],
+    reporters: ['verbose', 'json'],
+    outputFile: '/tmp/vitest-results.json',
+    testTimeout: 10000,
+  },
+});
+"""
 
 
 def build_ts_image(
@@ -62,22 +78,23 @@ class TypeScriptRunner(PodmanRunner):
             else:
                 existing.unlink()
 
-        # Inject ESM marker so Node resolves .ts imports correctly
+        # Inject ESM marker and vitest config into workspace (ace owns /workspace,
+        # so Vite can write its .timestamp cache file alongside the config)
         (self._host_ws / "package.json").write_text(_WORKSPACE_PACKAGE_JSON)
+        (self._host_ws / "vitest.config.ts").write_text(_WORKSPACE_VITEST_CONFIG)
 
         for name, content in files.items():
             (self._host_ws / name).write_text(content)
 
-        # Run vitest from the pre-built project dir, targeting /workspace
+        # Run vitest from the pre-built project dir with config in /workspace
         vitest_proc = subprocess.run(
             [
                 "podman", "exec", "--workdir", _TS_PROJECT, self._name,
                 "node", _VITEST_BIN,
                 "run",
-                "--config", _VITEST_CFG,
+                "--config", f"{_REMOTE_WS}/vitest.config.ts",
                 "--reporter", "json",
                 "--outputFile", _RESULTS_JSON,
-                _REMOTE_WS,
             ],
             capture_output=True,
             text=True,

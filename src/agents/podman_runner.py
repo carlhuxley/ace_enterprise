@@ -57,6 +57,9 @@ class PodmanRunner:
         if self._host_ws.exists():
             shutil.rmtree(self._host_ws)
         self._host_ws.mkdir(parents=True)
+        # World-writable so the container's non-root user can write cache files
+        # (e.g. vitest .timestamp files) into the bind-mounted workspace.
+        self._host_ws.chmod(0o777)
 
         subprocess.run(
             ["podman", "rm", "-f", self._name],

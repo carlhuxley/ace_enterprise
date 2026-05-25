@@ -6,8 +6,11 @@ inserted after the fact.
 """
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+_TZ_UK = ZoneInfo("Europe/London")
 
 
 class BootstrapAuditLog:
@@ -22,7 +25,7 @@ class BootstrapAuditLog:
                     pass
 
     def record(self, event: str, **fields) -> str:
-        entry = {"ts": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
+        entry = {"ts": datetime.now(_TZ_UK).isoformat(), "event": event, **fields}
         entry["chain_hash"] = hashlib.sha256(
             (self._prev_hash + json.dumps(entry, sort_keys=True)).encode()
         ).hexdigest()
