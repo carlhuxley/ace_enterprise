@@ -25,6 +25,7 @@ _WORKSPACE_PACKAGE_JSON = '{"type":"module","name":"pulse"}'
 _WORKSPACE_VITEST_CONFIG = """\
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
+  cacheDir: '/tmp/vitest-cache',
   test: {
     globals: true,
     environment: 'node',
