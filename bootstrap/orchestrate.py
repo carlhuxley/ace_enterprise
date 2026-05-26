@@ -158,6 +158,20 @@ def main() -> None:
     )
     print(f"  {len(feature_files)} feature files written to {FEATURES_DIR}/")
 
+    # Pick up hand-authored .feature files not produced by extraction this run.
+    # These are logged as GHERKIN_MANUAL so the audit trail records human authorship.
+    produced_stems = {f.stem for f in feature_files}
+    manual_features = sorted(
+        f for f in FEATURES_DIR.glob("*.feature")
+        if f.stem not in produced_stems
+    )
+    for mf in manual_features:
+        log.record("GHERKIN_MANUAL", feature_file=str(mf), sha256=BootstrapAuditLog.sha256(mf))
+        print(f"  [manual] {mf.name}")
+    if manual_features:
+        feature_files = feature_files + manual_features
+        print(f"  +{len(manual_features)} hand-authored feature file(s) queued for synthesis")
+
     if not feature_files:
         print("  Nothing to synthesize — aborting.")
         log.record("RUN_ABORT", reason="no feature files produced in Stage 1")
