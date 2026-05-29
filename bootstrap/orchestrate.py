@@ -42,6 +42,7 @@ _SKIP_FOR_TS = {
     "language_pod",
     "python_language_pod",
     "podman_runner",
+    "go_language_pod",  # feature spec too Go-toolchain-specific; see ace_enterprise-vmg
 }
 
 
