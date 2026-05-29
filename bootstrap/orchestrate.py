@@ -188,6 +188,14 @@ def main() -> None:
     print(f"  passed={passed}  blocked={failed}")
 
     # ------------------------------------------------------------------
+    # Stage 3.5: Place root-level files
+    # Certain synthesised modules must live at the repo root rather than in
+    # their subdirectory (e.g. vitest.config.ts).  Copy and log on the chain.
+    # ------------------------------------------------------------------
+    if lang == "typescript":
+        _place_root_files(OSS_DIR, log)
+
+    # ------------------------------------------------------------------
     # Stage 4: Stamp
     # ------------------------------------------------------------------
     print("\n=== Stage 4: Stamp ===")
@@ -269,6 +277,31 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
     )
     print(f"  Committed: {result.stdout.strip()}")
     log.record("GIT_COMMIT", oss_dir=str(oss_dir), message=msg, is_new_repo=is_new)
+
+
+# Maps synthesised module stem → destination filename at the repo root.
+_ROOT_FILE_PLACEMENTS: dict[str, str] = {
+    "vitest_config": "vitest.config.ts",
+}
+
+
+def _place_root_files(oss_dir: Path, log: BootstrapAuditLog) -> None:
+    """Copy designated synthesised modules to their repo-root destination."""
+    import shutil
+    for stem, dest_name in _ROOT_FILE_PLACEMENTS.items():
+        src = oss_dir / stem / f"{stem}.ts"
+        dest = oss_dir / dest_name
+        if not src.exists():
+            print(f"  [root-place] {dest_name} — source not yet synthesised, skipping")
+            continue
+        shutil.copy2(src, dest)
+        log.record(
+            "ROOT_FILE_PLACED",
+            src=str(src),
+            dest=str(dest),
+            sha256=BootstrapAuditLog.sha256(dest),
+        )
+        print(f"  [root-place] {stem}/{stem}.ts → {dest_name}")
 
 
 def _synthesis_loop(
