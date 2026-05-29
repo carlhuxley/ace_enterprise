@@ -144,11 +144,14 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
             return None
 
         parts = [_strip_markdown(p) for p in lines[0].split("|")]
-        if len(parts) != 4:
+        if len(parts) < 4:
             logger.warning("IncrementalPlanner: invalid format: %s", lines[0])
             return None
 
-        test_name, description, test_file_str, impl_file_str = parts
+        test_name = parts[0]
+        description = "|".join(parts[1:-2])
+        test_file_str = parts[-2]
+        impl_file_str = parts[-1]
         return TestIncrement(
             test_name=test_name,
             description=description,
@@ -229,11 +232,14 @@ test_name | description with exact values | test_file_path | impl_file_path
             return None
 
         parts = [_strip_markdown(p) for p in lines[0].split("|")]
-        if len(parts) != 4:
+        if len(parts) < 4:
             logger.warning("IncrementalPlanner: invalid scenario increment format: %s", lines[0])
             return None
 
-        test_name, description, test_file_str, impl_file_str = parts
+        test_name = parts[0]
+        description = "|".join(parts[1:-2])
+        test_file_str = parts[-2]
+        impl_file_str = parts[-1]
         return TestIncrement(
             test_name=test_name,
             description=description,

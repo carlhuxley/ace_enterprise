@@ -393,4 +393,50 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **TestAssertion** — A single assertion extracted from a test (type, expected, actual).
 
-**TestCase** — A test case for validating implementation in
+**TestCase** — A test case for validating implementation in `ContractOrchestrator`.
+
+**TestIncrement** — One planned test step in the TDD loop. Used by `IncrementalPlanner` and `AutonomousTDDAgent`.
+
+**TestReviewAgent** — Validates test quality before TDD implementation. Produces `TestReviewResult` with quality score and issues.
+
+**TestWritingRubric** — Domain-specific evaluation rubric for test suite output. Scores edge cases, assertions, naming, and coverage.
+
+**TokenEfficiencyReporter** — Computes token efficiency scores from LanguagePod run data. Produces `EfficiencyReport`.
+
+**TokenUsage** — Token consumption for one complete TDD cycle. Contains `cycle_number`, `input_tokens`, `output_tokens`.
+
+**TypeScriptLanguagePod** — LanguagePod for TypeScript TDD cycles via vitest in a rootless Podman container.
+
+**TypeScriptRunner** — PodmanRunner pre-configured for the TypeScript harness image.
+
+**TypeScriptWorkerAgent** — Generates TypeScript code for each TDD phase given a PodSpec.
+
+**Vote** — A single model's vote on a proposed bullet in the ensemble system. Contains vote type, confidence, and reasoning.
+
+**VotingStrategy** — Strategy for deciding bullet approval: `MajorityVoting`, `SupermajorityVoting`, `WeightedVoting`, `UnanimousVoting`, `EscalatingVoting`.
+
+**WorkerAgent** — Standalone LLM code-generation component. Separates prompt-building and LLM-calling from TDD loop orchestration. Receives feature context and optional constraints (playbook bullets, AST context map) explicitly; returns code strings. File I/O and test execution are the caller's (pod's) responsibility.
+
+---
+
+## Architectural Decisions
+
+**ADR-001: LanguagePod Protocol** — Each target language gets a `LanguagePod` that implements `run_red()`, `run_green()`, `run_refactor()`, and `token_usage()`. The LEARN phase (playbook bullets, ensemble voting) remains in the harness, not the pod. This keeps pods stateless and focused on language-specific execution.
+
+**ADR-002: WorkerAgent as Code Generator** — The `WorkerAgent` is a standalone component that receives all context explicitly (PodSpec, playbook bullets, AST context map) and returns code strings. It does not perform file I/O or test execution — those are the pod's responsibility. This separation allows the WorkerAgent to be reused across different pod implementations and tested independently.
+
+**ADR-003: TDDCycleRunner with Optional Learning Loop** — The `TDDCycleRunner` orchestrates RED → GREEN (with retry) → REFACTOR for one feature. The learning loop (Reflector → Curator → playbook write) is optional and only runs when both `reflector` and `curator` are provided. This allows the runner to be used in both learning and non-learning contexts.
+
+**ADR-004: IterativeTDDRunner with Gherkin Support** — The `IterativeTDDRunner` supports two modes: planner-driven (using `IncrementalPlanner` to determine the next test) and Gherkin-driven (parsing a `.feature` file and iterating through scenarios). Both modes use the same `LanguagePod` interface for execution.
+
+**ADR-005: ExperimentLogger with PostgreSQL Fallback** — The `ExperimentLogger` stores all TDD and ML experiments in PostgreSQL with a consistent schema. When PostgreSQL is unavailable, it falls back to a local SQLite file (`ace_experiments.db`), ensuring TDD cycles are always persisted even without a running database.
+
+**ADR-006: PlaybookManager with File Persistence** — The `PlaybookManager` stores playbooks in memory and persists them to JSON files in `data/playbooks/`. Each playbook is stored as a separate JSON file named `pb_<id>.json`. On initialization, all existing playbook files are loaded from disk. This provides a simple, inspectable persistence layer without requiring a database.
+
+**ADR-007: commit_to_disk for Atomic Writes** — File writes in `PythonLanguagePod` use `commit_to_disk()`, which writes to a temporary file and then uses `os.replace()` for atomic rename. This prevents partial writes from corrupting test or implementation files during a TDD cycle.
+
+**ADR-008: _ensure_test_import for Module Discovery** — The `PythonLanguagePod` automatically prepends `from <module_name> import *` to test files that don't already import the implementation module. This ensures tests can always discover the code under test without requiring explicit import statements in generated test code.
+
+**ADR-009: _intercept_tokens for Token Tracking** — The `PythonLanguagePod` intercepts the LLM client's `generate()` method to track per-cycle token consumption. This provides accurate token accounting without modifying the LLM client interface.
+
+**ADR-010: _is_abort for Security Failures** — The `TDDCycleRunner` uses `_is_abort()` to detect security/policy failures that cannot be fixed by retry. These include `ForbiddenImport:`, `SecurityBreach:`, and `Bandit gate:` prefixes. When detected, the cycle is aborted immediately without retrying.
