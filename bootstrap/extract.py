@@ -1,10 +1,9 @@
 """Stage 1 — Translate private source modules to pure Gherkin feature files.
 
 For each source file:
-  - Records SOURCE_READ event (file path + sha256) in the audit log
-  - Calls the LLM with a behavior-only extraction prompt
-  - Strips accidental markdown fences from the response
-  - Writes the feature file and records GHERKIN_EMIT event
+  - If a .feature file already exists, records GHERKIN_CACHED and skips the LLM call
+  - Otherwise records SOURCE_READ, calls the LLM, strips markdown fences,
+    writes the feature file, and records GHERKIN_EMIT
 
 The LLM prompt is the clean-room barrier: it explicitly forbids referencing
 internal names and asks only for observable Given/When/Then behavior.
@@ -60,6 +59,19 @@ def extract_features(
         if len(source.strip()) < 80:
             continue
 
+        feature_path = features_dir / f"{src_file.stem}.feature"
+
+        if feature_path.exists():
+            log.record(
+                "GHERKIN_CACHED",
+                src_file=str(src_file),
+                feature_file=str(feature_path),
+                sha256=BootstrapAuditLog.sha256(feature_path),
+            )
+            produced.append(feature_path)
+            print(f"  [cached] {feature_path.name}")
+            continue
+
         log.record(
             "SOURCE_READ",
             file=str(src_file),
@@ -79,7 +91,6 @@ def extract_features(
             log.record("GHERKIN_SKIP", file=str(src_file), reason="no Feature: header in response")
             continue
 
-        feature_path = features_dir / f"{src_file.stem}.feature"
         feature_path.write_text(gherkin, encoding="utf-8")
 
         log.record(
