@@ -427,6 +427,57 @@ def _synthesis_loop(
     return passed, failed
 
 
+_SHARED_PLAYBOOK_ID = "bootstrap_ts_shared"
+
+# Seed bullets written once into the shared playbook at run start.
+# Encode known-good patterns for TypeScript synthesis derived from observed failures.
+_BOOTSTRAP_TS_SEED_BULLETS = [
+    (
+        "Test structural shape, not exact string content — use `typeof result === 'string'`, "
+        "`result.length > 0`, or regex patterns instead of asserting hardcoded literal strings. "
+        "Exact string assertions almost always fail in TypeScript synthesis.",
+        "test_assertion_rules",
+    ),
+    (
+        "Import vitest globals explicitly when needed: "
+        "`import { describe, it, expect, beforeEach, afterEach } from 'vitest'` — "
+        "or rely on globals:true in vitest.config.ts. Never assume they are ambient.",
+        "test_assertion_rules",
+    ),
+    (
+        "Avoid Python-specific test idioms — translate to TypeScript equivalents: "
+        "use `expect(fn).toThrow()` not `pytest.raises`, `vi.fn()` not `unittest.mock.patch`, "
+        "`.ts` file extensions not `.py`.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Spec observable behaviour via interface contracts, not implementation internals — "
+        "assert what goes in and what comes out; never assert private method names, "
+        "internal class hierarchies, or exact prompt strings.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Keep each test independent — use `beforeEach` to reset fixtures and avoid shared "
+        "mutable state between `it` blocks. TypeScript synthesis fails when test order matters.",
+        "test_assertion_rules",
+    ),
+]
+
+
+def _seed_shared_playbook(playbook_manager, log: BootstrapAuditLog) -> None:
+    """Create the shared bootstrap playbook and seed it if empty."""
+    from src.storage.schemas import BulletCreate
+    pb = playbook_manager.get_or_create_playbook(_SHARED_PLAYBOOK_ID)
+    existing = sum(len(v) for v in pb.sections.values())
+    if existing > 0:
+        print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': {existing} bullets already present")
+        return
+    for content, section in _BOOTSTRAP_TS_SEED_BULLETS:
+        playbook_manager.add_bullet(_SHARED_PLAYBOOK_ID, BulletCreate(content=content, section=section))
+    log.record("PLAYBOOK_SEEDED", playbook_id=_SHARED_PLAYBOOK_ID, bullet_count=len(_BOOTSTRAP_TS_SEED_BULLETS))
+    print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': seeded {len(_BOOTSTRAP_TS_SEED_BULLETS)} bullets")
+
+
 def _synthesis_loop_ts(
     feature_files: list[Path],
     oss_dir: Path,
@@ -453,6 +504,8 @@ def _synthesis_loop_ts(
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-ts-1.0")
 
+    _seed_shared_playbook(playbook_manager, log)
+
     container = TypeScriptRunner(container_name="ace_ts_bootstrap")
     container.start()
     print("  Container started.")
@@ -476,8 +529,7 @@ def _synthesis_loop_ts(
             out_dir.mkdir(parents=True, exist_ok=True)
 
             try:
-                playbook_id = f"bootstrap_ts_{stem}"
-                playbook_manager.get_or_create_playbook(playbook_id)
+                playbook_id = _SHARED_PLAYBOOK_ID
 
                 worker = TypeScriptWorkerAgent(
                     llm_fast, playbook_manager=playbook_manager, fallback_client=llm_fallback
