@@ -45,6 +45,51 @@ _SKIP_FOR_TS = {
     "go_language_pod",  # feature spec too Go-toolchain-specific; see ace_enterprise-vmg
 }
 
+# Modules synthesised first so the app is functional ASAP.
+# Tier 1 — foundation (everything depends on these)
+# Tier 2 — storage & persistence
+# Tier 3 — playbook / learning system
+# Tier 4 — broker / model routing
+# Tier 5 — CLI / public API surface
+# Anything not listed here follows in its natural (alphabetical) order.
+_SYNTHESIS_PRIORITY = [
+    # Tier 1
+    "llm_client",
+    "id_generator",
+    "file_lock",
+    "settings",
+    "config",
+    "schemas",        # storage/schemas
+    "models",         # storage/models
+    # Tier 2
+    "database",
+    "repository",
+    "experiment_logger",
+    "store",          # audit/store
+    # Tier 3
+    "manager",        # playbook/manager
+    "service",        # retrieval/service
+    "retrieval",
+    "embedding",
+    # Tier 4
+    "adaptive_broker",
+    "bayesian",
+    "capability_registry",
+    "factory",
+    # Tier 5
+    "ace_cli",
+    "api_index",
+]
+
+
+def _priority_sort_key(feature_file: Path) -> tuple[int, str]:
+    """Sort key: priority-listed modules first (in list order), rest alphabetically."""
+    stem = feature_file.stem
+    try:
+        return (0, str(_SYNTHESIS_PRIORITY.index(stem)).zfill(4))
+    except ValueError:
+        return (1, stem)
+
 
 def get_target_modules(src_root: Path, language: str) -> list[Path]:
     """Sweeps the src directory and filters out irrelevant modules based on target language."""
@@ -182,6 +227,9 @@ def main() -> None:
     # Stage 2 + 3: Synthesize & Verify
     # ------------------------------------------------------------------
     print(f"\n=== Stage 2+3: Synthesize & Verify ({len(feature_files)} features) ===")
+    feature_files = sorted(feature_files, key=_priority_sort_key)
+    priority_pending = [f.stem for f in feature_files if _priority_sort_key(f)[0] == 0]
+    print(f"  Priority queue ({len(priority_pending)}): {', '.join(priority_pending)}")
     if lang == "typescript":
         passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force)
     else:
