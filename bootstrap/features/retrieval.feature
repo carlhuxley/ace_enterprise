@@ -34,3 +34,9 @@ Feature: Bullet Retrieval
     When retrieve_cross_model is called with secondary_weight 0.5
     Then secondary bullet scores are reduced relative to primary scores
     And results are sorted by weighted score descending
+
+  Scenario: Retrieve with mismatched query embedding dimension throws an Error
+    Given a retriever whose stored embeddings have dimension 384
+    When retrieve is called with a query embedding of dimension 512
+    Then an Error should be thrown with a message indicating dimension mismatch
+    And no results should be returned

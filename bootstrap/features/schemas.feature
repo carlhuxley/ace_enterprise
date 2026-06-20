@@ -7,7 +7,7 @@ Feature: Playbook Data Schemas
     Then the content is "Use async/await for I/O operations"
     And the section is "strategies_and_hard_rules"
     And the tags default to an empty list
-    And the confidence_score defaults to a value between 0.0 and 1.0
+    And the confidence_score defaults to 0.0
 
   Scenario: Create a bullet with optional provenance fields
     Given content "Always validate inputs" and section "strategies_and_hard_rules"
@@ -36,3 +36,9 @@ Feature: Playbook Data Schemas
     Then the domain is "financial_analysis"
     And the total_bullets is 342
     And the total_tokens is 125000
+
+  Scenario: Bullet construction without confidence_score throws an Error
+    Given a raw data payload with content and section but no confidence_score field
+    When a Bullet is constructed from that payload
+    Then an Error should be thrown with a message indicating the missing required field
+    And confidence_score must not be silently assigned a random or arbitrary fallback value

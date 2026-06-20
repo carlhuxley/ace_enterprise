@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bootstrap.audit_log import BootstrapAuditLog
-from bootstrap.clean_room import verify_clean_room, verify_clean_room_cross_language
+from bootstrap.clean_room import verify_clean_room, verify_clean_room_cross_language, verify_ts_style
 from bootstrap.extract import extract_features
 from bootstrap.stamp import stamp_directory
 
@@ -480,6 +480,7 @@ _SHARED_PLAYBOOK_ID = "bootstrap_ts_shared"
 # Seed bullets written once into the shared playbook at run start.
 # Encode known-good patterns for TypeScript synthesis derived from observed failures.
 _BOOTSTRAP_TS_SEED_BULLETS = [
+    # --- test assertion rules ---
     (
         "Test structural shape, not exact string content — use `typeof result === 'string'`, "
         "`result.length > 0`, or regex patterns instead of asserting hardcoded literal strings. "
@@ -493,6 +494,12 @@ _BOOTSTRAP_TS_SEED_BULLETS = [
         "test_assertion_rules",
     ),
     (
+        "Keep each test independent — use `beforeEach` to reset fixtures and avoid shared "
+        "mutable state between `it` blocks. TypeScript synthesis fails when test order matters.",
+        "test_assertion_rules",
+    ),
+    # --- strategies and hard rules ---
+    (
         "Avoid Python-specific test idioms — translate to TypeScript equivalents: "
         "use `expect(fn).toThrow()` not `pytest.raises`, `vi.fn()` not `unittest.mock.patch`, "
         "`.ts` file extensions not `.py`.",
@@ -504,26 +511,103 @@ _BOOTSTRAP_TS_SEED_BULLETS = [
         "internal class hierarchies, or exact prompt strings.",
         "strategies_and_hard_rules",
     ),
+    # --- TypeScript conventions (also enforced by the Stage 3 style gate) ---
     (
-        "Keep each test independent — use `beforeEach` to reset fixtures and avoid shared "
-        "mutable state between `it` blocks. TypeScript synthesis fails when test order matters.",
-        "test_assertion_rules",
+        "Use camelCase for ALL TypeScript identifiers — variables, parameters, properties, "
+        "and private fields. Never use snake_case, even for internal state "
+        "(e.g. `helpfulCount` not `helpful_count`, `totalBullets` not `total_bullets`). "
+        "Files synthesised with snake_case identifiers are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Never use Math.random() as a default field value or fallback — it makes tests "
+        "non-deterministic and the synthesised file will be rejected. Callers must provide "
+        "values, or the constructor should require them explicitly.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Use `import { createHash } from 'crypto'; createHash('sha256').update(content).digest('hex')` "
+        "for content hashing. Never use bitwise hash functions (djb2-style `hash << 5`) — "
+        "they produce unreliable integers and are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Provide real implementation logic — do not stub methods with hardcoded return values "
+        "like `id: 'ctx-001'` or `id: 'pb-existing'`. Hardcoded stub IDs are rejected at the "
+        "style gate. Generate IDs from a counter, uuid, or hash of the content.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Prefer `interface` over `class` for pure data shapes — use a class only when the "
+        "type needs methods or encapsulation. Plain data transfer objects should be interfaces "
+        "so callers can construct them with object literals.",
+        "strategies_and_hard_rules",
+    ),
+    # --- rule-ts-001: Language & Idioms ---
+    (
+        "Never use Python context-manager patterns (`__enter__`/`__exit__` methods or "
+        "`with` statements). Use TypeScript `try/finally` blocks for cleanup, or Explicit "
+        "Resource Management (`using` / `await using` with `Symbol.dispose` / `AsyncDisposable`). "
+        "Files containing `__enter__` or `__exit__` are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Throw native JavaScript error types only — `Error`, `TypeError`, `RangeError`. "
+        "Never reference Python exception names such as `RuntimeError`, `ValueError`, or "
+        "`KeyError`. Python exception names in synthesised TypeScript are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "Do not use `to_dict()` or `from_dict()` for serialization — these are Python idioms. "
+        "Use TypeScript-native patterns instead: object spreading (`{ ...obj }`), "
+        "`JSON.parse`/`JSON.stringify`, or explicit property mapping in a plain function.",
+        "strategies_and_hard_rules",
+    ),
+    # --- rule-ts-003: Types & Architecture ---
+    (
+        "Ban `any` in all forms — implicit or explicit. All caught exceptions must be typed "
+        "as `unknown` and type-guarded before access "
+        "(e.g. `if (err instanceof Error) { msg = err.message; }`). "
+        "Files containing `any` or unguarded `catch (e)` are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "All core domain types and interfaces (e.g. `Bullet`, `Playbook`, `PodSpec`) must be "
+        "imported from a single unified type registry file. Never redefine these shapes inline "
+        "across multiple modules — duplicate definitions cause drift and are rejected.",
+        "strategies_and_hard_rules",
     ),
 ]
 
 
 def _seed_shared_playbook(playbook_manager, log: BootstrapAuditLog) -> None:
-    """Create the shared bootstrap playbook and seed it if empty."""
+    """Ensure the shared bootstrap playbook contains all expected seed bullets.
+
+    Content-deduplicating: safe to call when the playbook already has bullets
+    from a previous run — only missing entries are added.
+    """
     from src.storage.schemas import BulletCreate
     pb = playbook_manager.get_or_create_playbook(_SHARED_PLAYBOOK_ID)
-    existing = sum(len(v) for v in pb.sections.values())
-    if existing > 0:
-        print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': {existing} bullets already present")
-        return
+
+    existing_contents = {
+        b["content"]
+        for section_bullets in pb.sections.values()
+        for b in section_bullets
+    }
+
+    added = 0
     for content, section in _BOOTSTRAP_TS_SEED_BULLETS:
-        playbook_manager.add_bullet(_SHARED_PLAYBOOK_ID, BulletCreate(content=content, section=section))
-    log.record("PLAYBOOK_SEEDED", playbook_id=_SHARED_PLAYBOOK_ID, bullet_count=len(_BOOTSTRAP_TS_SEED_BULLETS))
-    print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': seeded {len(_BOOTSTRAP_TS_SEED_BULLETS)} bullets")
+        if content not in existing_contents:
+            playbook_manager.add_bullet(_SHARED_PLAYBOOK_ID, BulletCreate(content=content, section=section))
+            added += 1
+
+    pb = playbook_manager.get_or_create_playbook(_SHARED_PLAYBOOK_ID)
+    total = sum(len(v) for v in pb.sections.values())
+    if added:
+        log.record("PLAYBOOK_SEEDED", playbook_id=_SHARED_PLAYBOOK_ID, bullets_added=added, total=total)
+        print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': added {added} bullet(s) → {total} total")
+    else:
+        print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': {total} bullets (already complete)")
 
 
 def _synthesis_loop_ts(
@@ -620,9 +704,47 @@ def _synthesis_loop_ts(
 
                 for synth_file in sorted(out_dir.glob("*.ts")):
                     cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
-                    event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
+                    if not cr.passed:
+                        log.record(
+                            "CLEAN_ROOM_FAIL",
+                            feature=str(feature_file),
+                            file=str(synth_file),
+                            sha256=BootstrapAuditLog.sha256(synth_file),
+                            model=MODEL_PASS1,
+                            input_tokens=token_in,
+                            output_tokens=token_out,
+                            payload=cr.as_log_payload(
+                                module=synth_file.stem,
+                                input_language="Python (Source AST)",
+                                output_language="TypeScript (Target AST via Vitest)",
+                            ),
+                        )
+                        print(f"    [CLEAN_ROOM_FAIL] {synth_file.name}")
+                        for v in cr.violations:
+                            print(f"      {v}")
+                        synth_file.unlink()
+                        failed += 1
+                        continue
+
+                    sr = verify_ts_style(synth_file)
+                    if not sr.passed:
+                        log.record(
+                            "STYLE_BLOCK",
+                            feature=str(feature_file),
+                            file=str(synth_file),
+                            sha256=BootstrapAuditLog.sha256(synth_file),
+                            model=MODEL_PASS1,
+                            payload=sr.as_log_payload(module=synth_file.stem),
+                        )
+                        print(f"    [STYLE_BLOCK] {synth_file.name}")
+                        for v in sr.violations:
+                            print(f"      {v}")
+                        synth_file.unlink()
+                        failed += 1
+                        continue
+
                     log.record(
-                        event,
+                        "CLEAN_ROOM_PASS",
                         feature=str(feature_file),
                         file=str(synth_file),
                         sha256=BootstrapAuditLog.sha256(synth_file),
@@ -635,14 +757,7 @@ def _synthesis_loop_ts(
                             output_language="TypeScript (Target AST via Vitest)",
                         ),
                     )
-                    if not cr.passed:
-                        print(f"    [BLOCKED] {synth_file.name}")
-                        for v in cr.violations:
-                            print(f"      {v}")
-                        synth_file.unlink()
-                        failed += 1
-                    else:
-                        passed += 1
+                    passed += 1
 
             except Exception as exc:
                 reason = str(exc)

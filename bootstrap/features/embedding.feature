@@ -31,3 +31,10 @@ Feature: Embedding Service
     Given two vectors [] and [1.0, 2.0, 3.0]
     When cosine_similarity is called
     Then the result is 0.0
+
+  Scenario: Cosine similarity of mismatched dimension vectors throws an Error
+    Given a query vector of dimension 512
+    And a candidate vector of dimension 384
+    When cosine_similarity is called on the mismatched vectors
+    Then an Error should be thrown with a message indicating dimension mismatch
+    And no partial similarity score should be returned
