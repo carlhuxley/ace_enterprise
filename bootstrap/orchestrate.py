@@ -650,15 +650,41 @@ def _synthesis_loop_ts(
             stem = feature_file.stem
             out_dir = oss_dir / stem
 
-            # Resume: skip if output already exists and --force not set
+            # Resume: skip if output already exists and spec hasn't changed.
+            # .spec.sha256 records the feature file hash used for the last synthesis.
+            # Absent file → adopt current spec as baseline (avoids mass re-synthesis
+            # on first run after this feature was introduced).
             if not force and out_dir.exists() and any(out_dir.glob("*.ts")):
+                spec_hash_file = out_dir / ".spec.sha256"
+                current_spec_sha = BootstrapAuditLog.sha256(feature_file)
                 existing = list(out_dir.glob("*.ts"))
-                print(f"  [{stem}] skipping — {len(existing)} .ts file(s) already present (--force to re-run)")
-                log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
-                           existing_files=[f.name for f in existing],
-                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing})
-                passed += len(existing)
-                continue
+
+                if spec_hash_file.exists():
+                    recorded_spec_sha = spec_hash_file.read_text().strip()
+                    if recorded_spec_sha != current_spec_sha:
+                        print(f"  [{stem}] spec changed — re-synthesising")
+                        log.record("CACHE_BUST", feature=str(feature_file),
+                                   recorded_spec_sha=recorded_spec_sha,
+                                   current_spec_sha=current_spec_sha)
+                        # fall through to synthesis
+                    else:
+                        print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present, spec unchanged")
+                        log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
+                                   existing_files=[f.name for f in existing],
+                                   file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                                   spec_sha=current_spec_sha)
+                        passed += len(existing)
+                        continue
+                else:
+                    # No spec hash recorded yet — adopt current spec as baseline.
+                    spec_hash_file.write_text(current_spec_sha)
+                    print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present (spec hash adopted)")
+                    log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
+                               existing_files=[f.name for f in existing],
+                               file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                               spec_sha=current_spec_sha)
+                    passed += len(existing)
+                    continue
 
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -704,6 +730,7 @@ def _synthesis_loop_ts(
                 for stale in out_dir.glob("*.py"):
                     stale.unlink()
 
+                module_ok = True
                 for synth_file in sorted(out_dir.glob("*.ts")):
                     cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
                     if not cr.passed:
@@ -726,6 +753,7 @@ def _synthesis_loop_ts(
                             print(f"      {v}")
                         synth_file.unlink()
                         failed += 1
+                        module_ok = False
                         continue
 
                     sr = verify_ts_style(synth_file)
@@ -743,6 +771,7 @@ def _synthesis_loop_ts(
                             print(f"      {v}")
                         synth_file.unlink()
                         failed += 1
+                        module_ok = False
                         continue
 
                     log.record(
@@ -760,6 +789,11 @@ def _synthesis_loop_ts(
                         ),
                     )
                     passed += 1
+
+                if module_ok and any(out_dir.glob("*.ts")):
+                    (out_dir / ".spec.sha256").write_text(
+                        BootstrapAuditLog.sha256(feature_file)
+                    )
 
             except Exception as exc:
                 reason = str(exc)
