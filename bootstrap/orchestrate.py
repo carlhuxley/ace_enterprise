@@ -391,7 +391,8 @@ def _synthesis_loop(
                 existing = list(out_dir.glob("*.py"))
                 print(f"  [{stem}] skipping — {len(existing)} .py file(s) already present (--force to re-run)")
                 log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
-                           existing_files=[f.name for f in existing])
+                           existing_files=[f.name for f in existing],
+                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing})
                 passed += len(existing)
                 continue
 
@@ -654,7 +655,8 @@ def _synthesis_loop_ts(
                 existing = list(out_dir.glob("*.ts"))
                 print(f"  [{stem}] skipping — {len(existing)} .ts file(s) already present (--force to re-run)")
                 log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
-                           existing_files=[f.name for f in existing])
+                           existing_files=[f.name for f in existing],
+                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing})
                 passed += len(existing)
                 continue
 
