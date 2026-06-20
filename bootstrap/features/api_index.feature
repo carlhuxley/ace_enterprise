@@ -6,14 +6,14 @@ Feature: ACE Enterprise public API index
   Scenario: Import AutonomousTDDAgent from package root
     Given the ace-enterprise-oss package is installed
     When a consumer imports AutonomousTDDAgent from "ace-enterprise-oss"
-    Then AutonomousTDDAgent is a class with a build_feature method
-    And build_feature accepts a requirement string and returns a result with test_files and implementation_files
+    Then AutonomousTDDAgent is a class with a buildFeature method
+    And buildFeature accepts a requirement string and returns a result with testFiles and implementationFiles
 
   Scenario: Import ProjectConfig from package root
     Given the ace-enterprise-oss package is installed
     When a consumer imports ProjectConfig from "ace-enterprise-oss"
     Then ProjectConfig is a class with a static load method that accepts a project path string
-    And a ProjectConfig instance has fields project_root, test_dir, src_dir, playbook_id, and max_iterations
+    And a ProjectConfig instance has fields projectRoot, testDir, srcDir, playbookId, and maxIterations
 
   Scenario: Import LLMClient from package root
     Given the ace-enterprise-oss package is installed
@@ -23,12 +23,12 @@ Feature: ACE Enterprise public API index
   Scenario: Import AdaptiveBroker from package root
     Given the ace-enterprise-oss package is installed
     When a consumer imports AdaptiveBroker from "ace-enterprise-oss"
-    Then AdaptiveBroker is a class with a route_task method that accepts a task description
+    Then AdaptiveBroker is a class with a routeTask method that accepts a task description
 
   Scenario: Import PlaybookManager from package root
     Given the ace-enterprise-oss package is installed
     When a consumer imports PlaybookManager from "ace-enterprise-oss"
-    Then PlaybookManager is a class with get_or_create_playbook and add_bullet methods
+    Then PlaybookManager is a class with getOrCreatePlaybook and addBullet methods
 
   Scenario: All core exports resolve from a single destructured import
     Given the ace-enterprise-oss package is installed
