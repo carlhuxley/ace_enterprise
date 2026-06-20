@@ -15,7 +15,7 @@ Feature: Audit Event Collector Service
       | outcome     | success                                    |
     Then the response status code should be 202
     And the response should contain "status" with value "accepted"
-    And the response should contain "event_id"
+    And the response should contain "eventId"
 
   Scenario: Health check endpoint returns service status
     Given an audit collector application with an audit store
@@ -37,7 +37,7 @@ Feature: Audit Event Collector Service
       | metadata    | {"record_count": 42, "query": "SELECT *"}  |
     Then the response status code should be 202
     And the response should contain "status" with value "accepted"
-    And the response should contain "event_id"
+    And the response should contain "eventId"
 
   Scenario: Fail to submit event when storage fails
     Given an audit collector application with a failing audit store
@@ -58,7 +58,7 @@ Feature: Audit Event Collector Service
     And I POST a valid audit event to "/events" with eventType "user.logout"
     Then both responses should have status code 202
     And both responses should contain "status" with value "accepted"
-    And both responses should contain unique "event_id" values
+    And both responses should contain unique "eventId" values
 
   Scenario: Collector initializes audit store on startup
     Given an audit store that has not been initialized

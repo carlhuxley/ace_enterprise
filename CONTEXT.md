@@ -440,3 +440,11 @@ Use these terms exactly in code, docs, and architecture discussions.
 **ADR-009: _intercept_tokens for Token Tracking** — The `PythonLanguagePod` intercepts the LLM client's `generate()` method to track per-cycle token consumption. This provides accurate token accounting without modifying the LLM client interface.
 
 **ADR-010: _is_abort for Security Failures** — The `TDDCycleRunner` uses `_is_abort()` to detect security/policy failures that cannot be fixed by retry. These include `ForbiddenImport:`, `SecurityBreach:`, and `Bandit gate:` prefixes. When detected, the cycle is aborted immediately without retrying.
+
+**ADR-011: WorkerAgent with Default Test Rules** — The `WorkerAgent` carries a set of `_DEFAULT_TEST_RULES` that are seeded into the playbook's `test_assertion_rules` section on first use. These rules guide the LLM to write property-based assertions rather than exact-value assertions when multiple correct outputs exist. The rules are used as fallback when no playbook bullets exist for the section.
+
+**ADR-012: _extract_code with Truncated Fence Handling** — The `WorkerAgent`'s `_extract_code()` function handles truncated markdown code fences (where the model stops before the closing ```). It matches unclosed fences as a fallback, ensuring code is still extracted even when the LLM response is cut off mid-output.
+
+**ADR-013: IterativeTDDRunner with Gherkin-Driven Mode** — The `IterativeTDDRunner` supports a Gherkin-driven mode via `run_from_feature()` that parses a `.feature` file and iterates through scenarios one by one. Each scenario becomes a TDD cycle, with the scenario's steps providing the acceptance criteria for the RED phase. This mode uses `GherkinFeatureBridge` to parse the feature file and `IncrementalPlanner.next_increment_for_scenario()` to plan each test.
+
+**ADR-014: TDDCycleRunner Learning Loop with Error Isolation** — The learning loop in `TDDCycleRunner._learn()` is wrapped in a try/except block so that a failure in the Reflector or Curator does not cause the TDD cycle itself to fail. The cycle result is returned with or without learned bullets, and the error is logged as a warning. This ensures that learning is best-effort and never blocks the TDD loop.

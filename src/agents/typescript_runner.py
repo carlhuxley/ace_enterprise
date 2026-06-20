@@ -95,18 +95,30 @@ class TypeScriptRunner(PodmanRunner):
             capture_output=True,
         )
 
-        vitest_proc = subprocess.run(
-            [
-                "podman", "exec", "--workdir", _TS_PROJECT, self._name,
-                "node", _VITEST_BIN,
-                "run",
-                "--config", f"{_REMOTE_WS}/vitest.config.ts",
-                "--reporter", "json",
-                "--outputFile", _RESULTS_JSON,
-            ],
-            capture_output=True,
-            text=True,
-        )
+        _vitest_timeout = max(60, self._test_timeout * 6)
+        try:
+            vitest_proc = subprocess.run(
+                [
+                    "podman", "exec", "--workdir", _TS_PROJECT, self._name,
+                    "node", _VITEST_BIN,
+                    "run",
+                    "--config", f"{_REMOTE_WS}/vitest.config.ts",
+                    "--reporter", "json",
+                    "--outputFile", _RESULTS_JSON,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_vitest_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            # esbuild zombie accumulation — kill the container so the next pulse
+            # starts clean rather than inheriting a process-saturated environment.
+            subprocess.run(["podman", "rm", "-f", self._name], capture_output=True)
+            return PulseResult(
+                exit_code=1,
+                stdout="",
+                stderr=f"vitest timed out after {_vitest_timeout}s (esbuild hang); container restarted",
+            )
 
         # Read the JSON results file from inside the container
         read_proc = subprocess.run(

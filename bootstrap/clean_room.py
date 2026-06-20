@@ -65,6 +65,19 @@ _TS_KEYWORDS = frozenset({
     "test", "expect", "beforeEach", "afterEach", "of", "in",
 })
 
+# --- TypeScript style gate patterns --------------------------------------
+
+# Matches snake_case tokens (two or more lowercase words joined by underscores)
+_SNAKE_IDENT = re.compile(r'\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b')
+_MATH_RANDOM  = re.compile(r'\bMath\.random\(\)')
+# djb2-style bitwise hash: left-shift or self-AND folding
+_BITWISE_HASH = re.compile(r'<<\s*\d+.*hash|hash\s*&\s*hash|\|\s*0\b')
+# Hardcoded stub IDs ('ctx-001', 'pb-existing', etc.)
+_HARDCODED_ID = re.compile(r'["\'](?:ctx|pb)-[a-zA-Z0-9_-]+["\']')
+
+# Node.js globals that legitimately contain underscores
+_SNAKE_WHITELIST = frozenset({"__dirname", "__filename", "__esModule"})
+
 
 # --- result type ---------------------------------------------------------
 
@@ -298,3 +311,72 @@ def verify_clean_room_cross_language(
         docword_overlap=max_doc_ratio,
         checks_run=["guard_a_semantic_token_overlap", "guard_b_jsdoc_ngram"],
     )
+
+
+# --- TypeScript style gate -----------------------------------------------
+
+@dataclass
+class TsStyleResult:
+    passed: bool
+    violations: list[str] = field(default_factory=list)
+
+    def as_log_payload(self, module: str) -> dict:
+        return {
+            "module": module,
+            "checks_run": [
+                "snake_case_identifiers",
+                "math_random_default",
+                "bitwise_hash",
+                "hardcoded_stub_ids",
+            ],
+            "violations": self.violations,
+        }
+
+
+def _strip_ts_noise(code: str) -> str:
+    """Remove comments and string literals so identifier scanning avoids false positives."""
+    code = re.sub(r'/\*.*?\*/', ' ', code, flags=re.DOTALL)   # block comments
+    code = re.sub(r'//[^\n]*', ' ', code)                      # line comments
+    code = re.sub(r'`(?:[^`\\]|\\.)*`', '``', code, flags=re.DOTALL)  # template literals
+    code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)           # double-quoted strings
+    code = re.sub(r"'(?:[^'\\]|\\.)*'", "''", code)           # single-quoted strings
+    return code
+
+
+def verify_ts_style(synthesized_path: Path) -> TsStyleResult:
+    """Style gate — enforces idiomatic TypeScript conventions.
+
+    Rule 1  No snake_case identifiers (TypeScript uses camelCase everywhere).
+    Rule 2  No Math.random() as a default — makes tests non-deterministic.
+    Rule 3  No bitwise hash functions (djb2-style) — use crypto.createHash.
+    Rule 4  No hardcoded stub IDs like 'ctx-001' or 'pb-existing'.
+    """
+    code = synthesized_path.read_text(encoding="utf-8")
+    violations: list[str] = []
+
+    # Rule 1: snake_case identifiers — scan with noise stripped to avoid string hits
+    clean = _strip_ts_noise(code)
+    snake_hits = [m for m in _SNAKE_IDENT.findall(clean) if m not in _SNAKE_WHITELIST]
+    if snake_hits:
+        sample = ", ".join(sorted(set(snake_hits))[:6])
+        violations.append(f"snake_case identifiers (rename to camelCase): {sample}")
+
+    # Rule 2: Math.random() — non-deterministic, untestable as a default
+    if _MATH_RANDOM.search(code):
+        violations.append(
+            "Math.random() detected — callers must supply values; no random defaults"
+        )
+
+    # Rule 3: Bitwise hash — fragile integer arithmetic masquerading as a hash
+    if _BITWISE_HASH.search(code):
+        violations.append(
+            "Bitwise hash (djb2-style) detected — use crypto.createHash('sha256') instead"
+        )
+
+    # Rule 4: Hardcoded stub IDs — skeleton placeholder, not real logic
+    stubs = _HARDCODED_ID.findall(code)
+    if stubs:
+        sample = ", ".join(sorted(set(stubs))[:4])
+        violations.append(f"Hardcoded stub IDs: {sample} — generate IDs dynamically")
+
+    return TsStyleResult(passed=len(violations) == 0, violations=violations)
