@@ -455,12 +455,17 @@ class LLMClient:
         last_error = None
 
         for model in models_to_try:
-            payload = {
+            payload: dict[str, Any] = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens or 4096,  # OpenRouter requires explicit max_tokens
             }
+            # Prevent silent fallback to a different provider (e.g. DeepSeek) when
+            # a named Anthropic model is requested. Free-tier models keep fallbacks
+            # enabled because the explicit fallback list is the point.
+            if model.startswith("anthropic/") and not model.endswith(":free"):
+                payload["provider"] = {"allow_fallbacks": False}
 
             # Retry logic with exponential backoff for rate limits
             max_retries = 3
