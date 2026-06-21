@@ -223,11 +223,21 @@ def main() -> None:
     # These are routed to _contract_synth_path (no TDD container) rather than
     # _synthesis_loop_ts.  Only meaningful for the typescript target.
     contract_specs = sorted(FEATURES_DIR.glob("*.contract.yml")) if lang == "typescript" else []
+    contract_stems = {cs.stem.split(".")[0] for cs in contract_specs}
     if contract_specs:
         for cs in contract_specs:
             log.record("CONTRACT_SPEC_QUEUED", contract_file=str(cs),
                        sha256=BootstrapAuditLog.sha256(cs))
         print(f"  +{len(contract_specs)} contract spec(s) queued for interface synthesis")
+
+    # Drop any .feature files that have been superseded by a .contract.yml —
+    # they would otherwise be routed to the TDD container and fail repeatedly.
+    if contract_stems:
+        before = len(feature_files)
+        feature_files = [f for f in feature_files if f.stem not in contract_stems]
+        dropped = before - len(feature_files)
+        if dropped:
+            print(f"  -{dropped} feature file(s) superseded by contract spec(s), removed from TDD queue")
 
     if not feature_files and not contract_specs:
         print("  Nothing to synthesize — aborting.")
