@@ -622,7 +622,7 @@ def _seed_shared_playbook(playbook_manager, log: BootstrapAuditLog) -> None:
     pb = playbook_manager.get_or_create_playbook(_SHARED_PLAYBOOK_ID)
 
     existing_contents = {
-        b["content"]
+        b.content
         for section_bullets in pb.sections.values()
         for b in section_bullets
     }

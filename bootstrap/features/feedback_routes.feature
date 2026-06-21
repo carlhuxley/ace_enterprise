@@ -66,13 +66,13 @@ Feature: Feedback REST API
     Given a feedback collector is available
     When a GET request is made to "/eval-888/drift" with query parameter automatedScore -5.0
     Then the response status code is 422
-    And the response detail contains "automated_score must be in [0, 100]"
+    And the response detail contains "automatedScore must be in [0, 100]"
 
   Scenario: Get drift with automated score above valid range
     Given a feedback collector is available
     When a GET request is made to "/eval-999/drift" with query parameter automatedScore 150.0
     Then the response status code is 422
-    And the response detail contains "automated_score must be in [0, 100]"
+    And the response detail contains "automatedScore must be in [0, 100]"
 
   Scenario: Get drift with default automated score
     Given a feedback collector is available
