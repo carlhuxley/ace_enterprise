@@ -8,12 +8,12 @@ Feature: Local Audit Client
 
   Scenario: Emit a simple audit event with payload
     Given a local audit client is initialized
-    When emitSimple is called with eventType "PATTERN_LEARNED", actorId "tdd-agent", and payload {"patternId": "ctx-001"}
+    When emitSimple is called with eventType "PATTERN_LEARNED", actorId "tdd-agent", and payload {"patternId": "pat-abc123"}
     Then the method returns True
 
   Scenario: Emit a simple audit event with all optional parameters
     Given a local audit client is initialized
-    When emitSimple is called with eventType "PATTERN_LEARNED", actorId "tdd-agent", payload {"patternId": "ctx-001"}, actorType "system", sessionId "sess-123", playbookId "play-456", and projectId "proj-789"
+    When emitSimple is called with eventType "PATTERN_LEARNED", actorId "tdd-agent", payload {"patternId": "pat-abc123"}, actorType "system", sessionId "sess-123", playbookId "play-456", and projectId "proj-789"
     Then the method returns True
 
   Scenario: Emit an audit event using AuditEventCreate object
