@@ -82,6 +82,6 @@ Feature: Model Attribution Tracker
   Scenario: Creating an audit payload with model attribution
     Given a new ModelAttributionTracker
     When I create an audit payload with modelId "gpt-4-turbo", requestedModel "gpt-4", and provider "openrouter"
-    Then the payload contains key "model_id" with value "gpt-4-turbo"
-    And the payload contains key "requested_model" with value "gpt-4"
+    Then the payload contains key "modelId" with value "gpt-4-turbo"
+    And the payload contains key "requestedModel" with value "gpt-4"
     And the payload contains key "provider" with value "openrouter"
