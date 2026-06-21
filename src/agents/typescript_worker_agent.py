@@ -15,10 +15,11 @@ from src.agents.language_pod import PodSpec
 _DEFAULT_HARD_RULES = [
     "Use camelCase for ALL identifiers — variables, parameters, properties, private fields. Never snake_case.",
     "Never use Math.random() as a default or fallback — callers must supply values explicitly.",
-    "Use crypto.createHash('sha256') for hashing. Never djb2-style bitwise hash (hash << 5, hash & hash).",
+    "Never write a custom hash function (no djb2, no bitwise hash, no charCodeAt loops). Use crypto.createHash('sha256') only if the spec explicitly requires hashing; for IDs use crypto.randomUUID().",
     "No hardcoded stub IDs like 'ctx-001' or 'pb-existing' — generate IDs from crypto.randomUUID() or a counter.",
     "No Python idioms: no __enter__/__exit__, no to_dict/from_dict, no Python exception names.",
     "No `any` — type caught exceptions as `unknown` and type-guard before access.",
+    "The test harness only has vitest and Node built-ins. Never import express, hono, fastify, supertest, axios, or any HTTP framework/client. Implement HTTP-style routes as plain exported functions taking typed request objects; tests call them directly.",
 ]
 
 _DEFAULT_TEST_RULES = [
@@ -107,6 +108,9 @@ class TypeScriptWorkerAgent:
                 f"\nAcceptance criteria (Gherkin — use exact values from relevant scenarios):\n"
                 f"```gherkin\n{spec.gherkin_context}\n```"
             )
+        hard_rules = self._get_hard_rules()
+        if hard_rules:
+            parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         rules = self._get_test_rules()
         if rules:
             parts.append("\nAssertion rules:\n" + "\n".join(f"- {r}" for r in rules))
