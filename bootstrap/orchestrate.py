@@ -558,9 +558,18 @@ _BOOTSTRAP_TS_SEED_BULLETS = [
         "strategies_and_hard_rules",
     ),
     (
+        "Never write a custom hash function (no djb2, no bitwise hash, no charCodeAt loops). "
         "Use `import { createHash } from 'crypto'; createHash('sha256').update(content).digest('hex')` "
-        "for content hashing. Never use bitwise hash functions (djb2-style `hash << 5`) — "
-        "they produce unreliable integers and are rejected at the style gate.",
+        "only when the spec explicitly requires content hashing. "
+        "For unique IDs use `crypto.randomUUID()`. "
+        "Custom hash implementations are rejected at the style gate.",
+        "strategies_and_hard_rules",
+    ),
+    (
+        "The test harness only has vitest and Node built-ins. Never import express, hono, fastify, "
+        "supertest, axios, or any HTTP framework or client — they are not installed. "
+        "Implement HTTP-style route handlers as plain exported functions that accept typed request "
+        "objects and return typed response objects; tests call them directly without a running server.",
         "strategies_and_hard_rules",
     ),
     (
