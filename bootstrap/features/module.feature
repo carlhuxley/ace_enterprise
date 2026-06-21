@@ -72,8 +72,8 @@ Feature: Reflector Module - Analyze generator performance and extract insights
     Then a dictionary is returned
     And the dictionary contains key "provider"
     And the dictionary contains key "model"
-    And the dictionary contains key "max_refinement_rounds" with value 3
-    And the dictionary contains key "enable_iterative" with value True
+    And the dictionary contains key "maxRefinementRounds" with value 3
+    And the dictionary contains key "enableIterative" with value True
 
   Scenario: Reflection preserves generator bullet feedback tags
     Given a Reflector instance with default settings
