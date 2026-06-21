@@ -1,0 +1,60 @@
+synthesis_mode: interface
+module: contract_schema
+source_file: src/contracts/contract_schema.py
+description: |
+  YAML-backed data schema for interface contracts. Pure data transfer objects
+  with no LLM calls or external services. Defines ContractSpec and its
+  supporting types; provides load/save helpers for the contract.yml format.
+
+typescript_output:
+  - file: contract_schema.ts
+    exports:
+      interfaces:
+        - name: TestCaseSpec
+          fields:
+            - name: string
+            - input: string
+            - expected: string
+            - description: string   # defaults to ""
+        - name: FixtureSpec
+          fields:
+            - setup: string         # defaults to ""
+            - teardown: string      # defaults to ""
+        - name: InterfaceContract   # referenced by toInterfaceContract()
+          fields:
+            - contractId: string
+            - functionName: string
+            - signature: string
+            - docstring: string
+            - testCases: TestCase[]
+            - estimatedComplexity: number
+            - hints: string[]
+            - fixtures: Fixtures | undefined
+      classes:
+        - name: ContractSpec
+          fields:
+            - id: string
+            - functionName: string
+            - signature: string     # defaults to "()"
+            - docstring: string     # defaults to ""
+            - complexity: number    # 1-6
+            - testCases: TestCaseSpec[]
+            - hints: string[]
+            - fixtures: FixtureSpec | undefined
+          methods:
+            - toInterfaceContract(): InterfaceContract
+      functions:
+        - loadContracts(yamlContent: string): ContractSpec[]
+        - loadContractsFromFile(filePath: string): ContractSpec[]
+        - saveContracts(contracts: ContractSpec[], filePath: string): void
+
+constraints:
+  - All identifiers are camelCase (functionName, testCases, estimatedComplexity)
+  - Use js-yaml for YAML parsing: import yaml from 'js-yaml'
+  - Use fs from 'node:fs' only in loadContractsFromFile and saveContracts
+  - loadContracts throws Error('YAML must contain \'contracts\' key') if key absent
+  - loadContracts throws Error if functionName absent or testCases missing/empty
+  - loadContracts throws Error if complexity < 1 or > 6
+  - The Gherkin feature used snake_case field names in YAML fixtures — the TypeScript
+    version uses camelCase throughout (functionName not function_name, testCases not
+    test_cases); this is the intentional TS-idiomatic translation

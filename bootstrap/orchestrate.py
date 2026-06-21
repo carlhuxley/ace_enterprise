@@ -21,6 +21,7 @@ Usage:
     .venv/bin/python bootstrap/orchestrate.py --lang typescript --file src/agents/worker_agent.py
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -218,13 +219,23 @@ def main() -> None:
         feature_files = feature_files + manual_features
         print(f"  +{len(manual_features)} hand-authored feature file(s) queued for synthesis")
 
-    if not feature_files:
+    # Collect contract-spec files now so they are logged before synthesis begins.
+    # These are routed to _contract_synth_path (no TDD container) rather than
+    # _synthesis_loop_ts.  Only meaningful for the typescript target.
+    contract_specs = sorted(FEATURES_DIR.glob("*.contract.yml")) if lang == "typescript" else []
+    if contract_specs:
+        for cs in contract_specs:
+            log.record("CONTRACT_SPEC_QUEUED", contract_file=str(cs),
+                       sha256=BootstrapAuditLog.sha256(cs))
+        print(f"  +{len(contract_specs)} contract spec(s) queued for interface synthesis")
+
+    if not feature_files and not contract_specs:
         print("  Nothing to synthesize — aborting.")
         log.record("RUN_ABORT", reason="no feature files produced in Stage 1")
         return
 
     # ------------------------------------------------------------------
-    # Stage 2 + 3: Synthesize & Verify
+    # Stage 2 + 3: Synthesize & Verify (Gherkin TDD path)
     # ------------------------------------------------------------------
     print(f"\n=== Stage 2+3: Synthesize & Verify ({len(feature_files)} features) ===")
     feature_files = sorted(feature_files, key=_priority_sort_key)
@@ -235,6 +246,16 @@ def main() -> None:
     else:
         passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force)
     print(f"  passed={passed}  blocked={failed}")
+
+    # ------------------------------------------------------------------
+    # Stage 2.5: Contract Interface Synthesis (no TDD container)
+    # ------------------------------------------------------------------
+    if contract_specs:
+        print(f"\n=== Stage 2.5: Contract Interface Synthesis ({len(contract_specs)} specs) ===")
+        c_passed, c_failed = _contract_synth_path(contract_specs, OSS_DIR, log, force=force)
+        passed += c_passed
+        failed += c_failed
+        print(f"  passed={c_passed}  blocked={c_failed}")
 
     # ------------------------------------------------------------------
     # Stage 3.5: Place root-level files
@@ -609,6 +630,218 @@ def _seed_shared_playbook(playbook_manager, log: BootstrapAuditLog) -> None:
         print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': added {added} bullet(s) → {total} total")
     else:
         print(f"  Shared playbook '{_SHARED_PLAYBOOK_ID}': {total} bullets (already complete)")
+
+
+def _parse_ts_blocks(response: str) -> dict[str, str]:
+    """Extract named TypeScript fenced blocks from an LLM response.
+
+    Matches both ```typescript filename.ts and ```ts filename.ts openers.
+    Returns {filename: code} with trailing whitespace stripped from each block.
+    """
+    blocks: dict[str, str] = {}
+    for m in re.finditer(r"```(?:typescript|ts) (\S+\.ts)\n(.*?)```", response, re.DOTALL):
+        blocks[m.group(1)] = m.group(2).rstrip()
+    return blocks
+
+
+def _build_contract_synth_prompt(python_source: str, contract_spec: str) -> str:
+    """Build the single-shot synthesis prompt for the contract interface path.
+
+    Concatenation avoids str.format() breakage when python_source or
+    contract_spec contain literal braces.
+    """
+    return (
+        "You are a TypeScript interface synthesiser. Produce clean-room TypeScript "
+        "from a Python source file and a contract specification.\n\n"
+        "CLEAN-ROOM RULES (enforced by automated gate — violations cause rejection):\n"
+        "1. Do NOT copy names, comments, docstrings, or identifiers verbatim from the "
+        "Python source. Translate concepts; do not transcribe them.\n"
+        "2. Use camelCase for ALL TypeScript identifiers. Never snake_case.\n"
+        "3. Only native JS error types: Error, TypeError, RangeError. Never Python "
+        "names (ValueError, RuntimeError, KeyError, etc.).\n"
+        "4. No `any`. Type caught exceptions as `unknown` and type-guard before access.\n"
+        "5. No Python idioms: no __enter__/__exit__, no to_dict/from_dict.\n"
+        "6. Use crypto.createHash('sha256') for hashing. Never djb2-style bitwise hash.\n"
+        "7. No hardcoded stub IDs — derive from content, counter, or crypto.randomUUID().\n"
+        "8. Prefer `interface` over `class` for pure data shapes.\n\n"
+        "PYTHON SOURCE (understand the intent; do not copy):\n"
+        "---\n"
+        + python_source
+        + "\n---\n\n"
+        "CONTRACT SPECIFICATION (defines exactly what TypeScript to produce):\n"
+        "---\n"
+        + contract_spec
+        + "\n---\n\n"
+        "OUTPUT FORMAT:\n"
+        "Emit each TypeScript file as a named fenced code block. "
+        "Produce ONLY the files listed in typescript_output. No test files. "
+        "No prose between blocks.\n\n"
+        "```typescript <filename>.ts\n"
+        "// implementation\n"
+        "```\n"
+    )
+
+
+def _contract_synth_path(
+    contract_files: list[Path],
+    oss_dir: Path,
+    log: BootstrapAuditLog,
+    *,
+    force: bool = False,
+) -> tuple[int, int]:
+    """Synthesise TypeScript from .contract.yml specs without a TDD container.
+
+    Used for IO-wiring and schema modules whose behaviour cannot be exercised
+    in a sandboxed Vitest container. A single LLM call generates the TypeScript
+    directly from the Python source + YAML contract spec. The same clean-room
+    and style gates apply; results land on the audit chain as CONTRACT_SYNTH_PASS
+    or CONTRACT_SYNTH_FAIL instead of CLEAN_ROOM_PASS.
+    """
+    import yaml as _yaml
+    from src.utils.llm_client import LLMClient
+
+    llm = LLMClient(provider="openrouter", model=MODEL_PASS1)
+    passed = failed = 0
+
+    for contract_file in contract_files:
+        spec = _yaml.safe_load(contract_file.read_text())
+        stem = spec.get("module", contract_file.stem.split(".")[0])
+        out_dir = oss_dir / stem
+
+        # --- caching: same .spec.sha256 logic as _synthesis_loop_ts ---
+        if not force and out_dir.exists() and any(out_dir.glob("*.ts")):
+            spec_hash_file = out_dir / ".spec.sha256"
+            current_spec_sha = BootstrapAuditLog.sha256(contract_file)
+            existing = list(out_dir.glob("*.ts"))
+            if spec_hash_file.exists():
+                recorded_sha = spec_hash_file.read_text().strip()
+                if recorded_sha == current_spec_sha:
+                    print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present, spec unchanged")
+                    log.record(
+                        "SYNTHESIS_CACHED", feature=str(contract_file), out_dir=str(out_dir),
+                        existing_files=[f.name for f in existing],
+                        file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                        spec_sha=current_spec_sha,
+                    )
+                    passed += len(existing)
+                    continue
+                print(f"  [{stem}] spec changed — re-synthesising (contract path)")
+                log.record("CACHE_BUST", feature=str(contract_file),
+                           recorded_spec_sha=recorded_sha, current_spec_sha=current_spec_sha)
+            else:
+                spec_hash_file.write_text(current_spec_sha)
+                print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present (spec hash adopted)")
+                log.record(
+                    "SYNTHESIS_CACHED", feature=str(contract_file), out_dir=str(out_dir),
+                    existing_files=[f.name for f in existing],
+                    file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                    spec_sha=current_spec_sha,
+                )
+                passed += len(existing)
+                continue
+
+        source_file = Path(spec.get("source_file", ""))
+        if not source_file.exists():
+            reason = f"source_file not found: {source_file}"
+            print(f"  [{stem}] SKIPPED — {reason}")
+            log.record("SYNTHESIS_SKIP", feature=str(contract_file), reason=reason)
+            continue
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            prompt = _build_contract_synth_prompt(
+                python_source=source_file.read_text(),
+                contract_spec=contract_file.read_text(),
+            )
+
+            print(f"  [{stem}] synthesizing (contract path)...", end=" ", flush=True)
+            result = llm.generate(prompt)
+            token_in  = result.get("prompt_tokens", 0) or result.get("input_tokens", 0)
+            token_out = result.get("completion_tokens", 0) or result.get("output_tokens", 0)
+
+            ts_blocks = _parse_ts_blocks(result["content"])
+            if not ts_blocks:
+                print("✗ (no named TypeScript blocks in response)")
+                log.record("SYNTHESIS_SKIP", feature=str(contract_file),
+                           reason="no named TypeScript blocks in LLM response")
+                failed += 1
+                continue
+
+            print(f"✓ ({len(ts_blocks)} file(s))")
+
+            module_ok = True
+            for filename, code in sorted(ts_blocks.items()):
+                synth_file = out_dir / filename
+                synth_file.write_text(code + "\n")
+
+                cr = verify_clean_room_cross_language(synth_file, PRIVATE_SRC_ROOT)
+                if not cr.passed:
+                    log.record(
+                        "CONTRACT_SYNTH_FAIL",
+                        feature=str(contract_file),
+                        file=str(synth_file),
+                        sha256=BootstrapAuditLog.sha256(synth_file),
+                        model=MODEL_PASS1,
+                        input_tokens=token_in,
+                        output_tokens=token_out,
+                        reason="clean_room",
+                        payload=cr.as_log_payload(
+                            module=synth_file.stem,
+                            input_language="Python (Source AST)",
+                            output_language="TypeScript (Contract Interface)",
+                        ),
+                    )
+                    print(f"    [CONTRACT_SYNTH_FAIL] {filename} — clean-room")
+                    for v in cr.violations:
+                        print(f"      {v}")
+                    synth_file.unlink()
+                    failed += 1
+                    module_ok = False
+                    continue
+
+                sr = verify_ts_style(synth_file)
+                if not sr.passed:
+                    log.record(
+                        "STYLE_BLOCK",
+                        feature=str(contract_file),
+                        file=str(synth_file),
+                        sha256=BootstrapAuditLog.sha256(synth_file),
+                        model=MODEL_PASS1,
+                        payload=sr.as_log_payload(module=synth_file.stem),
+                    )
+                    print(f"    [STYLE_BLOCK] {filename}")
+                    for v in sr.violations:
+                        print(f"      {v}")
+                    synth_file.unlink()
+                    failed += 1
+                    module_ok = False
+                    continue
+
+                log.record(
+                    "CONTRACT_SYNTH_PASS",
+                    feature=str(contract_file),
+                    file=str(synth_file),
+                    sha256=BootstrapAuditLog.sha256(synth_file),
+                    model=MODEL_PASS1,
+                    input_tokens=token_in,
+                    output_tokens=token_out,
+                    payload=cr.as_log_payload(
+                        module=synth_file.stem,
+                        input_language="Python (Source AST)",
+                        output_language="TypeScript (Contract Interface)",
+                    ),
+                )
+                passed += 1
+
+            if module_ok and any(out_dir.glob("*.ts")):
+                (out_dir / ".spec.sha256").write_text(BootstrapAuditLog.sha256(contract_file))
+
+        except Exception as exc:
+            print(f"✗ SKIPPED — {str(exc)[:120]}")
+            log.record("SYNTHESIS_SKIP", feature=str(contract_file), reason=str(exc))
+
+    return passed, failed
 
 
 def _synthesis_loop_ts(

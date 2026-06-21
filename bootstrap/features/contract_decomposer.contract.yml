@@ -1,0 +1,52 @@
+synthesis_mode: interface
+module: contract_decomposer
+source_file: src/contracts/contract_decomposer.py
+description: |
+  Decomposes natural language requirements into structured ContractSpec objects
+  by calling an LLM. The LLM client is injected (not constructed internally),
+  making the decomposer testable in isolation.
+
+  The Gherkin scenarios required wiring a mock LLM into the TDD container,
+  which the sandbox does not support. The TypeScript version exposes the LLM
+  client via constructor injection so callers can substitute fakes.
+
+typescript_output:
+  - file: contract_decomposer.ts
+    exports:
+      interfaces:
+        - name: DecomposerConfig
+          fields:
+            - maxTokens: number       # default 2000
+            - temperature: number     # default 0.3
+            - requireTestCases: boolean  # default true
+            - minTestCases: number    # default 1
+        - name: LLMClient
+          description: Minimal interface satisfied by any client with a generate method
+          methods:
+            - generate(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<{ content: string }>
+      classes:
+        - name: DecompositionError
+          extends: Error
+        - name: ContractDecomposer
+          constructor: "(config?: Partial<DecomposerConfig>)"
+          methods:
+            - decompose(requirement: string): Promise<ContractSpec[]>
+            - setLlmClient(client: LLMClient): void
+
+constraints:
+  - decompose() is async (the LLM call is awaited)
+  - setLlmClient() is the only way to inject a client; no constructor injection
+    (mirrors the Python source which uses set_llm_client)
+  - _parseJsonResponse extracts a JSON array from the LLM response, handling both
+    raw JSON and markdown ```json``` fenced blocks
+  - Throws DecompositionError('No JSON array found in response: ...') if no array found
+  - Throws DecompositionError('No contracts generated') if the parsed array is empty
+  - Throws DecompositionError('Invalid contract format: ...') wrapping field errors
+  - complexity must be 1-6; throw DecompositionError if outside range
+  - functionName is required; throw if absent
+  - testCases required when config.requireTestCases is true (default)
+  - ContractSpec and TestCaseSpec are imported from ./contract_schema
+  - The SYSTEM_PROMPT and DECOMPOSE_PROMPT strings should be preserved verbatim
+    from the Python source (they are the functional spec for the LLM call)
+  - No default LLM client is constructed; throw DecompositionError('No LLM client set')
+    if decompose() is called before setLlmClient()

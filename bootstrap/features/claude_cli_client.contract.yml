@@ -1,0 +1,39 @@
+synthesis_mode: interface
+module: claude_cli_client
+source_file: src/utils/claude_cli_client.py
+description: |
+  Drop-in LLM client backed by the local `claude --print` CLI instead of an
+  HTTP API. Invokes claude via child_process, strips CLAUDE* env vars to avoid
+  nested-session detection, and returns a response object in the same shape as
+  the HTTP LLMClient so callers need no changes.
+
+  This is a pure IO-wiring adapter. It cannot be meaningfully unit-tested
+  inside a sandboxed container because the subprocess target (the claude CLI)
+  is not available there.
+
+typescript_output:
+  - file: claude_cli_client.ts
+    exports:
+      interfaces:
+        - name: LLMResponse
+          fields:
+            - content: string
+            - promptTokens: number     # always 0 — CLI exposes no token counts
+            - completionTokens: number # always 0
+            - tokensUsed: number       # always 0
+      classes:
+        - name: ClaudeCliClient
+          constructor: "(timeout?: number)"  # default 300 seconds
+          methods:
+            - generate(prompt: string, temperature?: number): LLMResponse
+
+constraints:
+  - Use spawnSync from 'node:child_process' (synchronous, mirrors Python subprocess.run)
+  - Pass args: ['--print', '--output-format', 'text', prompt]
+  - Filter process.env to exclude all keys starting with 'CLAUDE' before passing
+    env to the subprocess — prevents nested-session exit-1 from the CLI
+  - On non-zero exit code throw Error(`claude CLI error (exit ${code}): ${stderr}`)
+  - Return value content is result.stdout.trim() (strip leading/trailing whitespace)
+  - temperature parameter is accepted for interface compatibility but not forwarded
+    to the CLI (the CLI does not expose a temperature flag)
+  - No external npm dependencies beyond Node built-ins

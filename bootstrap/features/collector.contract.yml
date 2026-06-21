@@ -1,0 +1,56 @@
+synthesis_mode: interface
+module: collector
+source_file: src/audit/collector.py
+description: |
+  Write-only HTTP audit event collector. Exposes POST /events (202 Accepted)
+  and GET /health only. Accepts an AuditStore dependency for persistence.
+  The Python source uses FastAPI; the TypeScript equivalent uses Express.
+
+  This is pure HTTP-wiring infrastructure. Tests require a live server and
+  a real or mock database, which are not available in the TDD sandbox container.
+
+typescript_output:
+  - file: collector.ts
+    exports:
+      interfaces:
+        - name: AuditStore
+          description: Dependency injected by caller; only append() is used here
+          methods:
+            - createTables(): void | Promise<void>
+            - append(event: AuditEvent): StoredEvent | Promise<StoredEvent>
+        - name: AuditEvent
+          description: Incoming event payload (mirrors src/audit/schemas.py AuditEvent)
+          fields:
+            - eventType: string
+            - timestamp: string
+            - actor: string
+            - resource: string
+            - action: string
+            - outcome: string
+            - metadata: Record<string, unknown> | undefined
+        - name: StoredEvent
+          fields:
+            - eventId: string
+            - "[key: string]: unknown"
+        - name: AuditEventResponse
+          fields:
+            - status: "'accepted'"
+            - eventId: string
+        - name: HealthResponse
+          fields:
+            - status: "'healthy'"
+            - service: string
+      functions:
+        - createCollectorApp(auditStore: AuditStore): express.Application
+        - createApp(): express.Application   # reads AUDIT_DATABASE_URL from env
+
+constraints:
+  - Use express and its types (npm: express, @types/express)
+  - POST /events returns 202 with AuditEventResponse; 500 with { detail: string } on error
+  - GET /health returns 200 with HealthResponse { status: 'healthy', service: 'audit-collector' }
+  - Apply CORS middleware allowing POST only; origins from env CORS_ORIGINS (default "*")
+  - Call auditStore.createTables() during app initialisation (on first request or in setup)
+  - createApp reads AUDIT_DATABASE_URL from process.env with the same default as Python:
+    "postgresql://audit:audit@localhost:5433/ace_audit"
+  - No other endpoints; the collector is intentionally write-only
+  - Log startup/shutdown and storage errors using console (no logger dependency)
