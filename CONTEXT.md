@@ -15,6 +15,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **AdaptiveBroker** — Routes tasks to the best agent based on historical performance using configurable strategies (budget, balanced, Pareto). Falls back to a default agent when no history exists.
 
+**AgentCapabilities** — Agent capabilities with proficiency ratings. Used by `CapabilityRegistry` to track anonymous agent skills.
+
 **AgentPerformanceMetrics** — Performance metrics for an agent (anonymized by agent_ref). Includes success rate, reliability score, variance-adjusted reliability, and complexity handling.
 
 **AnalysisRubric** — Domain-specific evaluation rubric for analytical/research output. Scores coverage, reasoning, accuracy, and citations.
@@ -65,11 +67,15 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **BulletRetriever** — Hybrid retrieval system for selecting relevant bullets from playbooks. Supports cross-model retrieval and contextual filtering (by confidence, domain, project).
 
+**BulletSection** — Enum of playbook sections for organizing bullets (e.g., `strategies_and_hard_rules`, `code_snippets`). Used by `EnsembleLearner` and `Curator`.
+
 **canonical_hash** — A deterministic SHA-256 hash over a workspace of files. Computed by sorting (filename + content) pairs and hashing the concatenation. Used by `PodmanOrchestrator` to verify that the container ran exactly the code that was sent.
 
 **CapabilityRegistry** — Anonymous registry of agent capabilities with proficiency ratings. Used by `BrokerAdvisor` to recommend agents by capability fit.
 
 **CGR³ (Context Graph Retrieve-Rank-Reason)** — A retrieval system that scores bullets against request context across multiple dimensions (temporal validity, team locality, tech stack compatibility, project relevance, domain relevance) and issues a verdict (`APPLY`, `ASK_FIRST`, `SKIP`). Core components: `ContextGraphRetriever`, `ContextScorer`, `InstitutionalKnowledgeService`. Sub-types: `RankedBullet` (a bullet with context-aware ranking), `RetrievalContext` (context for the current retrieval request), `ContextGap` (describes a gap in context affecting applicability), `ReasoningVerdict` (verdict from the Reason phase), `KnowledgeResponse` (response from the InstitutionalKnowledgeService).
+
+**ClassAnalysis** — Analysis of a single class extracted from source code by `CodeAnalyzer`. Contains class name, methods, and decorators.
 
 **ClaudeCliClient** — Drop-in replacement for `LLMClient` using the local `claude -p` command-line interface. Useful for development without API keys.
 
@@ -133,7 +139,11 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **DeltaBullet** — A new bullet to add to playbook, produced by the Curator. Contains `section`, `content`, and `tags`. Provides `content_hash()` for deduplication.
 
+**DimensionScore** — Score awarded on a single dimension within an evaluation rubric. Contains raw score and weighted score.
+
 **DistillationRouter** — Routes tasks to domain-specific distillation playbooks. Uses `DomainRegistry` for domain classification and `Provenance` for license-aware filtering of training data.
+
+**DomainMatch** — Result of domain classification by `DomainRegistry`. Contains domain name and similarity score.
 
 **DomainRegistry** — Registry of available domains and their playbook centroids. Used by `DistillationRouter` to classify queries.
 
@@ -151,17 +161,25 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **EmbeddingService** — Local embedding generation using sentence-transformers. Used by PlaybookManager to compute bullet embeddings.
 
+**EnrichedRun** — An MLflow run enriched with ACE knowledge (decisions and patterns). Produced by `MLflowKnowledgeQuery`.
+
 **EnsembleLearner** — Orchestrates multiple models in parallel: each executes Generator → Reflector → Curator, then bullets are voted on and merged. Supports deliberation and cross-voting.
 
 **EnsembleResult** — Complete result from an ensemble learning session. Contains `approved_bullets()`, `rejected_bullets()`, and a `summary()`.
 
 **EnvironmentFeedback** — Feedback from task execution environment (result, expected vs actual output, test report). Used by Reflector.
 
+**EvaluationResult** — Result of blind evaluation of a submission. Contains quality score and dimension scores.
+
 **ExistingTest** — Represents an existing test in the codebase. Used by `RedundancyPreChecker`.
+
+**ExperimentDecision** — Captures a decision made during ML experimentation. Contains question, decision, rationale, and outcome.
 
 **ExperimentLogger** — Unified logger for TDD and ML experiments. Stores in PostgreSQL (fallback to SQLite). Provides `log_tdd_cycle()`, `log_ml_experiment()`, and query methods.
 
 **ExperimentLogModel** — SQLAlchemy model for experiment logs. Contains task_data, generator_data, environment_data, reflector_data, curator_data, result, and timestamps.
+
+**ExperimentPattern** — Cross-experiment pattern learned from multiple ML runs. Contains pattern name, description, success rate, and domain tags.
 
 **ExtractionResult** — Result of Gherkin extraction from codebase. Contains generated Gherkin feature, scenarios, step definitions, and confidence score.
 
@@ -172,6 +190,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 **FileDrift** — Describes a single file that has drifted (changed content) from its expected state.
 
 **FileLockContext** — Context manager that prevents inadvertent drift of target files during a TDD session. Uses `DriftDetector` to verify on exit.
+
+**Fixtures** — Test fixtures for setup/teardown in contract-driven development. Used by `InterfaceContract`.
 
 **FolderInfo** — Information about a project folder (path, purpose, contains source or tests). Used by `ProjectStructure`.
 
@@ -187,7 +207,11 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **GherkinExtractionAgent** — Reverse-engineers Gherkin scenarios from existing code and tests. Produces `ExtractionResult`.
 
+**GherkinFeature** — A complete Gherkin feature with name, description, and scenarios. Produced by `GherkinExtractionAgent`.
+
 **GherkinFeatureBridge** — Parses a Gherkin .feature file into a `FeatureSpec`. Used by `IterativeTDDRunner` for Gherkin-driven mode.
+
+**GherkinScenario** — A Gherkin scenario to be generated, containing steps (Given, When, Then). Produced by `GherkinExtractionAgent`.
 
 **GoLanguagePod** — LanguagePod implementation for Go TDD cycles.
 
@@ -215,6 +239,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **InterfaceContract** — Defines what needs to be implemented: signatures, input/output schemas, test cases, and fixtures. Used by `ContractOrchestrator`.
 
+**InterventionRecord** — Record of a human intervention after a TDD failure. Contains experiment ID, intervention description, and timestamp.
+
 **IterativeResult** — Outcome of a full iterative TDD session from `IterativeTDDRunner`. Contains `success`, `complete`, `iterations`, and list of `CycleResult`.
 
 **IterativeTDDRunner** — Kent Beck-style RED→GREEN→REFACTOR loop. Uses `IncrementalPlanner` to plan tests and a `LanguagePod` to execute phases. Supports Gherkin-driven mode.
@@ -241,6 +267,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **MethodSignature** — Represents a method signature extracted from code by `CodeAnalyzer`. Contains name, parameters, return type, and decorators.
 
+**MLflowKnowledgeQuery** — Unified interface to query MLflow runs with ACE knowledge context. Returns `EnrichedRun` objects.
+
 **ModelAttributionTracker** — Tracks OpenRouter model attribution in performance metrics. Records per-model success rates, quality scores, and trend detection.
 
 **ModelFamilyMetrics** — Aggregated metrics for a model family (e.g., all qwen/* models).
@@ -263,192 +291,4 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ModuleTDDBuilder** — Builds module implementations using TDD methodology. Iterates over `FunctionSpec`, generates and validates each function.
 
-**NoOpAuditClient** — No-op audit client for testing or when audit is disabled.
-
-**PerformanceAggregator** — Extracts metrics from audit trail and provides agent performance, model profiles, Bayesian estimates, and regression alerts.
-
-**PhaseResult** — Outcome of a single phase (RED, GREEN, or REFACTOR). Contains `passed`, `output`, and optional `error`.
-
-**Playbook** — A collection of learned knowledge organized into sections. Contains metadata (domain, version) and a list of `Bullet` per section.
-
-**PlaybookEnforcer** — Enforces playbook rules like ace-006 (high-frequency feedback). Checks edit ratios against historical session data.
-
-**PlaybookManager** — Core playbook operations: creation, delta updates, deduplication, token budget management, persistence to JSON files.
-
-**PlaybookMetadata** — Metadata for a playbook (domain, base_model, total_tokens, total_bullets).
-
-**PlaybookQA** — Q&A system that answers coding questions using playbook knowledge. Supports single model and ensemble answers.
-
-**PlaybookReliabilityAnalyzer** — Correlates bullet retrieval with first-pass GREEN outcomes. Computes `BulletReliability` for each bullet.
-
-**PlaybookRepository** — PostgreSQL repository for playbooks and bullets with pgvector integration for semantic search.
-
-**PodFactory** — Creates `LanguagePod` instances for a given language identifier.
-
-**PodmanOrchestrator** — Stateless sidecar execution layer for the Clean Room harness. Uses `ContainerRunner` to send code and verify execution integrity via `canonical_hash`.
-
-**PodmanRunner** — Production `ContainerRunner` backed by rootless Podman.
-
-**PodRun** — Input data for one pod's execution of a feature. Used by `TokenEfficiencyReporter`.
-
-**PodSpec** — Everything a pod needs to execute one phase: `feature_requirement`, `test_file`, `implementation_file`, `cycle_number`, `error_output`, `gherkin_context`.
-
-**PolyglotRunResult** — Combined results for all languages in a polyglot TDD run, including token efficiency comparison.
-
-**PolyglotTDDRunner** — Drives a RED→GREEN→REFACTOR loop for each requested language and compares token efficiency.
-
-**PostgresACEMLflowCallback** — MLflow callback that stores knowledge directly in PostgreSQL experiment_logs table.
-
-**PostgresBulletRetriever** — PostgreSQL-backed retrieval system using pgvector for semantic search.
-
-**PostgresPlaybookAdapter** — PostgreSQL-backed playbook manager that maintains compatibility with in-memory `PlaybookManager` API.
-
-**ProductionDataAnalyzer** — Analyzes quality data from experiment_logs for model performance metrics and trend reports.
-
-**ProjectArchitecture** — Cached project architecture information (folder structure, purposes).
-
-**ProjectConfig** — Manages project configuration from `.ace/config.yml`. Provides detection and auto-creation.
-
-**ProjectDetector** — Detects and analyzes Python project structure (root, src, test dirs, package manager, Python version).
-
-**ProjectInfo** — Information about a detected Python project (name, root, src dir, test dir, type, python version, package manager).
-
-**ProjectStructure** — Represents the project folder structure with purposes for intelligent file placement.
-
-**ProposedTest** — Represents a test being proposed for the next TDD cycle. Used by `RedundancyPreChecker`.
-
-**Provenance** — Model/bullet provenance for ownership-aware matching. Contains supplier, license category, and `can_teach()` check.
-
-**PulseResult** — Raw response from the container runner, including bandit analysis and test results.
-
-**PythonLanguagePod** — LanguagePod implementation for Python TDD cycles. Uses `WorkerAgent` for code generation and `PodmanOrchestrator` for execution.
-
-**QAAnswer** — Answer to a coding question with playbook context, confidence, and supporting bullets.
-
-**QualityBaseline** — Quality summary for one (model_id, version) pair in `RegressionDetector`.
-
-**RankedBullet** — A bullet with context-aware ranking from CGR³. Contains bullet, score, dimension scores, and verdict.
-
-**RatePeriod** — A time window for success rate calculation in `SuccessRateCalculator`.
-
-**ReasoningVerdict** — Verdict from the Reason phase of CGR³: `APPLY`, `ASK_FIRST`, or `SKIP`.
-
-**RedundancyPreChecker** — Pre-checks proposed tests for redundancy before RED phase. Uses keyword extraction and semantic overlap.
-
-**RedundancyResult** — Result of redundancy pre-check. Contains `is_redundant`, `reason`, and optional `similar_test`.
-
-**Reflector** — ACE pipeline module. Analyses task outcomes, extracts error patterns, root causes, and key insights. Tags bullets as helpful/harmful/neutral.
-
-**ReflectorOutput** — Output from the Reflector module. Contains `error_identification`, `root_cause`, `correct_approach`, `key_insight`, `bullet_tags`, `quality_score`.
-
-**RegressionAlert** — Fired when a quality regression is detected by `RegressionDetector`. Contains model_id, baseline, current, and severity.
-
-**RegressionDetector** — Tracks quality scores by (model_id, version) and detects regressions using CUSUM or threshold-based methods.
-
-**RepresentativeStrategy** — Strategy for selecting cluster representatives: `helpful_ratio`, `centrality`, `recency`. Used by `BulletClusterer`.
-
-**RetrievalContext** — Context for the current retrieval request in CGR³. Contains temporal, team, tech stack, project, and domain fields.
-
-**RoutingResult** — Result of adaptive routing decision (from `AdaptiveBroker`) or distillation routing (from `DistillationRouter`).
-
-**RoutingVerdict** — Verdict for routing decision in `DistillationRouter` (e.g., ROUTE, FALLBACK).
-
-**ScenarioSpec** — One Gherkin scenario with its step lines (Given, When, Then). Part of `FeatureSpec`.
-
-**ScoringDimension** — One measurable axis within an evaluation rubric. Contains name, description, weight.
-
-**SecurityBreachError** — Raised when H_proposed ≠ H_executed — the container ran different code than was sent. Detected by `PodmanOrchestrator`.
-
-**SemanticCodeAnalyzer** — Detects risky patterns in generated code (SQL injection, eval, exec, secrets).
-
-**SessionLog** — Simple session tracker for dogfooding loop visibility. Logs edits and test runs to a file.
-
-**Settings** — Application settings loaded from ACE's `.env` file. Validates database, Redis, LLM provider, and feature flags.
-
-**StepDefinition** — A step definition for Gherkin steps (mapping step regex to code).
-
-**Submission** — A submission to be evaluated by `BlindEvaluator`. Contains output, context, and optional rubric.
-
-**SuccessRateCalculator** — Measures experiment success rates across the system by type, version, and time period.
-
-**Supplier** — Model supplier/owner for provenance matching (e.g., OpenAI, Meta, Mistral).
-
-**TaskCompletion** — Record of a completed task with model attribution (model_id, requested_model, provider, success, quality score).
-
-**TaskInput** — Input to a task from the user. Contains `query`, `type`, `difficulty`, `context`.
-
-**TDDCycleAnalyzer** — Measures first-pass GREEN rate and trend over time from experiment log records.
-
-**TDDCycleRunner** — Orchestrates one complete TDD cycle: RED → GREEN (with retry) → REFACTOR, with optional learning loop.
-
-**TDDFailureCategory** — Categories of TDD failures for analysis (e.g., test_design, implementation, mocking).
-
-**TDDFailureRecorder** — Records TDD failures and interventions for self-improvement. Creates beads issues and playbook bullets.
-
-**TDDLesson** — A lesson learned from a TDD failure. Contains category, root cause, and description.
-
-**TDDLessonInjector** — Injects TDD lessons into agent prompts based on development phase.
-
-**TDDResult** — Final result of autonomous TDD session from `AutonomousTDDAgent`.
-
-**TestAnalyzer** — Analyzes test code to extract test scenarios, assertions, and setup patterns.
-
-**TestAssertion** — A single assertion extracted from a test (type, expected, actual).
-
-**TestCase** — A test case for validating implementation in `ContractOrchestrator`.
-
-**TestIncrement** — One planned test step in the TDD loop. Used by `IncrementalPlanner` and `AutonomousTDDAgent`.
-
-**TestReviewAgent** — Validates test quality before TDD implementation. Produces `TestReviewResult` with quality score and issues.
-
-**TestWritingRubric** — Domain-specific evaluation rubric for test suite output. Scores edge cases, assertions, naming, and coverage.
-
-**TokenEfficiencyReporter** — Computes token efficiency scores from LanguagePod run data. Produces `EfficiencyReport`.
-
-**TokenUsage** — Token consumption for one complete TDD cycle. Contains `cycle_number`, `input_tokens`, `output_tokens`.
-
-**TypeScriptLanguagePod** — LanguagePod for TypeScript TDD cycles via vitest in a rootless Podman container.
-
-**TypeScriptRunner** — PodmanRunner pre-configured for the TypeScript harness image.
-
-**TypeScriptWorkerAgent** — Generates TypeScript code for each TDD phase given a PodSpec.
-
-**Vote** — A single model's vote on a proposed bullet in the ensemble system. Contains vote type, confidence, and reasoning.
-
-**VotingStrategy** — Strategy for deciding bullet approval: `MajorityVoting`, `SupermajorityVoting`, `WeightedVoting`, `UnanimousVoting`, `EscalatingVoting`.
-
-**WorkerAgent** — Standalone LLM code-generation component. Separates prompt-building and LLM-calling from TDD loop orchestration. Receives feature context and optional constraints (playbook bullets, AST context map) explicitly; returns code strings. File I/O and test execution are the caller's (pod's) responsibility.
-
----
-
-## Architectural Decisions
-
-**ADR-001: LanguagePod Protocol** — Each target language gets a `LanguagePod` that implements `run_red()`, `run_green()`, `run_refactor()`, and `token_usage()`. The LEARN phase (playbook bullets, ensemble voting) remains in the harness, not the pod. This keeps pods stateless and focused on language-specific execution.
-
-**ADR-002: WorkerAgent as Code Generator** — The `WorkerAgent` is a standalone component that receives all context explicitly (PodSpec, playbook bullets, AST context map) and returns code strings. It does not perform file I/O or test execution — those are the pod's responsibility. This separation allows the WorkerAgent to be reused across different pod implementations and tested independently.
-
-**ADR-003: TDDCycleRunner with Optional Learning Loop** — The `TDDCycleRunner` orchestrates RED → GREEN (with retry) → REFACTOR for one feature. The learning loop (Reflector → Curator → playbook write) is optional and only runs when both `reflector` and `curator` are provided. This allows the runner to be used in both learning and non-learning contexts.
-
-**ADR-004: IterativeTDDRunner with Gherkin Support** — The `IterativeTDDRunner` supports two modes: planner-driven (using `IncrementalPlanner` to determine the next test) and Gherkin-driven (parsing a `.feature` file and iterating through scenarios). Both modes use the same `LanguagePod` interface for execution.
-
-**ADR-005: ExperimentLogger with PostgreSQL Fallback** — The `ExperimentLogger` stores all TDD and ML experiments in PostgreSQL with a consistent schema. When PostgreSQL is unavailable, it falls back to a local SQLite file (`ace_experiments.db`), ensuring TDD cycles are always persisted even without a running database.
-
-**ADR-006: PlaybookManager with File Persistence** — The `PlaybookManager` stores playbooks in memory and persists them to JSON files in `data/playbooks/`. Each playbook is stored as a separate JSON file named `pb_<id>.json`. On initialization, all existing playbook files are loaded from disk. This provides a simple, inspectable persistence layer without requiring a database.
-
-**ADR-007: commit_to_disk for Atomic Writes** — File writes in `PythonLanguagePod` use `commit_to_disk()`, which writes to a temporary file and then uses `os.replace()` for atomic rename. This prevents partial writes from corrupting test or implementation files during a TDD cycle.
-
-**ADR-008: _ensure_test_import for Module Discovery** — The `PythonLanguagePod` automatically prepends `from <module_name> import *` to test files that don't already import the implementation module. This ensures tests can always discover the code under test without requiring explicit import statements in generated test code.
-
-**ADR-009: _intercept_tokens for Token Tracking** — The `PythonLanguagePod` intercepts the LLM client's `generate()` method to track per-cycle token consumption. This provides accurate token accounting without modifying the LLM client interface.
-
-**ADR-010: _is_abort for Security Failures** — The `TDDCycleRunner` uses `_is_abort()` to detect security/policy failures that cannot be fixed by retry. These include `ForbiddenImport:`, `SecurityBreach:`, and `Bandit gate:` prefixes, plus container infrastructure failures (container creation/liveness errors, vitest timeouts). When detected, the cycle is aborted immediately without retrying.
-
-**ADR-011: WorkerAgent with Default Test Rules** — The `WorkerAgent` carries a set of `_DEFAULT_TEST_RULES` that are seeded into the playbook's `test_assertion_rules` section on first use. These rules guide the LLM to write property-based assertions rather than exact-value assertions when multiple correct outputs exist. The rules are used as fallback when no playbook bullets exist for the section.
-
-**ADR-012: _extract_code with Truncated Fence Handling** — The `WorkerAgent`'s `_extract_code()` function handles truncated markdown code fences (where the model stops before the closing ```). It matches unclosed fences as a fallback, ensuring code is still extracted even when the LLM response is cut off mid-output.
-
-**ADR-013: IterativeTDDRunner with Gherkin-Driven Mode** — The `IterativeTDDRunner` supports a Gherkin-driven mode via `run_from_feature()` that parses a `.feature` file and iterates through scenarios one by one. Each scenario becomes a TDD cycle, with the scenario's steps providing the acceptance criteria for the RED phase. This mode uses `GherkinFeatureBridge` to parse the feature file and `IncrementalPlanner.next_increment_for_scenario()` to plan each test.
-
-**ADR-014: TDDCycleRunner Learning Loop with Error Isolation** — The learning loop in `TDDCycleRunner._learn()` is wrapped in a try/except block so that a failure in the Reflector or Curator does not cause the TDD cycle itself to fail. The cycle result is returned with or without learned bullets, and the error is logged as a warning. This ensures that learning is best-effort and never blocks the TDD loop.
-
-**ADR-015: _is_abort Includes Container Infrastructure Failures** — The `_is_abort()` function in `TDDCycleRunner` also detects container-level failures such as "Error: can only create exec sessions", "Error: no such container", and "vitest timed out". These are infrastructure errors that cannot be resolved by retrying the LLM generation, so the cycle aborts immediately.
+**MultiRunResult** — Aggregated result across N evaluations of the same task. Contains mean, variance, and per-run

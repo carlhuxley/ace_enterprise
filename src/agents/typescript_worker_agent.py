@@ -12,6 +12,15 @@ import re
 
 from src.agents.language_pod import PodSpec
 
+_DEFAULT_HARD_RULES = [
+    "Use camelCase for ALL identifiers — variables, parameters, properties, private fields. Never snake_case.",
+    "Never use Math.random() as a default or fallback — callers must supply values explicitly.",
+    "Use crypto.createHash('sha256') for hashing. Never djb2-style bitwise hash (hash << 5, hash & hash).",
+    "No hardcoded stub IDs like 'ctx-001' or 'pb-existing' — generate IDs from crypto.randomUUID() or a counter.",
+    "No Python idioms: no __enter__/__exit__, no to_dict/from_dict, no Python exception names.",
+    "No `any` — type caught exceptions as `unknown` and type-guard before access.",
+]
+
 _DEFAULT_TEST_RULES = [
     (
         "Assert PROPERTIES not exact value when multiple correct outputs exist "
@@ -117,6 +126,9 @@ class TypeScriptWorkerAgent:
             f"Implementation file: {spec.implementation_file.name}",
             "Use named exports. Strict TypeScript — all parameters and return types annotated.",
         ]
+        hard_rules = self._get_hard_rules()
+        if hard_rules:
+            parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         if test_code:
             parts.append(f"\nTest file to satisfy:\n```typescript\n{test_code}\n```")
         if error_output:
@@ -132,6 +144,9 @@ class TypeScriptWorkerAgent:
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
         ]
+        hard_rules = self._get_hard_rules()
+        if hard_rules:
+            parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         if current_code:
             parts.append(f"\nCurrent code:\n{current_code}")
         parts.append("Output only the refactored TypeScript code.")
@@ -145,6 +160,15 @@ class TypeScriptWorkerAgent:
             return bullets if bullets else _DEFAULT_TEST_RULES
         except Exception:
             return _DEFAULT_TEST_RULES
+
+    def _get_hard_rules(self) -> list[str]:
+        if not self._playbook_manager:
+            return _DEFAULT_HARD_RULES
+        try:
+            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules") or []
+            return bullets if bullets else _DEFAULT_HARD_RULES
+        except Exception:
+            return _DEFAULT_HARD_RULES
 
 
 def _extract_code(content: str) -> str:

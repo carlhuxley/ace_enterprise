@@ -729,7 +729,7 @@ class PlaybookManager:
             logger.debug(f"Storage path {self.storage_path} does not exist, skipping load")
             return
 
-        json_files = list(self.storage_path.glob("pb_*.json"))
+        json_files = list(self.storage_path.glob("*.json"))
         logger.info(f"Loading {len(json_files)} playbook(s) from {self.storage_path}")
 
         for file_path in json_files:
