@@ -233,6 +233,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ImportValidator** — Validates and corrects import paths in generated code. Builds a module cache to resolve relative imports.
 
+**InadvertentDriftError** — Exception raised by `DriftDetector` when a target file has been modified outside the allowed file lock context.
+
 **IncrementalPlanner** — Determines the next test increment to write by asking the LLM what should be tested next. Used by `IterativeTDDRunner`.
 
 **InstitutionalKnowledgeService** — Central knowledge retrieval service for all code generation activities. Provides `get_guidance()`, `get_guidance_for_tdd()`, `get_guidance_for_implementation()`, `get_anti_patterns()`.
@@ -302,6 +304,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 **PlaybookEnforcer** — Enforces playbook rules such as ace-006 (high-frequency feedback). Checks edit ratios against session data.
 
 **PlaybookManager** — Core playbook operations: creation, delta updates, semantic deduplication, token budget management, and file-based JSON persistence.
+
+**PlaybookMetadata** — Metadata for a playbook: domain, base model, total tokens, total bullets.
 
 **PlaybookQA** — Q&A system that answers coding questions using playbook knowledge. Supports multi-model ensemble answers.
 
@@ -411,9 +415,9 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **TDDCycleRunner** — Orchestrates RED → GREEN → REFACTOR for one feature. Supports GREEN retries with error feedback and aborts on security/policy failures (ForbiddenImport, SecurityBreach, Bandit gate). Optionally runs Reflector/Curator after successful cycles for learning.
 
-**TDDFailureRecorder** — Records TDD failures and interventions for self-improvement. Creates beads issues and playbook bullets from failures.
-
 **TDDFailureCategory** — Enum of TDD failure categories (test_design, implementation, mocking, etc.).
+
+**TDDFailureRecorder** — Records TDD failures and interventions for self-improvement. Creates beads issues and playbook bullets from failures.
 
 **TDDLesson** — A lesson learned from a TDD failure. Contains category, root cause, and lesson description.
 

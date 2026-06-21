@@ -81,7 +81,7 @@ class LLMClient:
         self.provider = provider or settings.default_llm_provider
         self.model = self._get_default_model(model)
         self.base_url = base_url  # For vLLM custom endpoints
-        self.timeout = 600.0  # seconds (10 minutes for large local models)
+        self.timeout = 120.0  # seconds (2 min for cloud APIs; local models use vLLM path)
 
         logger.info(f"Initialized LLM client: {self.provider}/{self.model}")
 
