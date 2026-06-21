@@ -67,10 +67,10 @@ Feature: EffGen Adapter
     Then the list should be empty
 
   Scenario: Serialize TaskRequest to MCP parameters
-    Given a TaskRequest with taskId "task-123", taskType "code_generation", prompt "Write a function", and context {"language": "python"}
+    Given a TaskRequest with taskId "task-123", taskType "codeGeneration", prompt "Write a function", and context {"language": "python"}
     When I convert it to MCP parameters
     Then the parameters should have taskId "task-123"
-    And the parameters should have taskType "code_generation"
+    And the parameters should have taskType "codeGeneration"
     And the parameters should have prompt "Write a function"
     And the parameters should have context {"language": "python"}
 

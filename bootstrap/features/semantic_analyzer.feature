@@ -9,7 +9,7 @@ Feature: Semantic Code Analyzer
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "query = 'SELECT * FROM users WHERE id=' + user_id"
     Then the result should contain 1 issue
-    And the issue at index 0 should have type "sql_concatenation"
+    And the issue at index 0 should have type "sqlConcatenation"
     And the issue at index 0 should have severity "critical"
     And the issue at index 0 should have line 1
     And the issue at index 0 should have column 41
@@ -18,7 +18,7 @@ Feature: Semantic Code Analyzer
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "result = eval(user_input)"
     Then the result should contain 1 issue
-    And the issue at index 0 should have type "eval_usage"
+    And the issue at index 0 should have type "evalUsage"
     And the issue at index 0 should have severity "critical"
     And the issue at index 0 should have line 1
     And the issue at index 0 should have column 10
@@ -27,7 +27,7 @@ Feature: Semantic Code Analyzer
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "exec(dynamic_code)"
     Then the result should contain 1 issue
-    And the issue at index 0 should have type "exec_usage"
+    And the issue at index 0 should have type "execUsage"
     And the issue at index 0 should have severity "critical"
     And the issue at index 0 should have line 1
     And the issue at index 0 should have column 1
@@ -36,7 +36,7 @@ Feature: Semantic Code Analyzer
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "api_key = \"sk_live_1234567890abcdef\""
     Then the result should contain 1 issue
-    And the issue at index 0 should have type "hardcoded_secret"
+    And the issue at index 0 should have type "hardcodedSecret"
     And the issue at index 0 should have severity "high"
     And the issue at index 0 should have line 1
     And the issue at index 0 should have column 11
@@ -46,18 +46,18 @@ Feature: Semantic Code Analyzer
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "password = \"MyP@ssw0rd123\"\nquery = \"DELETE FROM logs WHERE id=\" + log_id\neval(command)"
     Then the result should contain 3 issues
-    And the issue at index 0 should have type "hardcoded_secret"
+    And the issue at index 0 should have type "hardcodedSecret"
     And the issue at index 0 should have line 1
-    And the issue at index 1 should have type "sql_concatenation"
+    And the issue at index 1 should have type "sqlConcatenation"
     And the issue at index 1 should have line 2
-    And the issue at index 2 should have type "eval_usage"
+    And the issue at index 2 should have type "evalUsage"
     And the issue at index 2 should have line 3
 
   Scenario: SQL concatenation with INSERT statement
     Given a SemanticCodeAnalyzer instance
     When analyze is called with code "sql = 'INSERT INTO users VALUES (' + values + ')'"
     Then the result should contain 1 issue
-    And the issue at index 0 should have type "sql_concatenation"
+    And the issue at index 0 should have type "sqlConcatenation"
     And the issue at index 0 should have severity "critical"
 
   Scenario: Short string assignment does not trigger secret detection

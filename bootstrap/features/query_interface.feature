@@ -19,7 +19,7 @@ Feature: MLflow Knowledge Query Interface
     Given an MLflowKnowledgeQuery for experiment "model_training"
     And the experiment has 5 MLflow runs
     And 2 runs have params.learningRate greater than 0.001
-    When I call getEnrichedRuns with filterString "params.learning_rate > '0.001'" and maxResults 100
+    When I call getEnrichedRuns with filterString "params.learningRate > '0.001'" and maxResults 100
     Then I receive 2 EnrichedRun objects
 
   Scenario: Find runs by decision question and outcome
@@ -42,10 +42,10 @@ Feature: MLflow Knowledge Query Interface
   Scenario: Get recommendations for parameters with domain tags
     Given an MLflowKnowledgeQuery for experiment "nlp_training"
     And the knowledge base has a pattern with successRate 0.85 and domainTags ["nlp", "transformers"]
-    And the pattern whenToApply mentions "batch_size" and "128"
-    When I call getRecommendationsForParams with params {"batch_size": 128, "optimizer": "adam"} and domainTags ["nlp"] and minSuccessRate 0.7
+    And the pattern whenToApply mentions "batchSize" and "128"
+    When I call getRecommendationsForParams with params {"batchSize": 128, "optimizer": "adam"} and domainTags ["nlp"] and minSuccessRate 0.7
     Then I receive a list of tuples containing ExperimentPattern and relevanceReason
-    And the first recommendation has a relevanceReason mentioning "batch_size"
+    And the first recommendation has a relevanceReason mentioning "batchSize"
     And recommendations are sorted by usefulnessScore in descending order
 
   Scenario: Get decision history filtered by keyword
@@ -59,13 +59,13 @@ Feature: MLflow Knowledge Query Interface
 
   Scenario: Compare two runs with different parameters and metrics
     Given an MLflowKnowledgeQuery for experiment "ab_testing"
-    And run "run_A" has params {"learning_rate": "0.001", "batch_size": "32"} and metrics {"accuracy": 0.85, "loss": 0.3}
-    And run "run_B" has params {"learning_rate": "0.01", "batch_size": "32"} and metrics {"accuracy": 0.90, "loss": 0.2}
+    And run "run_A" has params {"learningRate": "0.001", "batchSize": "32"} and metrics {"accuracy": 0.85, "loss": 0.3}
+    And run "run_B" has params {"learningRate": "0.01", "batchSize": "32"} and metrics {"accuracy": 0.90, "loss": 0.2}
     And run "run_A" has a decision with question "Use dropout?" and decision "Yes"
     And run "run_B" has a decision with question "Use dropout?" and decision "No"
     When I call compareRuns with runId1 "run_A" and runId2 "run_B"
     Then I receive a comparison dictionary
-    And paramDifferences contains "learning_rate" with run1 "0.001" and run2 "0.01"
+    And paramDifferences contains "learningRate" with run1 "0.001" and run2 "0.01"
     And metricDifferences contains "accuracy" with run1 0.85, run2 0.90, diff 0.05, and pctChange 5.88
     And decisionDifferences contains "Use dropout?" with run1 "Yes" and run2 "No"
 

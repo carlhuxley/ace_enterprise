@@ -50,8 +50,8 @@ Feature: Evaluation Rubric System
   Scenario: Score output with context dictionary
     Given a concrete rubric with name "ContextRubric"
     And the rubric has dimension "Relevance" with weight 1.0
-    And the rubric returns score 85.0 for "Relevance" when context contains "test_content"
-    When I call score with output "answer text" and context {"test_content": "question"}
+    And the rubric returns score 85.0 for "Relevance" when context contains "testContent"
+    When I call score with output "answer text" and context {"testContent": "question"}
     Then the result rubricName should be "ContextRubric"
     And the totalScore should be 85.0
     And the dimensionScores should contain score 85.0 for "Relevance" with weight 1.0

@@ -13,7 +13,7 @@ Feature: Audit Client
 
   Scenario: Emit audit event successfully
     Given an audit client with endpoint "http://audit-service:8081"
-    And an AuditEventCreate with event_type "PATTERN_LEARNED", actor_type "agent", actor_id "test-agent-1", and payload {"pattern_id": "ctx-001"}
+    And an AuditEventCreate with eventType "PATTERN_LEARNED", actorType "agent", actorId "test-agent-1", and payload {"patternId": "ctx-001"}
     When the client emits the event
     And the audit service responds with status code 202
     Then the emit method should return True

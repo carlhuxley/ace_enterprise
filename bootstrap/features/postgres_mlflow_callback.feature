@@ -33,7 +33,7 @@ Feature: PostgreSQL-backed MLflow Callback for ML Experiment Knowledge Capture
 
   Scenario: Log a decision with alternatives and context
     Given a PostgresACEMLflowCallback initialized with experimentName "model_selection" and playbookId "ml_experiments"
-    When I call logDecision with question "Which model architecture?", decision "ResNet50", rationale "Best accuracy/speed tradeoff", alternativesConsidered ["VGG16", "EfficientNet"], and context {"dataset_size": 10000, "gpu_memory": "8GB"}
+    When I call logDecision with question "Which model architecture?", decision "ResNet50", rationale "Best accuracy/speed tradeoff", alternativesConsidered ["VGG16", "EfficientNet"], and context {"datasetSize": 10000, "gpuMemory": "8GB"}
     Then a decision dictionary is returned
     And the decision dictionary contains alternatives ["VGG16", "EfficientNet"]
     And the decision dictionary contains context with datasetSize 10000
@@ -65,7 +65,7 @@ Feature: PostgreSQL-backed MLflow Callback for ML Experiment Knowledge Capture
     Given a PostgresACEMLflowCallback initialized with experimentName "accuracy_test" and playbookId "test_playbook"
     And I have logged 2 decisions
     And I have logged 1 pattern
-    When I call finalizeExperiment with hyperparameters {"learning_rate": 0.001, "batch_size": 32}, metrics {"accuracy": 0.95, "loss": 0.12}, and success True
+    When I call finalizeExperiment with hyperparameters {"learningRate": 0.001, "batchSize": 32}, metrics {"accuracy": 0.95, "loss": 0.12}, and success True
     Then the experiment is logged to PostgreSQL
     And the experiment log contains experimentName "accuracy_test"
     And the experiment log contains 2 decisions

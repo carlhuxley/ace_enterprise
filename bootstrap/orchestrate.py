@@ -245,6 +245,16 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------
+    # Pre-synthesis: Gherkin style precheck
+    # ------------------------------------------------------------------
+    warnings = _check_feature_snake_case(feature_files)
+    if warnings:
+        print(f"\n=== Gherkin Precheck: {len(warnings)} snake_case issue(s) found ===")
+        for w in warnings:
+            print(f"  {w}")
+        print("  Fix these before running synthesis to avoid STYLE_BLOCK failures.\n")
+
+    # ------------------------------------------------------------------
     # Stage 2 + 3: Synthesize & Verify (Gherkin TDD path)
     # ------------------------------------------------------------------
     print(f"\n=== Stage 2+3: Synthesize & Verify ({len(feature_files)} features) ===")
@@ -619,6 +629,27 @@ _BOOTSTRAP_TS_SEED_BULLETS = [
         "strategies_and_hard_rules",
     ),
 ]
+
+
+_GHERKIN_SNAKE_KEY = re.compile(r'\{[^}]*"([a-z][a-z0-9]+(?:_[a-z0-9]+)+)"\s*:')
+_GHERKIN_SNAKE_VAL = re.compile(r'(?:taskType|eventType|type|kind)\s+"([a-z][a-z0-9]+(?:_[a-z0-9]+)+)"')
+
+
+def _check_feature_snake_case(feature_files: list) -> list[str]:
+    """Scan feature files for snake_case JSON keys and type-discriminator values.
+
+    These leak into generated TypeScript as identifiers and cause STYLE_BLOCK
+    failures at the style gate. Returns a list of human-readable warning strings.
+    """
+    warnings = []
+    for path in sorted(feature_files):
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for m in _GHERKIN_SNAKE_KEY.finditer(line):
+                warnings.append(f"{path.name}:{lineno}: JSON key '{m.group(1)}' is snake_case → rename to camelCase")
+            for m in _GHERKIN_SNAKE_VAL.finditer(line):
+                warnings.append(f"{path.name}:{lineno}: type-discriminator value '{m.group(1)}' is snake_case → rename to camelCase")
+    return warnings
 
 
 def _seed_shared_playbook(playbook_manager, log: BootstrapAuditLog) -> None:

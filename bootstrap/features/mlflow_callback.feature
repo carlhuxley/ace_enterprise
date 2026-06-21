@@ -29,7 +29,7 @@ Feature: ACE MLflow Callback for Experiment Knowledge Capture
     Given MLflow is available
     And I have an ACEMLflowCallback with experimentName "model_selection"
     And there is an active MLflow run with runId "run_12345"
-    When I call logDecision with question "Which model architecture?", decision "ResNet50", rationale "Best accuracy/speed tradeoff", alternativesConsidered ["VGG16", "EfficientNet"], and context {"previous_accuracy": 0.85}
+    When I call logDecision with question "Which model architecture?", decision "ResNet50", rationale "Best accuracy/speed tradeoff", alternativesConsidered ["VGG16", "EfficientNet"], and context {"previousAccuracy": 0.85}
     Then an ExperimentDecision object is returned
     And the decision contains alternativesConsidered ["VGG16", "EfficientNet"]
     And the decision context includes "mlflow_run_id" with value "run_12345"
@@ -62,7 +62,7 @@ Feature: ACE MLflow Callback for Experiment Knowledge Capture
     And I have an ACEMLflowCallback with experimentName "cv_experiments"
     And the knowledge base contains patterns with domainTags ["computer_vision"] and successRate 0.8
     And the knowledge base contains patterns with domainTags ["nlp"] and successRate 0.9
-    When I call getRecommendations with currentParams {"batch_size": 32} and domainTags ["computer_vision"]
+    When I call getRecommendations with currentParams {"batchSize": 32} and domainTags ["computer_vision"]
     Then only patterns with domainTags containing "computer_vision" are returned
     And patterns with successRate below 0.7 are excluded
     And the patterns are sorted by usefulnessScore in descending order

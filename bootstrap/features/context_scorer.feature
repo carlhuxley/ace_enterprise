@@ -65,7 +65,7 @@ Feature: Context Scorer
     And the context gaps list should be empty for the project dimension
 
   Scenario: Score a bullet with custom weights
-    Given a ContextScorer with weights {"temporal": 0.5, "team": 0.2, "tech_stack": 0.2, "project": 0.1}
+    Given a ContextScorer with weights {"temporal": 0.5, "team": 0.2, "techStack": 0.2, "project": 0.1}
     And a bullet with temporal score 1.0, team score 0.5, techStack score 0.5, and project score 0.5
     When the bullet is scored against the context
     Then the combined score should be 0.7
