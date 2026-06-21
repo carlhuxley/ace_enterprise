@@ -111,9 +111,9 @@ FEATURES_DIR = BOOTSTRAP_DIR / "features"
 AUDIT_LOG_PATH = BOOTSTRAP_DIR / "audit.jsonl"
 
 # Model roster — Pass 1 is cheap/fast; Pass 2 escalates on failure
-MODEL_EXTRACT = "anthropic/claude-sonnet-4-5"   # Stage 1: Gherkin extraction
-MODEL_PASS1   = "anthropic/claude-sonnet-4-5"   # Pass 1: fast synthesis
-MODEL_PASS2   = "anthropic/claude-sonnet-4-5"   # Pass 2: fallback on failure
+MODEL_EXTRACT = "anthropic/claude-haiku-4-5"    # Stage 1: Gherkin extraction
+MODEL_PASS1   = "anthropic/claude-haiku-4-5"    # Pass 1: cheap synthesis
+MODEL_PASS2   = "anthropic/claude-sonnet-4-5"   # Pass 2: escalate on repeated failure
 
 # ---------------------------------------------------------------------------
 
@@ -465,8 +465,8 @@ def _synthesis_loop(
                 runner = IterativeTDDRunner(
                     pod=pod,
                     planner=planner,
-                    max_iterations=10,
-                    max_green_attempts=5,
+                    max_iterations=6,
+                    max_green_attempts=3,
                     experiment_logger=experiment_logger,
                     playbook_id=playbook_id,
                 )
@@ -975,7 +975,9 @@ def _synthesis_loop_ts(
                 playbook_id = _SHARED_PLAYBOOK_ID
 
                 worker = TypeScriptWorkerAgent(
-                    llm_fast, playbook_manager=playbook_manager, fallback_client=llm_fallback
+                    llm_fast, playbook_manager=playbook_manager,
+                    fallback_client=llm_fallback,
+                    escalate_after=999,  # haiku only; sonnet reserved for manual escalation
                 )
                 planner = IncrementalPlanner(
                     llm_client=llm_fast,
@@ -994,8 +996,8 @@ def _synthesis_loop_ts(
                 runner = IterativeTDDRunner(
                     pod=pod,
                     planner=planner,
-                    max_iterations=10,
-                    max_green_attempts=5,
+                    max_iterations=6,
+                    max_green_attempts=3,
                     experiment_logger=experiment_logger,
                     playbook_id=playbook_id,
                 )
