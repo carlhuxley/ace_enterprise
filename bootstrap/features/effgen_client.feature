@@ -22,37 +22,37 @@ Feature: EffGen Client LLM Interface
     Given an EffGenClient instance exists
     When I call generate with prompt "Write a function that adds two numbers"
     Then the response should contain key "content" with generated text
-    And the response should contain key "tokens_used" with an integer value
-    And the response should contain key "latency_ms" with an integer value
+    And the response should contain key "tokensUsed" with an integer value
+    And the response should contain key "latencyMs" with an integer value
     And the response should contain key "model" with the model name
 
   Scenario: Generate text completion with system prompt
     Given an EffGenClient instance exists
     When I call generate with prompt "Write a test" and systemPrompt "You are a Python expert"
     Then the response should contain key "content" with generated text
-    And the response should contain key "tokens_used" with an integer value
+    And the response should contain key "tokensUsed" with an integer value
     And the response should contain key "model" with the model name
 
   Scenario: Generate text with custom parameters
     Given an EffGenClient instance exists
     When I call generate with prompt "Hello", maxTokens 256, and temperature 0.5
     Then the response should contain key "content" with generated text
-    And the response should contain key "tokens_used" with an integer value
-    And the response should contain key "latency_ms" with an integer value
+    And the response should contain key "tokensUsed" with an integer value
+    And the response should contain key "latencyMs" with an integer value
 
   Scenario: Generate with agent mode using tools
     Given an EffGenClient instance exists
     When I call generateWithAgent with prompt "Calculate 2+2" and tools ["PythonREPL"]
     Then the response should contain key "content" with generated text
-    And the response should contain key "tokens_used" with an integer value
-    And the response should contain key "latency_ms" with an integer value
-    And the response should contain key "agent_mode" with value True
+    And the response should contain key "tokensUsed" with an integer value
+    And the response should contain key "latencyMs" with an integer value
+    And the response should contain key "agentMode" with value true
 
   Scenario: Generate with agent using system prompt and multiple tools
     Given an EffGenClient instance exists
     When I call generateWithAgent with prompt "Test this code", systemPrompt "You are a tester", and tools ["PythonREPL", "CodeExecutor"]
     Then the response should contain key "content" with generated text
-    And the response should contain key "agent_mode" with value True
+    And the response should contain key "agentMode" with value true
     And the response should contain key "model" with the model name
 
   Scenario: Check availability of effGen installation

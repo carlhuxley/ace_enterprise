@@ -3,7 +3,7 @@ Feature: EffGen Adapter
   Scenario: Register a single effGen agent with capabilities
     Given a capability registry
     And an EffGenAdapter initialized with the registry
-    When I register an agent with agentRef "agent-1", endpoint "http://localhost:8000", modelName "Qwen/Qwen2.5-Coder-7B", and capabilities {"code_generation": 0.9, "testing": 0.7}
+    When I register an agent with agentRef "agent-1", endpoint "http://localhost:8000", modelName "Qwen/Qwen2.5-Coder-7B", and capabilities {"codeGeneration": 0.9, "testing": 0.7}
     Then the agent "agent-1" should be in the list of registered agents
     And the endpoint for "agent-1" should be "http://localhost:8000"
     And the agent config for "agent-1" should have modelName "Qwen/Qwen2.5-Coder-7B"

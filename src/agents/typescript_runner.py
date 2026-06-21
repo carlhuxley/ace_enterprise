@@ -111,9 +111,19 @@ class TypeScriptRunner(PodmanRunner):
                 timeout=_vitest_timeout,
             )
         except subprocess.TimeoutExpired:
-            # esbuild zombie accumulation — kill the container so the next pulse
-            # starts clean rather than inheriting a process-saturated environment.
+            import time
+            # Kill the saturated container.
             subprocess.run(["podman", "rm", "-f", self._name], capture_output=True)
+            # Wait until Podman confirms it's gone before restarting (avoids name collision).
+            for _ in range(10):
+                check = subprocess.run(
+                    ["podman", "ps", "-a", "--filter", f"name={self._name}", "-q"],
+                    capture_output=True, text=True,
+                )
+                if not check.stdout.strip():
+                    break
+                time.sleep(0.5)
+            self.start()
             return PulseResult(
                 exit_code=1,
                 stdout="",

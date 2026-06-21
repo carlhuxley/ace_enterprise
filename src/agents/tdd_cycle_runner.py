@@ -233,7 +233,13 @@ def _is_abort(result: PhaseResult) -> bool:
     """True for security/policy failures that cannot be fixed by retry."""
     if result.error is None:
         return False
-    for prefix in ("ForbiddenImport:", "SecurityBreach:", "Bandit gate:"):
+    for prefix in (
+        "ForbiddenImport:", "SecurityBreach:", "Bandit gate:",
+        # Container infrastructure failures — no point retrying with LLM
+        "Error: can only create exec sessions",
+        "Error: no such container",
+        "vitest timed out",
+    ):
         if result.error.startswith(prefix):
             return True
     return False

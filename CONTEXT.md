@@ -239,6 +239,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **MarkdownImporter** — Imports knowledge from markdown files into playbook bullets. Parses headings as sections and bullet points as content.
 
+**MethodSignature** — Represents a method signature extracted from code by `CodeAnalyzer`. Contains name, parameters, return type, and decorators.
+
 **ModelAttributionTracker** — Tracks OpenRouter model attribution in performance metrics. Records per-model success rates, quality scores, and trend detection.
 
 **ModelFamilyMetrics** — Aggregated metrics for a model family (e.g., all qwen/* models).
@@ -439,7 +441,7 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ADR-009: _intercept_tokens for Token Tracking** — The `PythonLanguagePod` intercepts the LLM client's `generate()` method to track per-cycle token consumption. This provides accurate token accounting without modifying the LLM client interface.
 
-**ADR-010: _is_abort for Security Failures** — The `TDDCycleRunner` uses `_is_abort()` to detect security/policy failures that cannot be fixed by retry. These include `ForbiddenImport:`, `SecurityBreach:`, and `Bandit gate:` prefixes. When detected, the cycle is aborted immediately without retrying.
+**ADR-010: _is_abort for Security Failures** — The `TDDCycleRunner` uses `_is_abort()` to detect security/policy failures that cannot be fixed by retry. These include `ForbiddenImport:`, `SecurityBreach:`, and `Bandit gate:` prefixes, plus container infrastructure failures (container creation/liveness errors, vitest timeouts). When detected, the cycle is aborted immediately without retrying.
 
 **ADR-011: WorkerAgent with Default Test Rules** — The `WorkerAgent` carries a set of `_DEFAULT_TEST_RULES` that are seeded into the playbook's `test_assertion_rules` section on first use. These rules guide the LLM to write property-based assertions rather than exact-value assertions when multiple correct outputs exist. The rules are used as fallback when no playbook bullets exist for the section.
 
@@ -448,3 +450,5 @@ Use these terms exactly in code, docs, and architecture discussions.
 **ADR-013: IterativeTDDRunner with Gherkin-Driven Mode** — The `IterativeTDDRunner` supports a Gherkin-driven mode via `run_from_feature()` that parses a `.feature` file and iterates through scenarios one by one. Each scenario becomes a TDD cycle, with the scenario's steps providing the acceptance criteria for the RED phase. This mode uses `GherkinFeatureBridge` to parse the feature file and `IncrementalPlanner.next_increment_for_scenario()` to plan each test.
 
 **ADR-014: TDDCycleRunner Learning Loop with Error Isolation** — The learning loop in `TDDCycleRunner._learn()` is wrapped in a try/except block so that a failure in the Reflector or Curator does not cause the TDD cycle itself to fail. The cycle result is returned with or without learned bullets, and the error is logged as a warning. This ensures that learning is best-effort and never blocks the TDD loop.
+
+**ADR-015: _is_abort Includes Container Infrastructure Failures** — The `_is_abort()` function in `TDDCycleRunner` also detects container-level failures such as "Error: can only create exec sessions", "Error: no such container", and "vitest timed out". These are infrastructure errors that cannot be resolved by retrying the LLM generation, so the cycle aborts immediately.

@@ -72,6 +72,9 @@ class PodmanRunner:
                 "--network", "none",
                 "--cpus", self._cpus,
                 "--memory", self._memory,
+                # tini-based init reaps zombie child processes (esbuild, node forks)
+                # so they don't accumulate and saturate the process table.
+                "--init",
                 # Bind-mount the host tmpfs dir as the container workspace
                 "-v", f"{self._host_ws}:{_REMOTE_WS}:z",
                 # Container's own /tmp on RAM too
