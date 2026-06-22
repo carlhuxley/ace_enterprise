@@ -910,15 +910,22 @@ def _synthesis_loop_ts(
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
     from src.utils.llm_client import LLMClient
+    from bootstrap.synthesis_router import SynthesisRouter
 
     print("  Building TypeScript harness image...")
     build_ts_image()
     print("  Image ready.")
 
-    llm_fast     = LLMClient(provider="openrouter", model=MODEL_PASS1)
     llm_fallback = LLMClient(provider="openrouter", model=MODEL_PASS2)
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-ts-1.0")
+
+    router = SynthesisRouter(
+        audit_log=Path("bootstrap/audit.jsonl"),
+        cheap_model=MODEL_PASS1,
+        premium_model=MODEL_PASS2,
+    )
+    router.print_plan()
 
     _seed_shared_playbook(playbook_manager, log)
 
@@ -974,13 +981,15 @@ def _synthesis_loop_ts(
             try:
                 playbook_id = _SHARED_PLAYBOOK_ID
 
+                primary_model, escalate_after = router.recommend(stem)
+                llm_primary = LLMClient(provider="openrouter", model=primary_model)
                 worker = TypeScriptWorkerAgent(
-                    llm_fast, playbook_manager=playbook_manager,
+                    llm_primary, playbook_manager=playbook_manager,
                     fallback_client=llm_fallback,
-                    escalate_after=999,  # haiku only; sonnet reserved for manual escalation
+                    escalate_after=escalate_after,
                 )
                 planner = IncrementalPlanner(
-                    llm_client=llm_fast,
+                    llm_client=llm_primary,
                     test_dir=out_dir,
                     src_dir=out_dir,
                     playbook_manager=playbook_manager,
