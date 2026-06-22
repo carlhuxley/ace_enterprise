@@ -7,7 +7,7 @@ Feature: Audit Event Collector Service
     Given an audit collector application with an audit store
     When I POST a valid audit event to "/events" with fields:
       | field       | value                                      |
-      | event_type  | user.login                                 |
+      | eventType   | user.login                                 |
       | timestamp   | 2024-01-15T10:30:00Z                       |
       | actor       | user-123                                   |
       | resource    | system                                     |
@@ -15,13 +15,13 @@ Feature: Audit Event Collector Service
       | outcome     | success                                    |
     Then the response status code should be 202
     And the response should contain "status" with value "accepted"
-    And the response should contain "event_id"
+    And the response should contain "eventId"
 
   Scenario: Collector returns minimal response on successful event submission
     Given an audit collector application with an audit store
     When I POST a valid audit event to "/events"
     Then the response status code should be 202
-    And the response should only contain fields "status" and "event_id"
+    And the response should only contain fields "status" and "eventId"
     And the response should not contain the full stored event
 
   Scenario: Health check endpoint returns service status
@@ -33,7 +33,7 @@ Feature: Audit Event Collector Service
 
   Scenario: Collector rejects invalid audit event with validation error
     Given an audit collector application with an audit store
-    When I POST an invalid audit event to "/events" missing required field "event_type"
+    When I POST an invalid audit event to "/events" missing required field "eventType"
     Then the response status code should be 422
 
   Scenario: Collector returns error when storage fails
@@ -49,7 +49,7 @@ Feature: Audit Event Collector Service
 
   Scenario: Create collector app with default configuration from environment
     Given the environment variable "AUDIT_DATABASE_URL" is set to "postgresql://user:pass@host:5432/db"
-    When I create a collector app using create_app
+    When I create a collector app using createApp
     Then a FastAPI application should be created
     And the application title should be "ACE Audit Collector"
     And the application version should be "1.0.0"

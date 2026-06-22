@@ -3,25 +3,25 @@ Feature: Test Writing Rubric Evaluation
   Scenario: Rubric identifies itself with a name
     Given a TestWritingRubric instance
     When the name property is accessed
-    Then the name is "test_writing"
+    Then the name is "testWriting"
 
   Scenario: Rubric defines four weighted scoring dimensions
     Given a TestWritingRubric instance
     When the dimensions property is accessed
     Then there are 4 dimensions
-    And dimension "edge_cases" has weight 0.30 and description "Boundary conditions tested"
+    And dimension "edgeCases" has weight 0.30 and description "Boundary conditions tested"
     And dimension "assertions" has weight 0.30 and description "Assert density relative to test count"
     And dimension "naming" has weight 0.20 and description "Descriptive test function names"
     And dimension "coverage" has weight 0.20 and description "Multiple independent test functions"
 
   Scenario: Edge cases dimension scores based on boundary pattern matches
     Given a TestWritingRubric instance
-    When scoring dimension "edge_cases" with code "test_value = None; check([]); x = 0"
+    When scoring dimension "edgeCases" with code "testValue = None; check([]); x = 0"
     Then the score is 60.0
 
   Scenario: Edge cases dimension caps score at 100
     Given a TestWritingRubric instance
-    When scoring dimension "edge_cases" with code "None [] {} '' \"\" 0 -1 empty boundary invalid negative overflow zero extra"
+    When scoring dimension "edgeCases" with code "None [] {} '' \"\" 0 -1 empty boundary invalid negative overflow zero extra"
     Then the score is 100.0
 
   Scenario: Assertions dimension scores ratio of asserts to test functions
@@ -36,12 +36,12 @@ Feature: Test Writing Rubric Evaluation
 
   Scenario: Assertions dimension returns zero for syntax errors
     Given a TestWritingRubric instance
-    When scoring dimension "assertions" with code "def test_bad( invalid syntax"
+    When scoring dimension "assertions" with code "def testBad( invalid syntax"
     Then the score is 0.0
 
   Scenario: Naming dimension scores descriptive multi-word test names
     Given a TestWritingRubric instance
-    When scoring dimension "naming" with code containing test functions "test_add_two_numbers" and "test_x"
+    When scoring dimension "naming" with code containing test functions "testAddTwoNumbers" and "testX"
     Then the score is 50.0
 
   Scenario: Naming dimension returns zero when no test functions exist
@@ -71,5 +71,5 @@ Feature: Test Writing Rubric Evaluation
 
   Scenario: Unknown dimension returns zero score
     Given a TestWritingRubric instance
-    When scoring dimension "unknown_dimension" with any code
+    When scoring dimension "unknownDimension" with any code
     Then the score is 0.0

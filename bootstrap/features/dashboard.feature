@@ -50,15 +50,15 @@ Feature: Audit Dashboard Analysis
     And agent "agent-100" report contains costs with total cost 9.0
 
   Scenario: Identify task type strengths
-    Given audit events for task type "code_review"
+    Given audit events for task type "codeReview"
       | agentId  | success |
       | agent-A   | true    |
       | agent-A   | true    |
       | agent-B   | true    |
       | agent-B   | false   |
     When I get task type strengths
-    Then task type "code_review" has best agent "agent-A"
-    And task type "code_review" has success rate 1.0
+    Then task type "codeReview" has best agent "agent-A"
+    And task type "codeReview" has success rate 1.0
 
   Scenario: Suggest optimal team for task types
     Given audit events showing agent "agent-X" excels at "debugging" with 100% success

@@ -35,7 +35,7 @@ Feature: Bullet Deduplication
     And a bullet at index 0 with content "Feature A" and embedding [1.0, 0.0] and helpfulCount 8 and harmfulCount 2
     And a bullet at index 1 with content "Feature B" and embedding [0.95, 0.05] and helpfulCount 5 and harmfulCount 5
     And a bullet at index 2 with content "Feature C" and embedding [0.0, 1.0] and helpfulCount 3 and harmfulCount 1
-    When deduplicate is called with preserveStrategy "highest_ratio"
+    When deduplicate is called with preserveStrategy "highestRatio"
     Then the result has length 2
     And the result contains the bullet at original index 0
     And the result contains the bullet at original index 2
@@ -44,7 +44,7 @@ Feature: Bullet Deduplication
     Given a BulletDeduplicator with similarityThreshold 0.90
     And a bullet with content "Feature A" and embedding [1.0, 0.0] and createdAt "2024-01-01T10:00:00"
     And a bullet with content "Feature B" and embedding [0.95, 0.05] and createdAt "2024-01-02T10:00:00"
-    When deduplicate is called with preserveStrategy "most_recent"
+    When deduplicate is called with preserveStrategy "mostRecent"
     Then the result has length 1
     And the result contains the bullet with createdAt "2024-01-02T10:00:00"
 
@@ -52,7 +52,7 @@ Feature: Bullet Deduplication
     Given a BulletDeduplicator with similarityThreshold 0.90
     And a bullet with content "Feature A" and embedding [1.0, 0.0] and helpfulCount 3 and harmfulCount 2
     And a bullet with content "Feature B" and embedding [0.95, 0.05] and helpfulCount 5 and harmfulCount 3
-    When deduplicate is called with preserveStrategy "most_used"
+    When deduplicate is called with preserveStrategy "mostUsed"
     Then the result has length 1
     And the result contains the bullet with helpfulCount 5 and harmfulCount 3
 
@@ -66,5 +66,5 @@ Feature: Bullet Deduplication
   Scenario: Deduplicate empty list returns empty list
     Given a BulletDeduplicator with similarityThreshold 0.85
     And an empty list of bullets
-    When deduplicate is called with preserveStrategy "highest_ratio"
+    When deduplicate is called with preserveStrategy "highestRatio"
     Then the result is an empty list

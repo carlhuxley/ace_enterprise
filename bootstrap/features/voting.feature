@@ -81,7 +81,7 @@ Feature: Voting System for Ensemble Learning
     And a ConsensusBullet with no votes
     When voteOnBullets is called with the bullet
     Then the bullet is in the rejected list
-    And the bullet has approved False and approvalStrategy "no_votes"
+    And the bullet has approved False and approvalStrategy "noVotes"
 
   Scenario: VotingSystem identifies contested bullets within approval range
     Given a VotingSystem with MajorityVoting strategy

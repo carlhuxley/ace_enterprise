@@ -4,12 +4,12 @@ Feature: CLI Knowledge Learning with Audit Trail
     Given a PlaybookManager instance
     And a LocalAuditClient instance
     And a playbook with ID "playbook-123"
-    When learnWithAudit is called with playbookId "playbook-123", content "Always validate user input", section "strategies_and_hard_rules", tags ["security", "validation"], and actorId "alice"
+    When learnWithAudit is called with playbookId "playbook-123", content "Always validate user input", section "strategiesAndHardRules", tags ["security", "validation"], and actorId "alice"
     Then a Bullet is returned with the content "Always validate user input"
-    And the Bullet has section "strategies_and_hard_rules"
+    And the Bullet has section "strategiesAndHardRules"
     And the Bullet has tags ["security", "validation"]
     And an audit event of type KNOWLEDGE_ADDED is emitted with actorId "alice" and actorType "human"
-    And the audit event payload contains bulletId, content "Always validate user input", section "strategies_and_hard_rules", tags ["security", "validation"], source "cli", and playbookId "playbook-123"
+    And the audit event payload contains bulletId, content "Always validate user input", section "strategiesAndHardRules", tags ["security", "validation"], source "cli", and playbookId "playbook-123"
 
   Scenario: Add knowledge with default actor ID
     Given a PlaybookManager instance
@@ -45,7 +45,7 @@ Feature: CLI Knowledge Learning with Audit Trail
     When learnFromFile is called with playbookId "playbook-202", filePath "/tmp/snippets.md", bulletType "snippet", auditClient provided, and actorId "bob"
     Then a list of 1 Bullet is returned
     And an audit event of type KNOWLEDGE_ADDED is emitted with actorId "bob" and actorType "human"
-    And the audit event payload contains source "file_import" and sourceFile "/tmp/snippets.md"
+    And the audit event payload contains source "fileImport" and sourceFile "/tmp/snippets.md"
 
   Scenario: Import from file without audit client
     Given a PlaybookManager instance

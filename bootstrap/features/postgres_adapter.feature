@@ -12,50 +12,50 @@ Feature: PostgreSQL Playbook Adapter
     And the playbook metadata baseModel should be "gpt-4"
     And the playbook metadata totalTokens should be 0
     And the playbook metadata totalBullets should be 0
-    And the playbook should have 4 empty sections: "strategies_and_hard_rules", "code_snippets", "troubleshooting", "domain_knowledge"
+    And the playbook should have 4 empty sections: "strategiesAndHardRules", "codeSnippets", "troubleshooting", "domainKnowledge"
 
   Scenario: Retrieve an existing playbook
-    Given a playbook exists with id "pb-12345" and domain "javascript"
-    When I get the playbook with id "pb-12345"
+    Given a playbook exists with id "play-12345" and domain "javascript"
+    When I get the playbook with id "play-12345"
     Then the playbook should be returned
-    And the playbookId should be "pb-12345"
+    And the playbookId should be "play-12345"
     And the metadata domain should be "javascript"
 
   Scenario: Retrieve a non-existent playbook
-    Given no playbook exists with id "pb-nonexistent"
-    When I get the playbook with id "pb-nonexistent"
+    Given no playbook exists with id "play-nonexistent"
+    When I get the playbook with id "play-nonexistent"
     Then None should be returned
 
   Scenario: Add a bullet to a playbook
-    Given a playbook exists with id "pb-67890"
-    When I add a bullet with content "Always use type hints" and section "strategies_and_hard_rules" to playbook "pb-67890"
-    Then the bullet should be created with a unique id starting with "ctx-"
+    Given a playbook exists with id "play-67890"
+    When I add a bullet with content "Always use type hints" and section "strategiesAndHardRules" to playbook "play-67890"
+    Then the bullet should be created with a unique id starting with "blt-"
     And the bullet content should be "Always use type hints"
-    And the bullet section should be "strategies_and_hard_rules"
+    And the bullet section should be "strategiesAndHardRules"
     And the bullet helpfulCount should be 0
     And the bullet harmfulCount should be 0
     And the bullet should have an embedding vector
 
   Scenario: Add a bullet to a non-existent playbook
-    Given no playbook exists with id "pb-missing"
-    When I attempt to add a bullet to playbook "pb-missing"
-    Then a ValueError should be raised with message "Playbook pb-missing not found"
+    Given no playbook exists with id "play-missing"
+    When I attempt to add a bullet to playbook "play-missing"
+    Then a ValueError should be raised with message "Playbook not found"
 
   Scenario: Add a bullet with an invalid section
-    Given a playbook exists with id "pb-11111"
-    When I attempt to add a bullet with section "invalid_section" to playbook "pb-11111"
-    Then a ValueError should be raised with message "Invalid section: invalid_section"
+    Given a playbook exists with id "play-11111"
+    When I attempt to add a bullet with section "invalidSection" to playbook "play-11111"
+    Then a ValueError should be raised with message "Invalid section"
 
   Scenario: Get all bullets from a playbook
-    Given a playbook exists with id "pb-22222"
-    And the playbook has 2 bullets in section "strategies_and_hard_rules"
-    And the playbook has 1 bullet in section "code_snippets"
-    When I get all bullets from playbook "pb-22222"
+    Given a playbook exists with id "play-22222"
+    And the playbook has 2 bullets in section "strategiesAndHardRules"
+    And the playbook has 1 bullet in section "codeSnippets"
+    When I get all bullets from playbook "play-22222"
     Then 3 bullets should be returned
 
   Scenario: Get all bullets from an empty playbook
-    Given a playbook exists with id "pb-33333" with no bullets
-    When I get all bullets from playbook "pb-33333"
+    Given a playbook exists with id "play-33333" with no bullets
+    When I get all bullets from playbook "play-33333"
     Then an empty list should be returned
 
   Scenario: Semantic search across all playbooks
@@ -67,13 +67,13 @@ Feature: PostgreSQL Playbook Adapter
     And at most 5 results should be returned
 
   Scenario: Semantic search within a specific playbook
-    Given a playbook exists with id "pb-44444"
+    Given a playbook exists with id "play-44444"
     And the playbook has bullets about Python testing
-    When I perform a semantic search with query "unit tests" for playbookId "pb-44444" with topK 3
-    Then only bullets from playbook "pb-44444" should be returned
+    When I perform a semantic search with query "unit tests" for playbookId "play-44444" with topK 3
+    Then only bullets from playbook "play-44444" should be returned
     And at most 3 results should be returned
 
   Scenario: List all playbook IDs
-    Given 3 playbooks exist with ids "pb-aaa", "pb-bbb", "pb-ccc"
+    Given 3 playbooks exist with ids "play-aaa", "play-bbb", "play-ccc"
     When I list all playbooks
-    Then a list containing "pb-aaa", "pb-bbb", "pb-ccc" should be returned
+    Then a list containing "play-aaa", "play-bbb", "play-ccc" should be returned

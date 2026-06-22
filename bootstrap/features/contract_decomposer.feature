@@ -8,7 +8,7 @@ Feature: Contract Decomposer
     And a mock LLM client that returns valid JSON with one contract
     When I call decompose with requirement "Create a function to add two numbers"
     Then I receive a list containing 1 ContractSpec object
-    And the ContractSpec has function_name "add_numbers"
+    And the ContractSpec has functionName "addNumbers"
     And the ContractSpec has complexity between 1 and 6
 
   Scenario: Decompose requirement with multiple functions
@@ -30,11 +30,11 @@ Feature: Contract Decomposer
     When I call decompose with requirement "Create a function"
     Then a DecompositionError is raised with message containing "Invalid JSON"
 
-  Scenario: Fail when contract missing required function_name field
+  Scenario: Fail when contract missing required functionName field
     Given a ContractDecomposer instance
-    And a mock LLM client that returns JSON without function_name field
+    And a mock LLM client that returns JSON without functionName field
     When I call decompose with requirement "Create a function"
-    Then a DecompositionError is raised with message containing "function_name"
+    Then a DecompositionError is raised with message containing "functionName"
 
   Scenario: Fail when contract has invalid complexity value
     Given a ContractDecomposer instance
@@ -49,17 +49,17 @@ Feature: Contract Decomposer
     Then a DecompositionError is raised with message "No contracts generated"
 
   Scenario: Use custom configuration for decomposition
-    Given a DecomposerConfig with max_tokens 3000 and temperature 0.5
+    Given a DecomposerConfig with maxTokens 3000 and temperature 0.5
     And a ContractDecomposer instance initialized with that config
     And a mock LLM client that captures generation parameters
     When I call decompose with requirement "Create a function"
-    Then the LLM is called with max_tokens 3000
+    Then the LLM is called with maxTokens 3000
     And the LLM is called with temperature 0.5
 
   Scenario: Set custom LLM client
     Given a ContractDecomposer instance
     And a custom mock LLM client
-    When I call set_llm_client with the custom client
+    When I call setLlmClient with the custom client
     And I call decompose with requirement "Create a function"
     Then the custom LLM client is used for generation
 
@@ -67,7 +67,7 @@ Feature: Contract Decomposer
     Given a ContractDecomposer instance
     And a mock LLM client that returns contract with 2 test cases
     When I call decompose with requirement "Create a function"
-    Then I receive a ContractSpec with 2 test_cases
+    Then I receive a ContractSpec with 2 testCases
     And each test case has name, input, and expected fields
 
   Scenario: Handle contract with optional hints field
@@ -80,11 +80,11 @@ Feature: Contract Decomposer
     Given a ContractDecomposer instance
     And a mock LLM client that returns contract without id field
     When I call decompose with requirement "Create a function"
-    Then I receive a ContractSpec with id generated from function_name
+    Then I receive a ContractSpec with id generated from functionName
 
   Scenario: Require test cases when configuration demands it
-    Given a DecomposerConfig with require_test_cases True
+    Given a DecomposerConfig with requireTestCases True
     And a ContractDecomposer instance initialized with that config
-    And a mock LLM client that returns contract without test_cases
+    And a mock LLM client that returns contract without testCases
     When I call decompose with requirement "Create a function"
-    Then a DecompositionError is raised with message containing "test_cases"
+    Then a DecompositionError is raised with message containing "testCases"

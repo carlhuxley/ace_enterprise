@@ -51,7 +51,7 @@ Feature: Token Efficiency Reporter
     And cycle 1 used 300 input tokens and 200 output tokens
     When the reporter scores the pod runs
     And the report is converted to dictionary
-    Then the dictionary has key "token_efficiency"
+    Then the dictionary has key "tokenEfficiency"
     And the tokenEfficiency contains "scores" list with 1 entry
     And the first score has language "Go"
     And the first score has featureRequirement "API endpoint"
