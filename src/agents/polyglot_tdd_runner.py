@@ -57,6 +57,8 @@ class PodFactory:
             from src.agents.go_language_pod import GoLanguagePod
             return GoLanguagePod(
                 llm_client=kwargs["llm_client"],
+                project_root=kwargs["project_root"],
+                orchestrator=kwargs["orchestrator"],
                 playbook_manager=kwargs.get("playbook_manager"),
             )
         raise ValueError(f"Unsupported language: {language}")

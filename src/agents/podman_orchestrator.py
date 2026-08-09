@@ -33,6 +33,10 @@ class PulseResult:
     bandit_low: int = 0
     bandit_clean: bool = True
     h_executed: str = ""
+    # Deterministic reformatting of submitted files by the toolchain's own
+    # formatter (gofmt for Go), captured without needing write access to the
+    # (read-only) workspace. None for runners that don't auto-format.
+    formatted_files: dict[str, str] | None = None
 
 
 def canonical_hash(files: dict[str, str]) -> str:
@@ -82,8 +86,9 @@ class PodmanOrchestrator:
         pytest_passed = raw.exit_code == 0
         if raw.bandit_high > 0:
             # "bandit_*" field names are shared across languages (Bandit for
-            # Python, eslint-plugin-security for TypeScript) — the message
-            # stays scanner-agnostic since it's not always Bandit that flagged it.
+            # Python, eslint-plugin-security for TypeScript/gosec for Go) — the
+            # message stays scanner-agnostic since it's not always Bandit that
+            # flagged it.
             counts = f"HIGH={raw.bandit_high} MEDIUM={raw.bandit_medium} LOW={raw.bandit_low}"
             return PhaseResult(
                 passed=False,
@@ -94,6 +99,7 @@ class PodmanOrchestrator:
             passed=pytest_passed,
             output=raw.stdout,
             error=raw.stderr if not pytest_passed else None,
+            formatted_files=raw.formatted_files,
         )
 
     def start(self) -> None:

@@ -101,8 +101,9 @@ class TestGetBulletsAcrossPlaybooks:
 
 class TestGoLanguagePodWithRealPlaybook:
     def test_pod_uses_playbook_bullets_not_defaults(self, tmp_path):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
         from src.agents.go_language_pod import GoLanguagePod
+        from src.agents.language_pod import PhaseResult, PodSpec
 
         pm = _manager(tmp_path)
         pm.get_or_create_playbook("go-playbook")
@@ -111,19 +112,22 @@ class TestGoLanguagePodWithRealPlaybook:
         captured = []
         client = MagicMock()
         client.generate.side_effect = lambda prompt, **kw: captured.append(prompt) or {
-            "content": "package main", "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o"
+            "content": "package pulse", "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o"
         }
 
-        pod = GoLanguagePod(llm_client=client, playbook_manager=pm)
-        spec_mock = MagicMock()
-        spec_mock.feature_requirement = "Order processing"
-        spec_mock.test_file.name = "order_test.go"
-        spec_mock.implementation_file.name = "order.go"
-        spec_mock.implementation_file.parent = tmp_path
-        spec_mock.cycle_number = 1
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = PhaseResult(passed=True, output="ok", error=None)
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
-            pod.run_green(spec_mock)
+        pod = GoLanguagePod(
+            llm_client=client, project_root=tmp_path, orchestrator=orchestrator, playbook_manager=pm
+        )
+        spec = PodSpec(
+            feature_requirement="Order processing",
+            test_file=tmp_path / "order_test.go",
+            implementation_file=tmp_path / "order.go",
+            cycle_number=1,
+        )
+
+        pod.run_green(spec)
 
         assert any("always return error as last value" in p for p in captured)

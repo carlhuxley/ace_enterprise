@@ -1,7 +1,11 @@
-"""Tests for GoLanguagePod (ace_enterprise-j5s)."""
-import shutil
-import subprocess
-from unittest.mock import MagicMock, patch
+"""Tests for GoLanguagePod (ace_enterprise-j5s, sandboxed in ace_enterprise-jww).
+
+Rewritten for the sandboxed llm_client + orchestrator architecture — the pod
+previously ran go/gofmt/go vet directly on the host via subprocess with no
+isolation at all; it now routes through PodmanOrchestrator + GoRunner the
+same way PythonLanguagePod and TypeScriptLanguagePod do.
+"""
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,7 +13,7 @@ from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsag
 from src.agents.go_language_pod import GoLanguagePod
 
 
-def make_llm_client(content="package main\n\nfunc Foo() {}", tokens_used=100):
+def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
     client = MagicMock()
     client.generate.return_value = {
         "content": content,
@@ -20,8 +24,17 @@ def make_llm_client(content="package main\n\nfunc Foo() {}", tokens_used=100):
     return client
 
 
-def make_pod(tmp_path, playbook_manager=None):
-    return GoLanguagePod(llm_client=make_llm_client(), playbook_manager=playbook_manager)
+def make_pod(tmp_path, playbook_manager=None, pulse_result=None):
+    orchestrator = MagicMock()
+    orchestrator.pulse.return_value = pulse_result or PhaseResult(
+        passed=True, output="ok", error=None
+    )
+    return GoLanguagePod(
+        llm_client=make_llm_client(),
+        project_root=tmp_path,
+        orchestrator=orchestrator,
+        playbook_manager=playbook_manager,
+    )
 
 
 def spec(tmp_path, cycle=1):
@@ -31,22 +44,6 @@ def spec(tmp_path, cycle=1):
         implementation_file=tmp_path / "auth.go",
         cycle_number=cycle,
     )
-
-
-def _failed_proc():
-    m = MagicMock()
-    m.returncode = 1
-    m.stdout = "FAIL"
-    m.stderr = "--- FAIL: TestFoo (0.00s)"
-    return m
-
-
-def _passed_proc():
-    m = MagicMock()
-    m.returncode = 0
-    m.stdout = "ok"
-    m.stderr = ""
-    return m
 
 
 # ---------------------------------------------------------------------------
@@ -73,44 +70,47 @@ class TestProtocolConformance:
 class TestRunRed:
     def test_returns_phase_result(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            result = pod.run_red(spec(tmp_path))
+        result = pod.run_red(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
     def test_writes_test_file(self, tmp_path):
         pod = make_pod(tmp_path)
         s = spec(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            pod.run_red(s)
+        pod.run_red(s)
         assert s.test_file.exists()
 
-    def test_runs_go_test(self, tmp_path):
+    def test_calls_orchestrator_pulse(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()) as mock_run:
-            pod.run_red(spec(tmp_path))
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "go"
-        assert "test" in cmd
+        pod.run_red(spec(tmp_path))
+        pod._orchestrator.pulse.assert_called_once()
 
-    def test_passed_false_when_tests_fail(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            result = pod.run_red(spec(tmp_path))
+    def test_passed_false_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAIL", error=None))
+        result = pod.run_red(spec(tmp_path))
         assert not result.passed
 
-    def test_passed_true_when_tests_unexpectedly_pass(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_red(spec(tmp_path))
+    def test_passed_true_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="ok", error=None))
+        result = pod.run_red(spec(tmp_path))
         assert result.passed
 
     def test_llm_exception_returns_failed_result(self, tmp_path):
         client = MagicMock()
         client.generate.side_effect = RuntimeError("LLM unavailable")
-        pod = GoLanguagePod(llm_client=client)
+        orchestrator = MagicMock()
+        pod = GoLanguagePod(llm_client=client, project_root=tmp_path, orchestrator=orchestrator)
         result = pod.run_red(spec(tmp_path))
         assert not result.passed
         assert result.error is not None
+        orchestrator.pulse.assert_not_called()
+
+    def test_security_gate_failure_does_not_commit_test_file(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(
+            passed=False, output="", error="Security gate: HIGH=1 MEDIUM=0 LOW=0"
+        ))
+        s = spec(tmp_path)
+        pod.run_red(s)
+        assert not s.test_file.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -120,41 +120,41 @@ class TestRunRed:
 class TestRunGreen:
     def test_returns_phase_result(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_green(spec(tmp_path))
+        result = pod.run_green(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_writes_implementation_file(self, tmp_path):
-        pod = make_pod(tmp_path)
+    def test_writes_implementation_file_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="ok", error=None))
         s = spec(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            pod.run_green(s)
+        pod.run_green(s)
         assert s.implementation_file.exists()
 
-    def test_passed_when_tests_pass(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_green(spec(tmp_path))
+    def test_does_not_write_implementation_file_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAIL", error=None))
+        s = spec(tmp_path)
+        pod.run_green(s)
+        assert not s.implementation_file.exists()
+
+    def test_passed_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="ok", error=None))
+        result = pod.run_green(spec(tmp_path))
         assert result.passed
 
-    def test_failed_when_tests_fail(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            result = pod.run_green(spec(tmp_path))
+    def test_failed_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAIL", error=None))
+        result = pod.run_green(spec(tmp_path))
         assert not result.passed
 
     def test_queries_playbook_for_go_bullets(self, tmp_path):
         pm = MagicMock()
         pm.get_bullets.return_value = ["use errors.New for sentinel errors"]
-        pod = GoLanguagePod(llm_client=make_llm_client(), playbook_manager=pm)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            pod.run_green(spec(tmp_path))
+        pod = make_pod(tmp_path, playbook_manager=pm)
+        pod.run_green(spec(tmp_path))
         pm.get_bullets.assert_called_once_with("global-go-bullets")
 
     def test_no_error_when_no_playbook(self, tmp_path):
-        pod = GoLanguagePod(llm_client=make_llm_client(), playbook_manager=None)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_green(spec(tmp_path))
+        pod = make_pod(tmp_path, playbook_manager=None)
+        result = pod.run_green(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
 
@@ -165,39 +165,66 @@ class TestRunGreen:
 class TestRunRefactor:
     def test_returns_phase_result(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_refactor(spec(tmp_path))
+        result = pod.run_refactor(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_runs_gofmt_when_impl_exists(self, tmp_path):
-        pod = make_pod(tmp_path)
-        s = spec(tmp_path)
-        s.implementation_file.write_text("package foo\nfunc Foo() {}")
-        calls = []
-        with patch("subprocess.run", side_effect=lambda cmd, **kw: calls.append(cmd) or _passed_proc()):
-            pod.run_refactor(s)
-        assert any(c[0] == "gofmt" for c in calls)
+    def test_does_not_call_llm(self, tmp_path):
+        """Matches the pre-existing, deliberate design: REFACTOR uses
+        deterministic gofmt/go vet, not an LLM call (see ace_enterprise-3dg,
+        which explicitly left this alone as intentional and correct)."""
+        client = make_llm_client()
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = PhaseResult(passed=True, output="ok", error=None)
+        pod = GoLanguagePod(llm_client=client, project_root=tmp_path, orchestrator=orchestrator)
+        pod.run_refactor(spec(tmp_path))
+        original_generate.assert_not_called()
 
-    def test_runs_go_vet_when_impl_exists(self, tmp_path):
-        pod = make_pod(tmp_path)
-        s = spec(tmp_path)
-        s.implementation_file.write_text("package foo\nfunc Foo() {}")
-        calls = []
-        with patch("subprocess.run", side_effect=lambda cmd, **kw: calls.append(cmd) or _passed_proc()):
-            pod.run_refactor(s)
-        assert any(c[0] == "go" and "vet" in c for c in calls)
-
-    def test_passed_when_tests_green_after_refactor(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            result = pod.run_refactor(spec(tmp_path))
+    def test_passed_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="ok", error=None))
+        result = pod.run_refactor(spec(tmp_path))
         assert result.passed
 
-    def test_failed_when_tests_red_after_refactor(self, tmp_path):
-        pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            result = pod.run_refactor(spec(tmp_path))
+    def test_failed_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAIL", error=None))
+        result = pod.run_refactor(spec(tmp_path))
         assert not result.passed
+
+    def test_commits_gofmt_formatted_output_when_present(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("package pulse\nfunc Foo(){return}")
+
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(
+            passed=True, output="ok", error=None,
+            formatted_files={s.implementation_file.name: "package pulse\n\nfunc Foo() { return }\n"},
+        ))
+        pod.run_refactor(s)
+
+        assert s.implementation_file.read_text() == "package pulse\n\nfunc Foo() { return }\n"
+
+    def test_does_not_clobber_impl_when_refactor_pulse_fails(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("package pulse\nfunc Foo(){return}")
+
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(
+            passed=False, output="FAIL", error=None,
+            formatted_files={s.implementation_file.name: "package pulse\n\nfunc Foo() { return }\n"},
+        ))
+        pod.run_refactor(s)
+
+        assert s.implementation_file.read_text() == "package pulse\nfunc Foo(){return}"
+
+    def test_no_formatted_files_leaves_impl_unchanged(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("package pulse\nfunc Foo(){return}")
+
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="ok", error=None))
+        pod.run_refactor(s)
+
+        assert s.implementation_file.read_text() == "package pulse\nfunc Foo(){return}"
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +242,7 @@ class TestTokenUsage:
 
     def test_records_usage_after_red(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            pod.run_red(spec(tmp_path, cycle=1))
+        pod.run_red(spec(tmp_path, cycle=1))
         usage = pod.token_usage()
         assert len(usage) == 1
         assert usage[0].cycle_number == 1
@@ -224,47 +250,114 @@ class TestTokenUsage:
 
     def test_accumulates_across_cycles(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            pod.run_red(spec(tmp_path, cycle=1))
-            pod.run_red(spec(tmp_path, cycle=2))
+        pod.run_red(spec(tmp_path, cycle=1))
+        pod.run_red(spec(tmp_path, cycle=2))
         assert len(pod.token_usage()) == 2
         assert pod.token_usage()[0].cycle_number == 1
         assert pod.token_usage()[1].cycle_number == 2
 
     def test_token_usage_entries_are_token_usage_type(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_failed_proc()):
-            pod.run_red(spec(tmp_path, cycle=1))
+        pod.run_red(spec(tmp_path, cycle=1))
         assert all(isinstance(u, TokenUsage) for u in pod.token_usage())
 
     def test_refactor_records_zero_llm_tokens(self, tmp_path):
         pod = make_pod(tmp_path)
-        with patch("subprocess.run", return_value=_passed_proc()):
-            pod.run_refactor(spec(tmp_path, cycle=1))
+        pod.run_refactor(spec(tmp_path, cycle=1))
         usage = pod.token_usage()
         assert len(usage) == 1
         assert usage[0].input_tokens == 0
 
 
 # ---------------------------------------------------------------------------
-# Integration (requires Go toolchain)
+# Integration: real Podman container, real Go toolchain, real gosec
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(shutil.which("go") is None, reason="Go not installed")
+import shutil
+
+from src.agents.podman_orchestrator import PodmanOrchestrator
+
+skip_no_podman = pytest.mark.skipif(
+    shutil.which("podman") is None, reason="podman not in PATH"
+)
+
+
+@pytest.fixture(scope="module")
+def go_runner():
+    if shutil.which("podman") is None:
+        pytest.skip("podman not in PATH")
+    from src.agents.go_runner import GoRunner
+    runner = GoRunner(container_name="go_language_pod_test_session")
+    runner.start()
+    yield runner
+    runner.stop()
+
+
+_SAFE_GO_TEST = (
+    "package pulse\n\n"
+    "import \"testing\"\n\n"
+    "func TestAdd(t *testing.T) {\n"
+    "\tif Add(1, 2) != 3 {\n"
+    "\t\tt.Errorf(\"expected 3\")\n"
+    "\t}\n"
+    "}\n"
+)
+_SAFE_GO_IMPL = "package pulse\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+
+_VULN_GO_IMPL = (
+    "package pulse\n\n"
+    "import \"os\"\n"
+    "import \"os/exec\"\n\n"
+    "func Run() error {\n"
+    "\tcmd := exec.Command(os.Getenv(\"CMD\"))\n"
+    "\treturn cmd.Run()\n"
+    "}\n"
+)
+_VULN_GO_TEST = (
+    "package pulse\n\n"
+    "import \"testing\"\n\n"
+    "func TestRun(t *testing.T) {\n"
+    "\t_ = Run\n"
+    "}\n"
+)
+
+
+@skip_no_podman
 class TestGoIntegration:
-    def test_run_red_writes_failing_test(self, tmp_path):
-        client = make_llm_client(content=(
-            'package main\n\nimport "testing"\n\n'
-            'func TestAlwaysFail(t *testing.T) {\n\tt.Fatal("red phase")\n}\n'
-        ))
-        pod = GoLanguagePod(llm_client=client)
-        s = PodSpec(
-            feature_requirement="Always fail",
-            test_file=tmp_path / "fail_test.go",
-            implementation_file=tmp_path / "fail.go",
-            cycle_number=1,
-        )
-        (tmp_path / "go.mod").write_text("module example.com/test\n\ngo 1.21\n")
+    def test_safe_code_passes_full_sandwich(self, go_runner, tmp_path):
+        orchestrator = PodmanOrchestrator(runner=go_runner, work_dir=tmp_path / "work")
+        client = make_llm_client(content=_SAFE_GO_TEST)
+        pod = GoLanguagePod(llm_client=client, project_root=tmp_path, orchestrator=orchestrator)
+        s = spec(tmp_path)
+        s.implementation_file.write_text(_SAFE_GO_IMPL)
+
         result = pod.run_red(s)
-        assert isinstance(result, PhaseResult)
+
+        assert result.passed is True
         assert s.test_file.exists()
+
+    def test_vulnerable_code_blocked_by_gosec(self, go_runner, tmp_path):
+        orchestrator = PodmanOrchestrator(runner=go_runner, work_dir=tmp_path / "work")
+        client = make_llm_client(content=_VULN_GO_IMPL)
+        pod = GoLanguagePod(llm_client=client, project_root=tmp_path, orchestrator=orchestrator)
+        s = spec(tmp_path)
+        s.test_file.write_text(_VULN_GO_TEST)
+
+        result = pod.run_green(s)
+
+        assert result.passed is False
+        assert result.error is not None and result.error.startswith("Security gate:")
+        assert not s.implementation_file.exists()
+
+    def test_refactor_applies_real_gofmt_formatting(self, go_runner, tmp_path):
+        orchestrator = PodmanOrchestrator(runner=go_runner, work_dir=tmp_path / "work")
+        pod = GoLanguagePod(llm_client=make_llm_client(), project_root=tmp_path, orchestrator=orchestrator)
+        s = spec(tmp_path)
+        s.test_file.write_text(_SAFE_GO_TEST)
+        s.implementation_file.write_text("package pulse\n\nfunc Add(a, b int) int {\nreturn a+b\n}\n")
+
+        result = pod.run_refactor(s)
+
+        assert result.passed is True
+        reformatted = s.implementation_file.read_text()
+        assert reformatted == "package pulse\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"

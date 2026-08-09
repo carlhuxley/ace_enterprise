@@ -201,13 +201,15 @@ class TestPodFactory:
         )
         assert isinstance(pod, PythonLanguagePod)
 
-    def test_create_go_returns_go_pod(self):
+    def test_create_go_returns_go_pod(self, tmp_path):
         from src.agents.go_language_pod import GoLanguagePod
         llm_client = MagicMock()
         llm_client.generate.return_value = {
             "content": "", "tokens_used": 0, "latency_ms": 0, "model": "gpt-4o"
         }
-        pod = PodFactory.create("go", llm_client=llm_client)
+        pod = PodFactory.create(
+            "go", llm_client=llm_client, project_root=tmp_path, orchestrator=MagicMock()
+        )
         assert isinstance(pod, GoLanguagePod)
 
     def test_unsupported_language_raises_value_error(self):

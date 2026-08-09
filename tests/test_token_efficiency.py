@@ -302,19 +302,19 @@ class TestIntegrationWithStubPods:
             cycles_to_green=1,
         )
 
-        # Go stub pod
+        # Go stub pod (current architecture: llm_client + orchestrator)
         go_client = MagicMock()
         go_client.generate.return_value = {
-            "content": "package main\nfunc main() {}",
+            "content": "package pulse\nfunc main() {}",
             "tokens_used": 100,
             "latency_ms": 10,
             "model": "gpt-4o",
         }
-        go_pod = GoLanguagePod(llm_client=go_client)
+        go_orchestrator = MagicMock()
+        go_orchestrator.pulse.return_value = PhaseResult(passed=False, output="FAIL", error=None)
+        go_pod = GoLanguagePod(llm_client=go_client, project_root=tmp_path, orchestrator=go_orchestrator)
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="FAIL", stderr="")
-            go_pod.run_red(spec)
+        go_pod.run_red(spec)
 
         go_run = PodRun(
             language="go",

@@ -34,6 +34,9 @@ class PhaseResult:
     passed: bool
     output: str
     error: str | None = None
+    # Deterministic reformatting of submitted files (e.g. gofmt for Go),
+    # populated when the underlying toolchain auto-formats. None otherwise.
+    formatted_files: dict[str, str] | None = None
 
 
 @runtime_checkable

@@ -1,16 +1,24 @@
 """
 GoLanguagePod — LanguagePod implementation for Go TDD cycles.
 
-Runs go test, gofmt, and go vet via subprocess. Uses LLM to generate
-test stubs (RED) and implementation code (GREEN) with optional Go-idiom
-playbook bullets. No behavioural changes to the underlying toolchain.
+Executes inside a rootless Podman container via PodmanOrchestrator + GoRunner
+(ace_enterprise-jww) — previously ran go test/gofmt/go vet directly on the
+host via subprocess, with none of the isolation Python and TypeScript pods
+get (--network none, --cap-drop=all, read-only workspace, gosec static
+scanning). LLM generates Go test stubs (run_red) and implementation code
+(run_green) directly (no separate GoWorkerAgent, matching the pre-existing
+convention). run_refactor runs gofmt + go vet inside the sandbox, without
+LLM involvement — gofmt's reformatting is captured via GoRunner's
+formatted_files and committed directly, since gofmt is semantics-preserving
+by construction (it never needs re-verification against go vet/test).
 """
 import logging
+import os
 import re
-import subprocess
 from pathlib import Path
 
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
+from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +30,18 @@ _DEFAULT_GO_BULLETS = [
     "prefer channels and goroutines over shared memory for concurrency",
 ]
 
+# Every pulse is a fresh, ephemeral workspace (see GoRunner's go.mod), so all
+# generated files must agree on one package name regardless of what the LLM
+# would otherwise guess.
+_PACKAGE_NAME = "pulse"
+
+
+def commit_to_disk(code: str, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".tmp")
+    tmp.write_text(code, encoding="utf-8")
+    os.replace(tmp, dst)
+
 
 class GoLanguagePod:
     """
@@ -32,8 +52,16 @@ class GoLanguagePod:
     Injects global-go-bullets from PlaybookManager into the GREEN prompt when available.
     """
 
-    def __init__(self, llm_client, playbook_manager=None) -> None:
+    def __init__(
+        self,
+        llm_client,
+        project_root: Path,
+        orchestrator: PodmanOrchestrator,
+        playbook_manager=None,
+    ) -> None:
         self._llm_client = llm_client
+        self._project_root = project_root
+        self._orchestrator = orchestrator
         self._playbook_manager = playbook_manager
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
@@ -45,57 +73,79 @@ class GoLanguagePod:
             prompt = self._red_prompt(spec)
             response = self._llm_client.generate(prompt)
             test_code = _extract_code(response.get("content", ""))
-            spec.test_file.parent.mkdir(parents=True, exist_ok=True)
-            spec.test_file.write_text(test_code)
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        result = _run_go_test(spec.test_file.parent)
+        files: dict[str, str] = {spec.test_file.name: test_code}
+        if spec.implementation_file.exists():
+            files[spec.implementation_file.name] = spec.implementation_file.read_text(encoding="utf-8")
+
+        try:
+            result = self._orchestrator.pulse(files)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+
+        if not _is_security_failure(result):
+            commit_to_disk(test_code, spec.test_file)
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
     def run_green(self, spec: PodSpec) -> PhaseResult:
         self._cycle_tokens = 0
-        bullets = self._get_go_bullets()
-        prompt = self._green_prompt(spec, bullets)
-        response = self._llm_client.generate(prompt)
-        impl_code = _extract_code(response.get("content", ""))
-        spec.implementation_file.parent.mkdir(parents=True, exist_ok=True)
-        spec.implementation_file.write_text(impl_code)
+        test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
+        try:
+            bullets = self._get_go_bullets()
+            prompt = self._green_prompt(spec, bullets)
+            response = self._llm_client.generate(prompt)
+            impl_code = _extract_code(response.get("content", ""))
+        except Exception as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=str(exc))
 
-        result = _run_go_test(spec.implementation_file.parent)
+        files = {
+            spec.test_file.name: test_code,
+            spec.implementation_file.name: impl_code,
+        }
+
+        try:
+            result = self._orchestrator.pulse(files)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+
+        if result.passed:
+            commit_to_disk(impl_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
         self._cycle_tokens = 0
-        if spec.implementation_file.exists():
-            subprocess.run(
-                ["gofmt", "-w", str(spec.implementation_file)],
-                capture_output=True, text=True,
-            )
-            subprocess.run(
-                ["go", "vet", "./..."],
-                capture_output=True, text=True,
-                cwd=spec.implementation_file.parent,
-            )
+        test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
+        impl_code = spec.implementation_file.read_text(encoding="utf-8") if spec.implementation_file.exists() else ""
+        files = {
+            spec.test_file.name: test_code,
+            spec.implementation_file.name: impl_code,
+        }
+        try:
+            result = self._orchestrator.pulse(files)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
 
-        result = _run_go_test(spec.implementation_file.parent)
+        # gofmt is semantics-preserving by construction (whitespace/style
+        # only) — the vet/test pass we just verified against the original
+        # source still holds for the reformatted version, no second
+        # round-trip needed. Only keep it if the refactor pulse passed; a
+        # failed pulse must not clobber a working implementation.
+        if result.passed and result.formatted_files:
+            formatted_impl = result.formatted_files.get(spec.implementation_file.name)
+            if formatted_impl:
+                commit_to_disk(formatted_impl, spec.implementation_file)
+
         self._record_usage(spec.cycle_number)
-        return PhaseResult(
-            passed=result.returncode == 0,
-            output=result.stdout,
-            error=result.stderr if result.returncode != 0 else None,
-        )
+        return result
 
     def token_usage(self) -> list[TokenUsage]:
         return list(self._token_log)
@@ -107,7 +157,8 @@ class GoLanguagePod:
             f"Write a failing Go test for this feature: {spec.feature_requirement}\n"
             f"Output only valid Go code for {spec.test_file.name}. "
             f"Use the standard 'testing' package. The test must fail in the RED phase. "
-            f"Do not include an implementation."
+            f"Do not include an implementation. "
+            f"The file must declare 'package {_PACKAGE_NAME}' as its package."
         )
 
     def _green_prompt(self, spec: PodSpec, bullets: list[str]) -> str:
@@ -120,7 +171,9 @@ class GoLanguagePod:
             f"Test file: {spec.test_file.name}\n"
             f"Implementation file: {spec.implementation_file.name}"
             f"{bullets_section}\n"
-            f"Output only valid Go code."
+            f"Output only valid Go code. "
+            f"The file must declare 'package {_PACKAGE_NAME}' as its package, "
+            f"matching the test file."
         )
 
     def _get_go_bullets(self) -> list[str]:
@@ -151,12 +204,8 @@ class GoLanguagePod:
         self._llm_client.generate = _tracking_generate
 
 
-def _run_go_test(working_dir: Path):
-    return subprocess.run(
-        ["go", "test", "./..."],
-        capture_output=True, text=True,
-        cwd=working_dir,
-    )
+def _is_security_failure(result: PhaseResult) -> bool:
+    return result.error is not None and result.error.startswith("Security gate:")
 
 
 def _extract_code(content: str) -> str:
