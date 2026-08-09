@@ -108,6 +108,7 @@ class WorkerAgent:
     ) -> str:
         parts = [
             "Write minimal implementation to make the failing tests pass.",
+            f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
         ]
         if test_code:

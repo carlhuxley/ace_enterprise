@@ -191,12 +191,14 @@ class TestDualLanguageRun:
 class TestPodFactory:
     def test_create_python_returns_python_pod(self, tmp_path):
         from src.agents.python_language_pod import PythonLanguagePod
-        agent = MagicMock()
-        agent.llm_client = MagicMock()
-        agent.llm_client.generate.return_value = {
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        worker.llm_client.generate.return_value = {
             "content": "", "tokens_used": 0, "latency_ms": 0, "model": "gpt-4o"
         }
-        pod = PodFactory.create("python", agent=agent)
+        pod = PodFactory.create(
+            "python", worker=worker, project_root=tmp_path, orchestrator=MagicMock()
+        )
         assert isinstance(pod, PythonLanguagePod)
 
     def test_create_go_returns_go_pod(self):

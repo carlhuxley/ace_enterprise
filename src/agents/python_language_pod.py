@@ -107,6 +107,7 @@ class PythonLanguagePod:
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
+        self._record_usage(spec.cycle_number)
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:

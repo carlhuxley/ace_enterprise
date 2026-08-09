@@ -255,42 +255,41 @@ import pytest
 
 
 class TestIntegrationWithStubPods:
-    def test_two_pod_stubs_produce_correct_report(self):
+    def test_two_pod_stubs_produce_correct_report(self, tmp_path):
         from unittest.mock import MagicMock
         from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
         from src.agents.python_language_pod import PythonLanguagePod
         from src.agents.go_language_pod import GoLanguagePod
         from unittest.mock import patch
 
-        # Python stub pod
-        py_agent = MagicMock()
-        py_agent.project_root = "/tmp"
-        py_agent.llm_client = MagicMock()
-        py_agent.llm_client.generate.return_value = {
+        # Python stub pod (current architecture: worker + orchestrator)
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        worker.llm_client.generate.return_value = {
             "content": "def test_foo(): pass",
+            "prompt_tokens": 200,
+            "completion_tokens": 0,
             "tokens_used": 200,
             "latency_ms": 10,
             "model": "gpt-4o",
         }
-        from src.agents.autonomous_tdd_agent import TestResult
-        py_agent._write_minimal_code.return_value = ("def foo(): pass", [])
-        py_agent._refactor_code.return_value = "def foo(): pass"
-        py_agent._run_tests.return_value = TestResult(
-            passed=True, failed=False, output="1 passed", test_count=1
-        )
-        py_pod = PythonLanguagePod(py_agent)
 
-        # Make _write_test simulate the real agent calling llm_client.generate
-        def _write_test_calls_llm(*args, **kwargs):
-            py_agent.llm_client.generate("test prompt")
+        # Make generate_test simulate the real worker calling llm_client.generate
+        def _generate_test_calls_llm(*args, **kwargs):
+            worker.llm_client.generate("test prompt")
             return "def test_foo(): pass"
 
-        py_agent._write_test.side_effect = _write_test_calls_llm
+        worker.generate_test.side_effect = _generate_test_calls_llm
+
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = PhaseResult(passed=False, output="1 failed", error=None)
+
+        py_pod = PythonLanguagePod(worker, tmp_path, orchestrator)
 
         spec = PodSpec(
             feature_requirement="Auth feature",
-            test_file=MagicMock(),
-            implementation_file=MagicMock(),
+            test_file=tmp_path / "test_auth.py",
+            implementation_file=tmp_path / "auth.py",
             cycle_number=1,
         )
 

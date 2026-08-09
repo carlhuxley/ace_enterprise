@@ -217,7 +217,7 @@ def _make_spec(tmp_path):
 def test_forbidden_impl_never_reaches_container(tmp_path):
     worker = _MockWorker(FORBIDDEN_OS_IMPL)
     spy = _SpyOrchestrator()
-    pod = PythonLanguagePod.from_worker(worker, tmp_path, spy)
+    pod = PythonLanguagePod(worker, tmp_path, spy)
 
     # Pre-write a test file so run_green can read it
     spec = _make_spec(tmp_path)
@@ -234,7 +234,7 @@ def test_forbidden_impl_never_reaches_container(tmp_path):
 def test_safe_impl_reaches_container_via_spy(tmp_path):
     worker = _MockWorker(SAFE_IMPL)
     spy = _SpyOrchestrator()
-    pod = PythonLanguagePod.from_worker(worker, tmp_path, spy)
+    pod = PythonLanguagePod(worker, tmp_path, spy)
 
     spec = _make_spec(tmp_path)
     spec.test_file.write_text(TEST_FILE)

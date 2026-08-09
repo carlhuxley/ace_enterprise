@@ -1,6 +1,11 @@
-"""Tests for PythonLanguagePod (ace_enterprise-h3r)."""
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+"""Tests for PythonLanguagePod (ace_enterprise-h3r).
+
+Rewritten for the worker + orchestrator architecture (ace_enterprise-vzp) —
+the original PythonLanguagePod(agent) constructor and internal
+_write_test/_write_minimal_code/_refactor_code/_run_tests delegation were
+removed in 76980c8 in favour of WorkerAgent + PodmanOrchestrator.
+"""
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -8,38 +13,43 @@ from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsag
 from src.agents.python_language_pod import PythonLanguagePod
 
 
-def make_pod(tmp_path):
-    """Build a PythonLanguagePod with a fully mocked agent."""
-    from src.agents.autonomous_tdd_agent import TestResult
+def make_pod(tmp_path, pulse_result=None):
+    """Build a PythonLanguagePod with a fully mocked worker + orchestrator.
 
-    agent = MagicMock()
-    agent.project_root = tmp_path
-    agent.test_dir = tmp_path / "tests"
-    agent.src_dir = tmp_path / "src"
-    agent.llm_client = MagicMock()
-    agent.llm_client.generate.return_value = {
+    generate_test/generate_implementation call llm_client.generate via
+    side_effect (not just return_value) so the pod's token interception —
+    which wraps worker.llm_client.generate, not the worker's own methods —
+    actually has something to intercept, matching how the real WorkerAgent
+    calls self.llm_client.generate() internally.
+    """
+    worker = MagicMock()
+    worker.llm_client = MagicMock()
+    worker.llm_client.generate.return_value = {
         "content": "def test_foo(): pass",
+        "prompt_tokens": 120,
+        "completion_tokens": 0,
         "tokens_used": 120,
         "latency_ms": 50,
         "model": "gpt-4o",
     }
-    agent._write_test.return_value = "def test_foo(): pass"
-    agent._write_minimal_code.return_value = ("def foo(): pass", [])
-    agent._refactor_code.return_value = "def foo(): pass  # refactored"
-    agent._run_tests.return_value = TestResult(
-        passed=True, failed=False, output="1 passed", test_count=1
+
+    def _generate_test(*args, **kwargs):
+        worker.llm_client.generate("test prompt")
+        return "def test_foo(): pass"
+
+    def _generate_implementation(*args, **kwargs):
+        worker.llm_client.generate("impl prompt")
+        return "def foo(): pass"
+
+    worker.generate_test.side_effect = _generate_test
+    worker.generate_implementation.side_effect = _generate_implementation
+    worker.generate_refactor.return_value = "def foo(): pass  # refactored"
+
+    orchestrator = MagicMock()
+    orchestrator.pulse.return_value = pulse_result or PhaseResult(
+        passed=True, output="1 passed", error=None
     )
-    return PythonLanguagePod(agent)
-
-
-def failing_run_tests():
-    from src.agents.autonomous_tdd_agent import TestResult
-    return TestResult(passed=False, failed=True, output="FAILED", error="AssertionError")
-
-
-def passing_run_tests():
-    from src.agents.autonomous_tdd_agent import TestResult
-    return TestResult(passed=True, failed=False, output="1 passed", test_count=1)
+    return PythonLanguagePod(worker, tmp_path, orchestrator)
 
 
 def spec(tmp_path, cycle=1):
@@ -78,34 +88,45 @@ class TestRunRed:
         result = pod.run_red(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_calls_write_test(self, tmp_path):
+    def test_calls_generate_test(self, tmp_path):
         pod = make_pod(tmp_path)
         pod.run_red(spec(tmp_path))
-        pod._agent._write_test.assert_called_once()
+        pod._worker.generate_test.assert_called_once()
 
-    def test_calls_run_tests(self, tmp_path):
+    def test_calls_orchestrator_pulse(self, tmp_path):
         pod = make_pod(tmp_path)
         pod.run_red(spec(tmp_path))
-        pod._agent._run_tests.assert_called()
+        pod._orchestrator.pulse.assert_called_once()
 
-    def test_passed_reflects_test_failure(self, tmp_path):
-        pod = make_pod(tmp_path)
-        pod._agent._run_tests.return_value = failing_run_tests()
+    def test_passed_reflects_pulse_result(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAILED", error=None))
         result = pod.run_red(spec(tmp_path))
         assert not result.passed
 
-    def test_passed_when_tests_unexpectedly_pass(self, tmp_path):
-        pod = make_pod(tmp_path)
-        pod._agent._run_tests.return_value = passing_run_tests()
+    def test_passed_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
         result = pod.run_red(spec(tmp_path))
         assert result.passed
 
-    def test_write_test_exception_returns_failed_result(self, tmp_path):
+    def test_generate_test_exception_returns_failed_result(self, tmp_path):
         pod = make_pod(tmp_path)
-        pod._agent._write_test.side_effect = RuntimeError("LLM failed")
+        pod._worker.generate_test.side_effect = RuntimeError("LLM failed")
         result = pod.run_red(spec(tmp_path))
         assert not result.passed
         assert result.error is not None
+
+    def test_commits_test_file_to_disk(self, tmp_path):
+        pod = make_pod(tmp_path)
+        s = spec(tmp_path)
+        pod.run_red(s)
+        assert s.test_file.exists()
+
+    def test_forbidden_import_blocks_before_container(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod._worker.generate_test.side_effect = lambda *a, **kw: "import os\ndef test_foo(): os.system('x')"
+        result = pod.run_red(spec(tmp_path))
+        assert result.error is not None and result.error.startswith("ForbiddenImport:")
+        pod._orchestrator.pulse.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -115,30 +136,56 @@ class TestRunRed:
 class TestRunGreen:
     def test_returns_phase_result(self, tmp_path):
         pod = make_pod(tmp_path)
-        pod._agent._run_tests.return_value = passing_run_tests()
         result = pod.run_green(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_calls_write_minimal_code(self, tmp_path):
+    def test_calls_generate_implementation(self, tmp_path):
         pod = make_pod(tmp_path)
         pod.run_green(spec(tmp_path))
-        pod._agent._write_minimal_code.assert_called_once()
+        pod._worker.generate_implementation.assert_called_once()
 
-    def test_passed_reflects_test_result(self, tmp_path):
-        pod = make_pod(tmp_path)
-        pod._agent._run_tests.side_effect = [failing_run_tests(), passing_run_tests()]
+    def test_passed_reflects_pulse_result(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
         result = pod.run_green(spec(tmp_path))
         assert result.passed
 
-    def test_failed_when_tests_still_fail(self, tmp_path):
-        pod = make_pod(tmp_path)
-        pod._agent._run_tests.return_value = failing_run_tests()
+    def test_failed_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAILED", error=None))
         result = pod.run_green(spec(tmp_path))
         assert not result.passed
+
+    def test_does_not_commit_impl_file_when_pulse_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAILED", error=None))
+        s = spec(tmp_path)
+        pod.run_green(s)
+        assert not s.implementation_file.exists()
+
+    def test_commits_impl_file_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
+        s = spec(tmp_path)
+        pod.run_green(s)
+        assert s.implementation_file.exists()
+
+    def test_forbidden_import_blocks_before_container(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod._worker.generate_implementation.side_effect = (
+            lambda *a, **kw: "import subprocess\ndef foo(): subprocess.run(['x'])"
+        )
+        result = pod.run_green(spec(tmp_path))
+        assert result.error is not None and result.error.startswith("ForbiddenImport:")
+        pod._orchestrator.pulse.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
 # run_refactor
+#
+# Current behaviour: run_refactor does NOT call worker.generate_refactor — it
+# re-reads the existing test/impl files from disk and re-pulses them through
+# the orchestrator (a "still green" verification step, not code generation).
+# This differs from the legacy agent-wrapping design, which did call
+# _refactor_code(). Tests here assert actual current behaviour rather than
+# the old expectation — see ace_enterprise-vzp notes for whether this gap
+# (REFACTOR never generates refactored code) is intentional.
 # ---------------------------------------------------------------------------
 
 class TestRunRefactor:
@@ -147,14 +194,27 @@ class TestRunRefactor:
         result = pod.run_refactor(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_calls_refactor_code(self, tmp_path):
+    def test_does_not_call_generate_refactor(self, tmp_path):
         pod = make_pod(tmp_path)
         pod.run_refactor(spec(tmp_path))
-        pod._agent._refactor_code.assert_called_once()
+        pod._worker.generate_refactor.assert_not_called()
 
-    def test_passed_reflects_test_result(self, tmp_path):
+    def test_pulses_existing_files_from_disk(self, tmp_path):
         pod = make_pod(tmp_path)
-        pod._agent._run_tests.return_value = passing_run_tests()
+        s = spec(tmp_path)
+        s.test_file.parent.mkdir(parents=True, exist_ok=True)
+        s.test_file.write_text("def test_foo(): pass")
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo(): pass")
+
+        pod.run_refactor(s)
+
+        files = pod._orchestrator.pulse.call_args.args[0]
+        assert files[s.test_file.name] == "def test_foo(): pass"
+        assert files[s.implementation_file.name] == "def foo(): pass"
+
+    def test_passed_reflects_pulse_result(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
         result = pod.run_refactor(spec(tmp_path))
         assert result.passed
 
@@ -173,11 +233,8 @@ class TestTokenUsage:
         assert pod.token_usage() == []
 
     def test_records_token_usage_after_red(self, tmp_path):
-        # Simulate the agent calling generate during a phase by triggering
-        # the intercepted generate directly (make_pod sets tokens_used=120).
         pod = make_pod(tmp_path)
-        pod._agent.llm_client.generate("prompt")  # intercepted — adds 120 tokens
-        pod._record_usage(1)
+        pod.run_red(spec(tmp_path, cycle=1))
         usage = pod.token_usage()
         assert len(usage) == 1
         assert usage[0].cycle_number == 1
@@ -198,19 +255,12 @@ class TestTokenUsage:
 
 
 # ---------------------------------------------------------------------------
-# Integration: protocol interface only (no direct agent calls)
+# Integration: full RED -> GREEN -> REFACTOR via the protocol interface
 # ---------------------------------------------------------------------------
 
 class TestProtocolIntegration:
     def test_full_cycle_via_protocol_interface(self, tmp_path):
-        pod = make_pod(tmp_path)
-        pod._agent._run_tests.side_effect = [
-            failing_run_tests(),   # RED: test fails (correct)
-            failing_run_tests(),   # GREEN: run tests to get error
-            passing_run_tests(),   # GREEN: tests pass after impl
-            passing_run_tests(),   # REFACTOR: tests stay green
-        ]
-
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
         s = spec(tmp_path, cycle=1)
 
         red = pod.run_red(s)

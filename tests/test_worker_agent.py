@@ -1,4 +1,4 @@
-"""Tests for WorkerAgent and PythonLanguagePod.from_worker (ace_enterprise-eyd)."""
+"""Tests for WorkerAgent and PythonLanguagePod (ace_enterprise-eyd)."""
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -164,7 +164,7 @@ class TestGenerateRefactor:
 
 
 # ---------------------------------------------------------------------------
-# PythonLanguagePod.from_worker
+# PythonLanguagePod (worker + orchestrator construction)
 # ---------------------------------------------------------------------------
 
 class TestPythonLanguagePodFromWorker:
@@ -179,7 +179,7 @@ class TestPythonLanguagePodFromWorker:
             output="1 passed" if green_passed else "FAILED",
             error=None,
         )
-        return PythonLanguagePod.from_worker(worker, project_root=tmp_path, orchestrator=orchestrator), worker
+        return PythonLanguagePod(worker, project_root=tmp_path, orchestrator=orchestrator), worker
 
     def test_isinstance_language_pod(self, tmp_path):
         pod, _ = self._make_pod(tmp_path)
@@ -220,17 +220,3 @@ class TestPythonLanguagePodFromWorker:
         assert len(usage) == 1
         assert isinstance(usage[0], TokenUsage)
         assert usage[0].input_tokens == 80
-
-    def test_existing_agent_constructor_still_works(self, tmp_path):
-        from src.agents.python_language_pod import PythonLanguagePod
-        from src.agents.autonomous_tdd_agent import TestResult
-        agent = MagicMock()
-        agent.llm_client = MagicMock()
-        agent.llm_client.generate.return_value = {
-            "content": "x", "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o"
-        }
-        agent._run_tests.return_value = TestResult(
-            passed=True, failed=False, output="1 passed", test_count=1
-        )
-        pod = PythonLanguagePod(agent)
-        assert isinstance(pod, LanguagePod)
