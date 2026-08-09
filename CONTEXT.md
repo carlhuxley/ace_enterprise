@@ -29,6 +29,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **Audit** — Append-only event log. Every TDD cycle emits `CYCLE_COMPLETED` events recording which model was used, success/failure, and cycle counts. Used for model attribution and performance aggregation. Events are stored with hash chain integrity via `AuditStore`.
 
+**AuditCheckpoint** — External anchor for the audit hash chain (`src/audit/checkpoint.py`, ADR 003). `AuditStore.verify_full_chain()` only proves internal self-consistency — it can't detect a wholesale rewrite by anyone with audit-DB write access, since the check has nothing outside the table to compare against. A checkpoint snapshots the chain tip (latest `event_id` + `event_hash`) into `data/audit_checkpoints.jsonl`; because the hash chain is cumulative, matching a checkpoint later proves the entire prefix up to that point is unchanged. **Only meaningful if checkpoint commits are actually pushed** to a git remote the audit-DB credential doesn't control (`scripts/audit_checkpoint.py create|verify`) — a checkpoint that's only ever written locally provides no protection at all, since the same attacker who can rewrite the DB can just as easily rewrite the local file.
+
 **AuditClient** — Write-only client for emitting audit events. Supports remote (HTTP via `AuditStore`), local (SQLite via `LocalAuditClient`), and a `NoOpAuditClient` for testing.
 
 **AuditDashboard** — Dashboard for analyzing audit data: computes agent performance, cost analysis, task type strengths, and optimal team suggestions. Supports benchmark comparison.

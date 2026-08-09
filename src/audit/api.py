@@ -155,11 +155,29 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         dependencies=_AUTH,
     )
     async def verify_chain() -> dict:
-        """Verify the audit log hash chain integrity."""
+        """Verify the audit log hash chain integrity.
+
+        chain_valid only proves internal self-consistency (see
+        AuditStore.verify_full_chain) -- it cannot detect a wholesale rewrite
+        by anyone with DB write access. checkpoint_valid additionally checks
+        against externally-anchored checkpoints (src/audit/checkpoint.py) if
+        any have been recorded; checkpoints_checked=0 means none exist yet
+        for this deployment, not that the chain is unverifiable.
+        """
         is_valid, invalid_id = audit_store.verify_full_chain()
+
+        from src.audit.checkpoint import checkpoints_path_from_env, verify_checkpoints
+        checkpoint_result = verify_checkpoints(audit_store, checkpoints_path_from_env())
+
         return {
             "chain_valid": is_valid,
             "first_invalid_event": invalid_id,
+            "checkpoint_valid": checkpoint_result.valid,
+            "checkpoints_checked": checkpoint_result.checkpoints_checked,
+            "checkpoint_failures": [
+                {"created_at": f.checkpoint.created_at, "reason": f.reason}
+                for f in checkpoint_result.failures
+            ],
             "verified_at": datetime.utcnow().isoformat(),
         }
 

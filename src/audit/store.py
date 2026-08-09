@@ -142,6 +142,24 @@ class AuditStore:
         ).first()
         return result[0] if result else None
 
+    def _last_event_hash(self) -> tuple[str, str] | None:
+        """Return (event_id, event_hash) of the most recent event, or None if
+        empty. Used by src/audit/checkpoint.py for external anchoring."""
+        with self._session() as session:
+            result = session.query(
+                AuditEventModel.event_id, AuditEventModel.event_hash
+            ).order_by(AuditEventModel.id.desc()).first()
+            return (result[0], result[1]) if result else None
+
+    def _event_hash_by_id(self, event_id: str) -> str | None:
+        """Return the event_hash column for a given event_id, or None if not
+        found. Used by src/audit/checkpoint.py for external anchoring."""
+        with self._session() as session:
+            result = session.query(AuditEventModel.event_hash).filter(
+                AuditEventModel.event_id == event_id
+            ).first()
+            return result[0] if result else None
+
     def append(self, event: AuditEvent) -> AuditEvent:
         """
         Append an audit event to the store.
