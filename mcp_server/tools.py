@@ -418,7 +418,38 @@ class ACETools:
             return {"error": "Playbook manager not available"}
 
         try:
+            from src.playbook.content_safety import (
+                NEEDS_REVIEW_TAG,
+                ContentRejectedError,
+                Verdict,
+                screen_bullet_content,
+            )
             from src.storage.schemas import BulletCreate
+
+            playbook_id = self.playbook_id or "default_playbook"
+            content = args["content"]
+
+            # Content safety (ace_enterprise-z51): `learn` is callable by any
+            # MCP client, so its content is untrusted the same way external
+            # user input is. Screen before persisting.
+            screen = screen_bullet_content(content)
+            if screen.verdict == Verdict.REJECT:
+                self._audit.emit_simple(
+                    event_type=AuditEventType.KNOWLEDGE_ADDED,
+                    actor_id="mcp-client",
+                    actor_type="human",
+                    payload={
+                        "rejected": True,
+                        "reasons": screen.reasons,
+                        "content_length": len(content),
+                        "team_id": args.get("team_id"),
+                    },
+                    playbook_id=playbook_id,
+                )
+                return {
+                    "success": False,
+                    "error": f"Content rejected by safety screen: {'; '.join(screen.reasons)}",
+                }
 
             # Map type to section
             section_map = {
@@ -436,20 +467,27 @@ class ACETools:
             if args.get("project_id"):
                 project_ids = [args["project_id"]]
 
+            tags = list(args.get("tags", []))
+            if screen.verdict == Verdict.FLAG and NEEDS_REVIEW_TAG not in tags:
+                tags.append(NEEDS_REVIEW_TAG)
+
             bullet_data = BulletCreate(
-                content=args["content"],
+                content=content,
                 section=section_map.get(knowledge_type, "domain_knowledge"),
-                tags=args.get("tags", []),
+                tags=tags,
                 created_by_type="human",
                 created_by_id=args.get("team_id"),
                 team_id=args.get("team_id"),
-                # Contextual retrieval fields
-                confidence_score=args.get("confidence", 0.3),  # Low initial confidence
+                # Contextual retrieval fields. Always low initial confidence,
+                # NOT caller-controlled -- args.get("confidence", ...) used to
+                # let any MCP client hand a new bullet an arbitrary starting
+                # confidence, which defeated the "low confidence until
+                # promoted by real feedback" mitigation entirely.
+                confidence_score=0.3,
                 applicable_domains=args.get("domains"),
                 project_ids=project_ids,
             )
 
-            playbook_id = self.playbook_id or "default_playbook"
             bullet = manager.add_bullet(playbook_id, bullet_data)
 
             # Emit audit event
@@ -459,10 +497,11 @@ class ACETools:
                 actor_type="human",
                 payload={
                     "bullet_id": bullet.id,
-                    "content_length": len(args["content"]),
+                    "content_length": len(content),
                     "type": knowledge_type,
-                    "tags": args.get("tags", []),
+                    "tags": tags,
                     "team_id": args.get("team_id"),
+                    "flagged_for_review": screen.verdict == Verdict.FLAG,
                 },
                 playbook_id=playbook_id,
             )
@@ -472,7 +511,10 @@ class ACETools:
                 "bullet_id": bullet.id,
                 "playbook_id": playbook_id,
                 "message": "Knowledge added successfully",
+                "flagged_for_review": screen.verdict == Verdict.FLAG,
             }
+        except ContentRejectedError as e:
+            return {"success": False, "error": str(e)}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

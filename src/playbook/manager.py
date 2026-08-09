@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from src.config.settings import settings
+from src.playbook.content_safety import (
+    NEEDS_REVIEW_TAG,
+    ContentRejectedError,
+    Verdict,
+    screen_bullet_content,
+)
 from src.storage.schemas import (
     Bullet,
     BulletCreate,
@@ -161,6 +167,20 @@ class PlaybookManager:
         if bullet_data.section not in playbook.sections:
             raise ValueError(f"Invalid section: {bullet_data.section}")
 
+        # Universal content-safety backstop (ace_enterprise-z51): bullets get
+        # concatenated verbatim into future Generator/Worker prompts, so a
+        # clear instruction-hijack/delimiter-spoofing pattern is rejected
+        # regardless of caller — no legitimate internal bullet should ever
+        # match these. Provenance-specific FLAG-tier handling (low confidence
+        # + needs-review tag) belongs at the untrusted entry points
+        # (mcp_server/tools.py::_handle_learn, PlaybookManager.apply_delta),
+        # since only they know whether the content's provenance is trusted.
+        screen = screen_bullet_content(bullet_data.content)
+        if screen.verdict == Verdict.REJECT:
+            raise ContentRejectedError(
+                f"Bullet content rejected by safety screen: {'; '.join(screen.reasons)}"
+            )
+
         # Generate unique bullet ID
         self._bullet_counter += 1
         bullet_id = generate_bullet_id(self._bullet_counter)
@@ -255,13 +275,31 @@ class PlaybookManager:
                 )
                 continue
 
-            # Add bullet (disable auto-save for batch operation)
+            # Content safety (ace_enterprise-z51): Curator content is LLM-
+            # synthesized from Reflector's analysis of a task, which is
+            # attacker-influenced if the originating task/spec was
+            # adversarial -- this is an untrusted entry point, same as
+            # mcp_server/tools.py::_handle_learn. Force a low starting
+            # confidence (the BulletCreate default of 0.5 would otherwise
+            # clear the default retrieval min_confidence=0.5 filter
+            # immediately, with no real gating at all) and flag borderline
+            # content for human review rather than trusting it outright.
+            screen = screen_bullet_content(delta.content)
+            tags = list(delta.tags)
+            if screen.verdict == Verdict.FLAG and NEEDS_REVIEW_TAG not in tags:
+                tags.append(NEEDS_REVIEW_TAG)
+
             bullet_create = BulletCreate(
                 content=delta.content,
                 section=delta.section,
-                tags=delta.tags,
+                tags=tags,
+                confidence_score=0.3,
             )
-            bullet = self.add_bullet(playbook_id, bullet_create, auto_save=False)
+            try:
+                bullet = self.add_bullet(playbook_id, bullet_create, auto_save=False)
+            except ContentRejectedError as exc:
+                logger.warning(f"Curator bullet rejected by safety screen: {exc}")
+                continue
             added_bullets.append(bullet)
 
         logger.info(
@@ -311,12 +349,22 @@ class PlaybookManager:
         # Update counts and confidence
         if feedback == "helpful":
             bullet.helpful_count += 1
-            # Increase confidence asymptotically toward 1.0
-            # Each helpful feedback closes 10% of the gap to 1.0
-            bullet.confidence_score = min(
-                1.0,
-                current_confidence + (1.0 - current_confidence) * 0.1
-            )
+            if NEEDS_REVIEW_TAG in bullet.tags:
+                # Flagged content (ace_enterprise-z51) can't be promoted by
+                # ordinary positive feedback -- a human must call
+                # clear_review_flag() first. Still record the helpful count
+                # for visibility; just don't let it raise confidence.
+                logger.info(
+                    f"Bullet {bullet_id} is flagged ({NEEDS_REVIEW_TAG}) -- "
+                    f"helpful feedback recorded but confidence not promoted"
+                )
+            else:
+                # Increase confidence asymptotically toward 1.0
+                # Each helpful feedback closes 10% of the gap to 1.0
+                bullet.confidence_score = min(
+                    1.0,
+                    current_confidence + (1.0 - current_confidence) * 0.1
+                )
         elif feedback == "harmful":
             bullet.harmful_count += 1
             # Decrease confidence more aggressively
@@ -341,6 +389,33 @@ class PlaybookManager:
 
         # Auto-save to disk
         self._save_playbook(playbook_id)
+
+    def clear_review_flag(self, playbook_id: str, bullet_id: str) -> Bullet:
+        """Human review action: clear a bullet's needs-review flag.
+
+        Removes NEEDS_REVIEW_TAG so future "helpful" feedback can promote its
+        confidence_score again (ace_enterprise-z51). Does not itself change
+        confidence_score — a human clearing the flag is vouching for the
+        content, not instantly promoting it.
+
+        Raises:
+            ValueError: If playbook or bullet not found.
+        """
+        playbook = self.get_playbook(playbook_id)
+        if not playbook:
+            raise ValueError(f"Playbook {playbook_id} not found")
+
+        bullet = self._find_bullet(playbook, bullet_id)
+        if not bullet:
+            raise ValueError(f"Bullet {bullet_id} not found in playbook {playbook_id}")
+
+        if NEEDS_REVIEW_TAG in bullet.tags:
+            bullet.tags = [t for t in bullet.tags if t != NEEDS_REVIEW_TAG]
+            playbook.updated_at = datetime.utcnow()
+            logger.info(f"Cleared {NEEDS_REVIEW_TAG} flag on bullet {bullet_id} (human review)")
+            self._save_playbook(playbook_id)
+
+        return bullet
 
     def get_section_bullets(
         self,
