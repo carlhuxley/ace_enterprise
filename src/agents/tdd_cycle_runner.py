@@ -39,7 +39,7 @@ class TDDCycleRunner:
 
     GREEN is retried up to max_green_attempts times, passing the previous
     failure output back to the pod so the LLM can learn from the error.
-    Any security or policy failure (ForbiddenImport, SecurityBreach, Bandit gate)
+    Any security or policy failure (ForbiddenImport, SecurityBreach, Security gate)
     aborts the cycle immediately without retrying.
 
     Optional:
@@ -234,7 +234,7 @@ def _is_abort(result: PhaseResult) -> bool:
     if result.error is None:
         return False
     for prefix in (
-        "ForbiddenImport:", "SecurityBreach:", "Bandit gate:",
+        "ForbiddenImport:", "SecurityBreach:", "Security gate:",
         # Container infrastructure failures — no point retrying with LLM
         "Error: can only create exec sessions",
         "Error: no such container",

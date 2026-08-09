@@ -83,7 +83,8 @@ class TypeScriptLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
 
-        commit_to_disk(code, spec.test_file)
+        if not _is_security_failure(result):
+            commit_to_disk(code, spec.test_file)
         self._record_usage(spec.cycle_number)
         return result
 
@@ -165,6 +166,10 @@ class TypeScriptLanguagePod:
         ))
         self._prompt_tokens = 0
         self._completion_tokens = 0
+
+
+def _is_security_failure(result: PhaseResult) -> bool:
+    return result.error is not None and result.error.startswith("Security gate:")
 
 
 def _ensure_test_import(code: str, stem: str) -> str:

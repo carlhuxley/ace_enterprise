@@ -9,6 +9,7 @@ WORKDIR /opt/ts-project
 COPY ts-harness/package.json .
 COPY ts-harness/tsconfig.json .
 COPY ts-harness/vitest.config.ts .
+COPY ts-harness/eslint.config.js .
 RUN npm install --ignore-scripts && npm cache clean --force
 
 # Workspace bind-mounted here by the runner

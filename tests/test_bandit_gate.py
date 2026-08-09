@@ -114,7 +114,7 @@ def test_shell_injection_fails_bandit_gate(tmp_path):
 
     assert result.passed is False
     assert result.error is not None
-    assert "Bandit gate" in result.error
+    assert "Security gate" in result.error
 
 
 # --- Behavior 4: MEDIUM finding (pickle.loads) is non-blocking ---

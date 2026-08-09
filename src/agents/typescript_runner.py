@@ -1,9 +1,11 @@
 """
 TypeScriptRunner — PodmanRunner variant for the TypeScript TDD harness.
 
-Overrides send_pulse() to run vitest instead of pytest+bandit and parse
-the vitest JSON reporter output. All container lifecycle and tmpfs workspace
-machinery is inherited from PodmanRunner unchanged.
+Overrides send_pulse() to run vitest (instead of pytest) for tests and
+eslint + eslint-plugin-security (instead of Bandit) for static security
+scanning, parsing both JSON outputs into the shared PulseResult fields. All
+container lifecycle and tmpfs workspace machinery is inherited from
+PodmanRunner unchanged.
 """
 import json
 import subprocess
@@ -15,6 +17,8 @@ from src.agents.podman_runner import PodmanRunner
 
 _TS_PROJECT = "/opt/ts-project"
 _VITEST_BIN = f"{_TS_PROJECT}/node_modules/.bin/vitest"
+_ESLINT_BIN = f"{_TS_PROJECT}/node_modules/.bin/eslint"
+_ESLINT_CONFIG = f"{_TS_PROJECT}/eslint.config.js"
 _RESULTS_JSON = "/tmp/vitest-results.json"
 _REMOTE_WS = "/workspace"
 _REMOTE_CONFIG = "/tmp/vitest.config.ts"
@@ -173,19 +177,60 @@ class TypeScriptRunner(PodmanRunner):
             results_json=read_proc.stdout,
         )
 
+        # Static security scan (ace_enterprise-85u) — the TS analog of Bandit
+        # for Python. Only .ts files from this pulse are scanned (package.json
+        # etc aren't source). cwd=/workspace so eslint resolves file patterns
+        # relative to the (read-only) workspace instead of /opt/ts-project.
+        ts_files = [name for name in files if name.endswith(".ts")]
+        eslint_output = ""
+        if ts_files:
+            eslint_proc = subprocess.run(
+                [
+                    "podman", "exec", "--workdir", _REMOTE_WS, self._name,
+                    _ESLINT_BIN, "--format", "json",
+                    "--no-config-lookup", "--config", _ESLINT_CONFIG,
+                    *ts_files,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            eslint_output = eslint_proc.stdout or eslint_proc.stderr
+        eslint_high, eslint_medium, eslint_output = _parse_eslint(eslint_output)
+
         h_executed = self._compute_workspace_hash(list(files.keys()))
 
         return PulseResult(
             exit_code=0 if passed else 1,
             stdout=stdout,
             stderr=stderr,
-            bandit_output="",
-            bandit_high=0,
-            bandit_medium=0,
+            bandit_output=eslint_output,
+            bandit_high=eslint_high,
+            bandit_medium=eslint_medium,
             bandit_low=0,
-            bandit_clean=True,  # no bandit for TS; clean-room gate is the security layer
+            bandit_clean=eslint_high == 0,
             h_executed=h_executed,
         )
+
+
+def _parse_eslint(raw: str) -> tuple[int, int, str]:
+    """Parse eslint --format json output. Returns (high_count, medium_count, raw).
+
+    eslint severity 2 ("error", escalated rules in eslint.config.js) maps to
+    HIGH; severity 1 ("warn", the rest of eslint-plugin-security's recommended
+    set) maps to MEDIUM — mirroring Bandit's HIGH/MEDIUM split for Python.
+    """
+    high = medium = 0
+    try:
+        results = json.loads(raw)
+        for file_result in results:
+            for msg in file_result.get("messages", []):
+                if msg.get("severity") == 2:
+                    high += 1
+                elif msg.get("severity") == 1:
+                    medium += 1
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return high, medium, raw
 
 
 def _parse_vitest(

@@ -165,7 +165,7 @@ class PythonLanguagePod:
 
 
 def _is_security_failure(result: PhaseResult) -> bool:
-    return result.error is not None and result.error.startswith("Bandit gate:")
+    return result.error is not None and result.error.startswith("Security gate:")
 
 
 def _ensure_test_import(code: str, module_name: str) -> str:

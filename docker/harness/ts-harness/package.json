@@ -5,6 +5,9 @@
   "private": true,
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "eslint": "^9.9.0",
+    "eslint-plugin-security": "^3.0.1",
+    "@typescript-eslint/parser": "^8.0.0"
   }
 }

@@ -141,7 +141,7 @@ class TestMilestone1Integration:
             "html_parser.py": SAFE_IMPL,
             "test_html_parser.py": TEST_FILE,
         })
-        assert result.error is None or not result.error.startswith("Bandit gate:"), (
+        assert result.error is None or not result.error.startswith("Security gate:"), (
             f"Bandit blocked safe code: {result.error}"
         )
 

@@ -81,11 +81,14 @@ class PodmanOrchestrator:
     def _to_phase_result(self, raw: PulseResult) -> PhaseResult:
         pytest_passed = raw.exit_code == 0
         if raw.bandit_high > 0:
+            # "bandit_*" field names are shared across languages (Bandit for
+            # Python, eslint-plugin-security for TypeScript) — the message
+            # stays scanner-agnostic since it's not always Bandit that flagged it.
             counts = f"HIGH={raw.bandit_high} MEDIUM={raw.bandit_medium} LOW={raw.bandit_low}"
             return PhaseResult(
                 passed=False,
                 output=raw.stdout,
-                error=f"Bandit gate: {counts}\n{raw.bandit_output}",
+                error=f"Security gate: {counts}\n{raw.bandit_output}",
             )
         return PhaseResult(
             passed=pytest_passed,
