@@ -5,7 +5,7 @@ Pipeline:
   Stage 1  extract    LLM reads private src/ and emits pure Gherkin feature files
   Stage 2  synthesize TDD pipeline generates fresh implementations from Gherkin
   Stage 3  verify     Clean-room AST gate — blocks any file with private-name leakage
-  Stage 4  stamp      AGPLv3 SPDX headers + LICENSE + pyproject.toml applied
+  Stage 4  stamp      Apache-2.0 SPDX headers + LICENSE + pyproject.toml applied
 
 Every stage event is recorded in bootstrap/audit.jsonl with a tamper-evident
 chain hash. The log file is the paper trail for a corporate IP audit.
@@ -212,7 +212,7 @@ def _check_openrouter_credits() -> None:
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Bootstrap pipeline: private → Gherkin → public AGPLv3 repo")
+    parser = argparse.ArgumentParser(description="Bootstrap pipeline: private → Gherkin → public Apache-2.0 repo")
     parser.add_argument(
         "--file", metavar="PATH", help="Process a single source file instead of the full SOURCE_FILES list"
     )
@@ -357,7 +357,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     print("\n=== Stage 4: Stamp ===")
     stamped = stamp_directory(OSS_DIR, log, lang=lang)
-    print(f"  {stamped} files stamped AGPL-3.0-only")
+    print(f"  {stamped} files stamped Apache-2.0")
 
     log.record("RUN_COMPLETE", oss_dir=str(OSS_DIR), passed=passed, blocked=failed, stamped=stamped)
 

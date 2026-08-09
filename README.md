@@ -30,7 +30,7 @@ Private Python src/
            Same clean-room and style gates apply.
         │
         ▼  Stage 4 — Stamp
-           AGPL-3.0-only SPDX headers applied to every file.
+           Apache-2.0 SPDX headers applied to every file.
         │
         ▼  Stage 5 — Commit
            Public OSS repo committed. Every step is on the audit chain.
@@ -45,7 +45,7 @@ Private Python src/
 | Clean-room AST | No private identifier in synthesised TypeScript | File deleted, `CLEAN_ROOM_FAIL` on chain |
 | TypeScript style | camelCase, no `any`, no Python error names, no bitwise hashes, no stub IDs | File deleted, `STYLE_BLOCK` on chain |
 | Contract interface | IO modules: spec drives LLM directly, same gates after | `CONTRACT_SYNTH_FAIL` on chain |
-| AGPL stamp | SPDX header present on every `.ts` file | Stamped before commit |
+| Apache-2.0 stamp | SPDX header present on every `.ts` file | Stamped before commit |
 
 **Current state:** 105 modules synthesised, 63 passing all gates. The 4 remaining IO-wiring modules (`claude_cli_client`, `collector`, `contract_decomposer`, `contract_schema`) are being synthesised via the contract path added in the latest release.
 
@@ -221,7 +221,7 @@ ace_enterprise/
 │   ├── orchestrate.py       # pipeline entry point (Stages 1–5)
 │   ├── extract.py           # Stage 1: Gherkin extraction
 │   ├── clean_room.py        # Stage 3: AST clean-room + style gates
-│   ├── stamp.py             # Stage 4: AGPL stamping
+│   ├── stamp.py             # Stage 4: Apache-2.0 stamping
 │   ├── audit_log.py         # tamper-evident SHA-256 hash chain
 │   ├── audit.jsonl          # chain record (published into OSS repo)
 │   └── features/

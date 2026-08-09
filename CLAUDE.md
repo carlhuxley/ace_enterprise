@@ -84,4 +84,7 @@ concepts on each commit. Regenerate manually with:
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+### Licensing
+
+- This repository (ACE Enterprise itself) is licensed Apache-2.0 — see `LICENSE` at repo root. Do not add or leave AGPL/copyleft headers anywhere in `src/`, `mcp_server/`, `bootstrap/`, or other project source files.
+- `bootstrap/stamp.py` stamps the *synthesized clean-room output* (the separate public-repo synthesis pipeline in `bootstrap/`) with Apache-2.0 SPDX headers too, reading the LICENSE text directly from repo root as the single source of truth. When writing or refactoring code in `bootstrap/stamp.py` or anywhere that generates new TypeScript/Python files as pipeline output, default to Apache-2.0 and never emit AGPLv3 or other copyleft headers — this was previously inconsistent (stamped AGPL-3.0-only) and was corrected 2026-08-09.
