@@ -17,6 +17,43 @@ _openrouter_free_models_cache: list[str] | None = None
 _openrouter_cache_time: float = 0
 _OPENROUTER_CACHE_TTL = 3600  # 1 hour cache TTL
 
+# HTTP statuses that mean "this key will keep failing until you fix billing/
+# auth" — retrying or falling back to another model wastes time and money.
+_QUOTA_EXHAUSTED_STATUS_CODES = frozenset({401, 402, 403})
+
+# Message-body substrings that indicate quota/credit exhaustion even when a
+# provider reuses a generic status code (e.g. 429) for it instead of 402.
+_QUOTA_EXHAUSTED_KEYWORDS = (
+    "insufficient credit",
+    "insufficient_credit",
+    "out of credit",
+    "quota exceeded",
+    "quota_exceeded",
+    "payment required",
+    "add credits",
+    "exceeded your",
+    "balance",
+)
+
+
+class LLMQuotaExhaustedError(RuntimeError):
+    """Raised when the provider reports the API key has no credit/quota left.
+
+    Distinct from transient errors (rate limits, 5xx, timeouts): retrying or
+    falling back to another model will not help — every subsequent call on
+    this key will fail the same way until the account is topped up. Callers
+    that loop over many independent units of work (e.g. bootstrap/orchestrate.py
+    synthesising one module at a time) should treat this as fatal for the
+    whole run rather than catching it per-unit and moving on.
+    """
+
+
+def _is_quota_exhausted(status_code: int, body: str) -> bool:
+    if status_code in _QUOTA_EXHAUSTED_STATUS_CODES:
+        return True
+    body_lower = (body or "").lower()
+    return any(kw in body_lower for kw in _QUOTA_EXHAUSTED_KEYWORDS)
+
 
 def _fetch_openrouter_free_models() -> list[str]:
     """Fetch list of free models from OpenRouter API."""
@@ -505,6 +542,16 @@ class LLMClient:
                 except httpx.HTTPStatusError as e:
                     last_error = e
                     status_code = e.response.status_code
+
+                    # Fail fast on quota/credit exhaustion regardless of which
+                    # status code the provider used for it — retrying or
+                    # falling back to another model against a dead key just
+                    # burns the retry budget for no benefit.
+                    if _is_quota_exhausted(status_code, e.response.text):
+                        logger.error(f"OpenRouter quota exhausted for {model}: {e}")
+                        raise LLMQuotaExhaustedError(
+                            f"OpenRouter quota/credit exhausted (status={status_code}): {e}"
+                        )
 
                     # Handle rate limiting with retry
                     if status_code == 429:

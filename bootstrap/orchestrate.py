@@ -31,6 +31,67 @@ from bootstrap.audit_log import BootstrapAuditLog
 from bootstrap.clean_room import verify_clean_room, verify_clean_room_cross_language, verify_ts_style
 from bootstrap.extract import extract_features
 from bootstrap.stamp import stamp_directory
+from src.utils.llm_client import LLMQuotaExhaustedError
+
+
+class BootstrapAbortError(RuntimeError):
+    """Raised to stop the whole run rather than skip-and-continue per module.
+
+    Used for failures where retrying the next module can't possibly help
+    (e.g. the API key has no credit left) — continuing would just repeat the
+    same doomed call ~N more times and silently produce an incomplete run
+    that looks like a normal one, instead of a clear top-level error.
+    """
+
+
+def _abort_run(log: "BootstrapAuditLog", exc: Exception) -> None:
+    """Stop the pipeline immediately with a clear top-level error, skipping
+    Stage 3.5/4/5 (root-file placement, stamping, commit) — an incomplete run
+    should never be silently stamped and committed as if it were a normal one.
+    """
+    log.record("RUN_ABORT_TERMINAL", reason=str(exc))
+    print(f"\n{'=' * 70}\nBOOTSTRAP RUN ABORTED: {exc}\n"
+          f"Fix the underlying issue (e.g. top up API credits) and re-run — "
+          f"already-verified modules will be skipped automatically.\n{'=' * 70}")
+    sys.exit(1)
+
+
+def _resume_decision(
+    out_dir: Path, feature_file: Path, glob_pattern: str, force: bool
+) -> tuple[str, list[Path], str, str | None]:
+    """Decide whether a module needs (re-)synthesis, based on a *verified*
+    marker rather than output-file presence (ace_enterprise-ykl).
+
+    .spec.sha256 is only written by the caller after the clean-room/style gate
+    passes for every output file, so its presence with a hash matching the
+    current spec is the real "this was verified" signal. Output files being
+    present without that marker just means a prior run got as far as writing
+    them — including a run that was killed (OOM, exhausted credits) before
+    verification ran — so they're treated the same as "nothing here yet".
+
+    Returns (action, existing_files, current_spec_sha, recorded_spec_sha) where
+    recorded_spec_sha is only non-None for "cache_bust", and action is one of:
+      "cached"      — verified marker matches current spec; caller should skip
+      "cache_bust"  — verified marker present but spec changed; re-synthesise
+      "unverified"  — output files present but no verified marker; re-synthesise
+      "fresh"       — nothing here yet; re-synthesise
+    """
+    current_spec_sha = BootstrapAuditLog.sha256(feature_file)
+    if force or not out_dir.exists():
+        return "fresh", [], current_spec_sha, None
+
+    existing = list(out_dir.glob(glob_pattern))
+    if not existing:
+        return "fresh", [], current_spec_sha, None
+
+    spec_hash_file = out_dir / ".spec.sha256"
+    if not spec_hash_file.exists():
+        return "unverified", existing, current_spec_sha, None
+
+    recorded_spec_sha = spec_hash_file.read_text().strip()
+    if recorded_spec_sha != current_spec_sha:
+        return "cache_bust", existing, current_spec_sha, recorded_spec_sha
+    return "cached", existing, current_spec_sha, recorded_spec_sha
 
 # ---------------------------------------------------------------------------
 # Configuration — edit these before running
@@ -261,10 +322,13 @@ def main() -> None:
     feature_files = sorted(feature_files, key=_priority_sort_key)
     priority_pending = [f.stem for f in feature_files if _priority_sort_key(f)[0] == 0]
     print(f"  Priority queue ({len(priority_pending)}): {', '.join(priority_pending)}")
-    if lang == "typescript":
-        passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force)
-    else:
-        passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force)
+    try:
+        if lang == "typescript":
+            passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force)
+        else:
+            passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force)
+    except BootstrapAbortError as exc:
+        _abort_run(log, exc)
     print(f"  passed={passed}  blocked={failed}")
 
     # ------------------------------------------------------------------
@@ -272,7 +336,10 @@ def main() -> None:
     # ------------------------------------------------------------------
     if contract_specs:
         print(f"\n=== Stage 2.5: Contract Interface Synthesis ({len(contract_specs)} specs) ===")
-        c_passed, c_failed = _contract_synth_path(contract_specs, OSS_DIR, log, force=force)
+        try:
+            c_passed, c_failed = _contract_synth_path(contract_specs, OSS_DIR, log, force=force)
+        except BootstrapAbortError as exc:
+            _abort_run(log, exc)
         passed += c_passed
         failed += c_failed
         print(f"  passed={c_passed}  blocked={c_failed}")
@@ -427,15 +494,27 @@ def _synthesis_loop(
             stem = feature_file.stem
             out_dir = oss_dir / stem
 
-            # Resume: skip if output already exists and --force not set
-            if not force and out_dir.exists() and any(out_dir.glob("*.py")):
-                existing = list(out_dir.glob("*.py"))
-                print(f"  [{stem}] skipping — {len(existing)} .py file(s) already present (--force to re-run)")
+            # Resume: skip only if a *verified* prior run exists for the current
+            # spec (ace_enterprise-ykl) — see _resume_decision docstring.
+            action, existing, current_spec_sha, recorded_spec_sha = _resume_decision(
+                out_dir, feature_file, "*.py", force
+            )
+            if action == "cached":
+                print(f"  [{stem}] skipping — {len(existing)} verified .py file(s) present, spec unchanged")
                 log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
                            existing_files=[f.name for f in existing],
-                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing})
+                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                           spec_sha=current_spec_sha)
                 passed += len(existing)
                 continue
+            elif action == "cache_bust":
+                print(f"  [{stem}] spec changed — re-synthesising")
+                log.record("CACHE_BUST", feature=str(feature_file),
+                           recorded_spec_sha=recorded_spec_sha, current_spec_sha=current_spec_sha)
+            elif action == "unverified":
+                print(f"  [{stem}] {len(existing)} unverified .py file(s) present (no .spec.sha256) — re-synthesising")
+                log.record("SYNTHESIS_UNVERIFIED_RESYNTH", feature=str(feature_file), out_dir=str(out_dir),
+                           existing_files=[f.name for f in existing])
 
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -479,6 +558,7 @@ def _synthesis_loop(
                 token_in = sum(u.input_tokens for c in result.cycles for u in c.token_usage)
                 token_out = sum(u.output_tokens for c in result.cycles for u in c.token_usage)
 
+                module_ok = True
                 for synth_file in sorted(out_dir.glob("*.py")):
                     cr = verify_clean_room(synth_file, PRIVATE_SRC_ROOT)
                     event = "CLEAN_ROOM_PASS" if cr.passed else "CLEAN_ROOM_FAIL"
@@ -502,8 +582,21 @@ def _synthesis_loop(
                             print(f"      {v}")
                         synth_file.unlink()
                         failed += 1
+                        module_ok = False
                     else:
                         passed += 1
+
+                if module_ok and any(out_dir.glob("*.py")):
+                    (out_dir / ".spec.sha256").write_text(current_spec_sha)
+
+            except LLMQuotaExhaustedError as exc:
+                # Fatal for the whole run, not just this module — every remaining
+                # module would fail the same way. Stop instead of skip-and-continue
+                # (ace_enterprise-wki).
+                log.record("RUN_ABORT", reason=f"LLM quota exhausted: {exc}",
+                           feature=str(feature_file), modules_completed=passed)
+                print(f"\nABORT: LLM quota/credit exhausted while synthesising [{stem}]: {exc}")
+                raise BootstrapAbortError(str(exc)) from exc
 
             except Exception as exc:
                 reason = str(exc)
@@ -758,37 +851,28 @@ def _contract_synth_path(
         stem = spec.get("module", contract_file.stem.split(".")[0])
         out_dir = oss_dir / stem
 
-        # --- caching: same .spec.sha256 logic as _synthesis_loop_ts ---
-        if not force and out_dir.exists() and any(out_dir.glob("*.ts")):
-            spec_hash_file = out_dir / ".spec.sha256"
-            current_spec_sha = BootstrapAuditLog.sha256(contract_file)
-            existing = list(out_dir.glob("*.ts"))
-            if spec_hash_file.exists():
-                recorded_sha = spec_hash_file.read_text().strip()
-                if recorded_sha == current_spec_sha:
-                    print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present, spec unchanged")
-                    log.record(
-                        "SYNTHESIS_CACHED", feature=str(contract_file), out_dir=str(out_dir),
-                        existing_files=[f.name for f in existing],
-                        file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
-                        spec_sha=current_spec_sha,
-                    )
-                    passed += len(existing)
-                    continue
-                print(f"  [{stem}] spec changed — re-synthesising (contract path)")
-                log.record("CACHE_BUST", feature=str(contract_file),
-                           recorded_spec_sha=recorded_sha, current_spec_sha=current_spec_sha)
-            else:
-                spec_hash_file.write_text(current_spec_sha)
-                print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present (spec hash adopted)")
-                log.record(
-                    "SYNTHESIS_CACHED", feature=str(contract_file), out_dir=str(out_dir),
-                    existing_files=[f.name for f in existing],
-                    file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
-                    spec_sha=current_spec_sha,
-                )
-                passed += len(existing)
-                continue
+        # --- caching: same verified-marker logic as _synthesis_loop_ts (ace_enterprise-ykl) ---
+        action, existing, current_spec_sha, recorded_spec_sha = _resume_decision(
+            out_dir, contract_file, "*.ts", force
+        )
+        if action == "cached":
+            print(f"  [{stem}] skipping — {len(existing)} verified .ts file(s) present, spec unchanged")
+            log.record(
+                "SYNTHESIS_CACHED", feature=str(contract_file), out_dir=str(out_dir),
+                existing_files=[f.name for f in existing],
+                file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                spec_sha=current_spec_sha,
+            )
+            passed += len(existing)
+            continue
+        elif action == "cache_bust":
+            print(f"  [{stem}] spec changed — re-synthesising (contract path)")
+            log.record("CACHE_BUST", feature=str(contract_file),
+                       recorded_spec_sha=recorded_spec_sha, current_spec_sha=current_spec_sha)
+        elif action == "unverified":
+            print(f"  [{stem}] {len(existing)} unverified .ts file(s) present (no .spec.sha256) — re-synthesising")
+            log.record("SYNTHESIS_UNVERIFIED_RESYNTH", feature=str(contract_file), out_dir=str(out_dir),
+                       existing_files=[f.name for f in existing])
 
         source_file = Path(spec.get("source_file", ""))
         if not source_file.exists():
@@ -887,6 +971,12 @@ def _contract_synth_path(
             if module_ok and any(out_dir.glob("*.ts")):
                 (out_dir / ".spec.sha256").write_text(BootstrapAuditLog.sha256(contract_file))
 
+        except LLMQuotaExhaustedError as exc:
+            log.record("RUN_ABORT", reason=f"LLM quota exhausted: {exc}",
+                       feature=str(contract_file), modules_completed=passed)
+            print(f"\nABORT: LLM quota/credit exhausted while synthesising [{stem}]: {exc}")
+            raise BootstrapAbortError(str(exc)) from exc
+
         except Exception as exc:
             print(f"✗ SKIPPED — {str(exc)[:120]}")
             log.record("SYNTHESIS_SKIP", feature=str(contract_file), reason=str(exc))
@@ -940,41 +1030,32 @@ def _synthesis_loop_ts(
             stem = feature_file.stem
             out_dir = oss_dir / stem
 
-            # Resume: skip if output already exists and spec hasn't changed.
-            # .spec.sha256 records the feature file hash used for the last synthesis.
-            # Absent file → adopt current spec as baseline (avoids mass re-synthesis
-            # on first run after this feature was introduced).
-            if not force and out_dir.exists() and any(out_dir.glob("*.ts")):
-                spec_hash_file = out_dir / ".spec.sha256"
-                current_spec_sha = BootstrapAuditLog.sha256(feature_file)
-                existing = list(out_dir.glob("*.ts"))
-
-                if spec_hash_file.exists():
-                    recorded_spec_sha = spec_hash_file.read_text().strip()
-                    if recorded_spec_sha != current_spec_sha:
-                        print(f"  [{stem}] spec changed — re-synthesising")
-                        log.record("CACHE_BUST", feature=str(feature_file),
-                                   recorded_spec_sha=recorded_spec_sha,
-                                   current_spec_sha=current_spec_sha)
-                        # fall through to synthesis
-                    else:
-                        print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present, spec unchanged")
-                        log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
-                                   existing_files=[f.name for f in existing],
-                                   file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
-                                   spec_sha=current_spec_sha)
-                        passed += len(existing)
-                        continue
-                else:
-                    # No spec hash recorded yet — adopt current spec as baseline.
-                    spec_hash_file.write_text(current_spec_sha)
-                    print(f"  [{stem}] skipping — {len(existing)} .ts file(s) present (spec hash adopted)")
-                    log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
-                               existing_files=[f.name for f in existing],
-                               file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
-                               spec_sha=current_spec_sha)
-                    passed += len(existing)
-                    continue
+            # Resume: skip only if a *verified* prior run exists for the current
+            # spec (ace_enterprise-ykl) — see _resume_decision docstring. An
+            # absent marker used to mean "adopt current spec as baseline, trust
+            # existing files", which silently trusted files that could just as
+            # easily be leftovers from a run killed mid-iteration, before
+            # verification ran.
+            action, existing, current_spec_sha, recorded_spec_sha = _resume_decision(
+                out_dir, feature_file, "*.ts", force
+            )
+            if action == "cached":
+                print(f"  [{stem}] skipping — {len(existing)} verified .ts file(s) present, spec unchanged")
+                log.record("SYNTHESIS_CACHED", feature=str(feature_file), out_dir=str(out_dir),
+                           existing_files=[f.name for f in existing],
+                           file_hashes={f.name: BootstrapAuditLog.sha256(f) for f in existing},
+                           spec_sha=current_spec_sha)
+                passed += len(existing)
+                continue
+            elif action == "cache_bust":
+                print(f"  [{stem}] spec changed — re-synthesising")
+                log.record("CACHE_BUST", feature=str(feature_file),
+                           recorded_spec_sha=recorded_spec_sha, current_spec_sha=current_spec_sha)
+            elif action == "unverified":
+                print(f"  [{stem}] {len(existing)} unverified .ts file(s) present (no .spec.sha256) — re-synthesising")
+                log.record("SYNTHESIS_UNVERIFIED_RESYNTH", feature=str(feature_file), out_dir=str(out_dir),
+                           existing_files=[f.name for f in existing])
+                    # fall through to synthesis
 
             out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1088,6 +1169,12 @@ def _synthesis_loop_ts(
                     (out_dir / ".spec.sha256").write_text(
                         BootstrapAuditLog.sha256(feature_file)
                     )
+
+            except LLMQuotaExhaustedError as exc:
+                log.record("RUN_ABORT", reason=f"LLM quota exhausted: {exc}",
+                           feature=str(feature_file), modules_completed=passed)
+                print(f"\nABORT: LLM quota/credit exhausted while synthesising [{stem}]: {exc}")
+                raise BootstrapAbortError(str(exc)) from exc
 
             except Exception as exc:
                 reason = str(exc)
