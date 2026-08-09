@@ -39,9 +39,9 @@ class TestTDDFailureRecorder:
 class TestRecordFailure:
     """Tests for record_failure method."""
 
-    def test_increments_failed_cycles(self):
+    def test_increments_failed_cycles(self, tmp_path):
         """record_failure increments the failed_cycles counter."""
-        recorder = TDDFailureRecorder()
+        recorder = TDDFailureRecorder(beads_path=tmp_path / "issues.jsonl")
         context = FailureContext(
             feature_requirement="Test feature",
             cycle_number=1,
@@ -54,10 +54,10 @@ class TestRecordFailure:
         recorder.record_failure(context)
         assert recorder.failed_cycles == 2
 
-    def test_logs_to_experiment_logger(self):
+    def test_logs_to_experiment_logger(self, tmp_path):
         """record_failure calls ExperimentLogger with correct params."""
         mock_logger = Mock()
-        recorder = TDDFailureRecorder(experiment_logger=mock_logger)
+        recorder = TDDFailureRecorder(experiment_logger=mock_logger, beads_path=tmp_path / "issues.jsonl")
         
         context = FailureContext(
             feature_requirement="Build markdown importer",
@@ -98,12 +98,13 @@ class TestRecordFailure:
         assert "Test feature" in content
         assert "Fix the thing" in content
 
-    def test_adds_playbook_bullet(self):
+    def test_adds_playbook_bullet(self, tmp_path):
         """record_failure adds troubleshooting bullet to playbook."""
         mock_manager = Mock()
         recorder = TDDFailureRecorder(
             playbook_manager=mock_manager,
             playbook_id="test-pb",
+            beads_path=tmp_path / "issues.jsonl",
         )
         
         context = FailureContext(
