@@ -143,6 +143,12 @@ class PodmanRunner:
             text=True,
         )
 
+        # Runs AFTER pytest, not before (ace_enterprise-rli) — by the time a
+        # HIGH finding aborts the cycle (podman_orchestrator.py's Security
+        # gate), the code has already executed once inside the container.
+        # This is a commit-time/retry gate, not a pre-execution check; the
+        # actual containment is --network none + the read-only workspace
+        # mount (start(), above), not Bandit.
         bandit_result = subprocess.run(
             [
                 "podman", "exec", self._name,

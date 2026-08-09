@@ -43,7 +43,7 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **AutonomousTDDAgent** — The primary TDD entry point. Plans incremental tests using Ensemble, executes TDD cycles, and learns via the ACE pipeline. GREEN phase uses Generator for playbook-guided generation; retry learning routes through Curator. After a successful GREEN phase, promotes session-wins bullets to the playbook. If a test passes unexpectedly during RED phase (i.e., doesn't fail), attempts to refine it so it actually fails before proceeding.
 
-**Bandit Gate** — A security failure mode detected by Bandit static analysis. When generated code triggers a Bandit finding, `TDDCycleRunner` aborts the cycle immediately (no retry). Detected by `_is_abort()` via the prefix `Bandit gate:`.
+**Bandit Gate** — A security failure mode triggered by a HIGH-severity Bandit static-analysis finding on generated Python code (the TypeScript equivalent uses eslint-plugin-security, sharing the same `PulseResult.bandit_high`/`bandit_medium`/`bandit_low` fields). Detected by `_is_abort()`/`_is_security_failure()` via the prefix `Security gate:` in `PhaseResult.error`. Bandit runs *after* pytest execution inside the container, not before — it is a commit-time/retry gate, not a pre-execution check: it prevents the flagged result from being written to disk and aborts the TDD cycle immediately (no retry), but the code has already executed once inside the sandboxed container by the time it fires. The container's `--network none` isolation and read-only workspace mount are what actually contain the code while it runs.
 
 **BayesianEstimate** — Posterior summary of a Beta-Binomial success-rate model used by `PerformanceAggregator` for statistically robust agent performance estimates.
 
