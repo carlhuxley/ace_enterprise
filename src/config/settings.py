@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ACE's root directory (where settings.py lives -> src/config -> src -> ace_enterprise)
@@ -153,6 +153,21 @@ class Settings(BaseSettings):
     def validate_redis_url(cls, v: RedisDsn) -> str:
         """Convert RedisDsn to string"""
         return str(v)
+
+    @model_validator(mode="after")
+    def validate_cors_config(self) -> "Settings":
+        """Reject wildcard origins combined with allow_credentials.
+
+        Browsers already reject this combination per the CORS spec, but not
+        every client is a browser — fail fast at settings-construction time
+        rather than rely on that as the only safeguard (ace_enterprise-3ig).
+        """
+        if self.cors_allow_credentials and "*" in self.cors_origins:
+            raise ValueError(
+                "cors_allow_credentials=True cannot be combined with a wildcard "
+                "cors_origins — set explicit allowed origins or disable credentials."
+            )
+        return self
 
     @property
     def is_development(self) -> bool:

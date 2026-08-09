@@ -13,15 +13,18 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.audit.auth import require_api_key
 from src.audit.schemas import (
     AuditEventType,
     AuditQuery,
     AuditResult,
 )
 from src.audit.store import AuditStore
+
+_AUTH = [Depends(require_api_key)]
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         response_model=AuditResult,
         summary="Query audit events",
         description="Search and retrieve audit events with filtering and pagination.",
+        dependencies=_AUTH,
     )
     async def query_events(
         start_time: datetime | None = Query(None, description="Filter events after this time"),
@@ -115,6 +119,7 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         "/events/{event_id}",
         summary="Get a specific event",
         description="Retrieve a single audit event by its ID.",
+        dependencies=_AUTH,
     )
     async def get_event(event_id: str):
         """Get a specific audit event by ID."""
@@ -137,6 +142,7 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         "/stats",
         summary="Get audit statistics",
         description="Get summary statistics about the audit log.",
+        dependencies=_AUTH,
     )
     async def get_stats() -> dict:
         """Get audit log statistics."""
@@ -146,6 +152,7 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
         "/verify",
         summary="Verify hash chain integrity",
         description="Verify the entire audit log hash chain.",
+        dependencies=_AUTH,
     )
     async def verify_chain() -> dict:
         """Verify the audit log hash chain integrity."""

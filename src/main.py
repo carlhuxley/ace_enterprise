@@ -63,7 +63,8 @@ app = FastAPI(
     redoc_url="/redoc" if settings.is_development else None,
 )
 
-# CORS middleware
+# CORS middleware — settings.cors_allow_credentials + wildcard cors_origins is
+# rejected at Settings-construction time (src/config/settings.py), not here.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

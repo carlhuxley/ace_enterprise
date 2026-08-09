@@ -30,6 +30,11 @@ services:
     environment:
       AUDIT_DATABASE_URL: postgresql://audit:${AUDIT_DB_PASSWORD:-audit_secret}@audit-db:5432/ace_audit
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # Required: every route except /health rejects requests with a 503 if this
+      # is unset (src/audit/auth.py) rather than running unauthenticated, but
+      # failing docker compose up itself is a clearer signal than a deployed,
+      # silently-locked-out service.
+      AUDIT_API_KEY: ${AUDIT_API_KEY:?Set AUDIT_API_KEY before starting the audit service — this is a write endpoint into the tamper-evident audit log}
     ports:
       - "8081:8081"  # Exposed to ACE services for event submission
     depends_on:
@@ -45,6 +50,7 @@ services:
     environment:
       AUDIT_DATABASE_URL: postgresql://audit:${AUDIT_DB_PASSWORD:-audit_secret}@audit-db:5432/ace_audit
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      AUDIT_API_KEY: ${AUDIT_API_KEY:?Set AUDIT_API_KEY before starting the audit service — this is a read endpoint over the full audit trail}
     ports:
       - "8082:8082"  # Exposed for admin/compliance queries
     depends_on:

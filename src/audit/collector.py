@@ -12,11 +12,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.audit.auth import require_api_key
 from src.audit.schemas import AuditEvent
 from src.audit.store import AuditStore
+
+_AUTH = [Depends(require_api_key)]
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,7 @@ def create_collector_app(audit_store: AuditStore) -> FastAPI:
         status_code=status.HTTP_202_ACCEPTED,
         summary="Submit an audit event",
         description="Append an audit event to the immutable audit log. This is the only write operation available.",
+        dependencies=_AUTH,
     )
     async def receive_event(event: AuditEvent) -> dict:
         """
