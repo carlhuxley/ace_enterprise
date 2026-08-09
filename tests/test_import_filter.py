@@ -57,3 +57,47 @@ def test_custom_blocklist():
 def test_syntax_error_raises_syntax_error_not_forbidden(f):
     with pytest.raises(SyntaxError):
         f.check("def broken(:")
+
+
+# ---------------------------------------------------------------------------
+# Dynamic import bypasses (ace_enterprise-dwt)
+# ---------------------------------------------------------------------------
+
+def test_dunder_import_blocked(f):
+    with pytest.raises(ForbiddenImportError, match="os"):
+        f.check("__import__('os')")
+
+
+def test_dunder_import_non_blocked_module_passes(f):
+    f.check("__import__('json')")
+
+
+def test_importlib_import_module_blocked(f):
+    with pytest.raises(ForbiddenImportError, match="subprocess"):
+        f.check("import importlib\nimportlib.import_module('subprocess')")
+
+
+def test_importlib_import_module_blocked_without_explicit_import(f):
+    with pytest.raises(ForbiddenImportError, match="os"):
+        f.check("importlib.import_module('os')")
+
+
+def test_importlib_import_module_non_blocked_module_passes(f):
+    f.check("import importlib\nimportlib.import_module('json')")
+
+
+def test_aliased_importlib_module_call_blocked(f):
+    with pytest.raises(ForbiddenImportError, match="os"):
+        f.check("import importlib as il\nil.import_module('os')")
+
+
+def test_aliased_import_module_function_blocked(f):
+    with pytest.raises(ForbiddenImportError, match="subprocess"):
+        f.check("from importlib import import_module as loader\nloader('subprocess')")
+
+
+def test_dynamic_import_with_non_literal_arg_does_not_crash(f):
+    # Not statically detectable — the filter is advisory, not a full interpreter.
+    # Must not raise ForbiddenImportError (can't prove it's forbidden) and must
+    # not crash on a non-Constant argument.
+    f.check("mod_name = get_module_name()\n__import__(mod_name)")
