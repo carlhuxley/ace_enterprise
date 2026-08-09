@@ -57,8 +57,12 @@ class PodmanRunner:
         if self._host_ws.exists():
             shutil.rmtree(self._host_ws)
         self._host_ws.mkdir(parents=True)
-        # World-writable so the container's non-root user can write cache files
-        # (e.g. vitest .timestamp files) into the bind-mounted workspace.
+        # World-readable/executable so the container's non-root (or capability-
+        # dropped root) user can read workspace files despite the uid remap from
+        # rootless Podman's user namespace. The workspace mount itself is read-only
+        # (see -v ...:ro below) so the write bit no longer does anything for the
+        # container; left permissive since the host process still needs full
+        # access to clear/rewrite the workspace between pulses.
         self._host_ws.chmod(0o777)
 
         subprocess.run(
@@ -75,8 +79,19 @@ class PodmanRunner:
                 # tini-based init reaps zombie child processes (esbuild, node forks)
                 # so they don't accumulate and saturate the process table.
                 "--init",
-                # Bind-mount the host tmpfs dir as the container workspace
-                "-v", f"{self._host_ws}:{_REMOTE_WS}:z",
+                # Drop every ambient capability and block acquiring new ones. Without
+                # this, retained caps like CAP_SYS_ADMIN would let generated code
+                # remount a read-only workspace mount as read-write from inside.
+                "--cap-drop", "all",
+                "--security-opt", "no-new-privileges",
+                # Bind-mount the host tmpfs dir as the container workspace, read-only.
+                # Generated code can read its own test/impl files but can't rewrite
+                # them mid-run to fake a pass; canonical_hash pulse verification
+                # (podman_orchestrator.py) is defense-in-depth on top of this, not
+                # the primary control. The host still has full write access to the
+                # same directory outside the container's mount view, so send_pulse()
+                # can keep clearing/repopulating it between pulses as before.
+                "-v", f"{self._host_ws}:{_REMOTE_WS}:z,ro",
                 # Container's own /tmp on RAM too
                 "--mount", "type=tmpfs,dst=/tmp",
                 self._image, "sleep", "infinity",
@@ -119,8 +134,10 @@ class PodmanRunner:
         pytest_result = subprocess.run(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
-                "python", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
-                f"--timeout={self._test_timeout}",
+                # -B: don't write __pycache__/.pyc; -p no:cacheprovider: don't
+                # write .pytest_cache — the workspace mount is now read-only.
+                "python", "-B", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
+                f"--timeout={self._test_timeout}", "-p", "no:cacheprovider",
             ],
             capture_output=True,
             text=True,

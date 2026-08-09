@@ -7,6 +7,7 @@ machinery is inherited from PodmanRunner unchanged.
 """
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 from src.agents.podman_orchestrator import PulseResult, canonical_hash
@@ -16,13 +17,17 @@ _TS_PROJECT = "/opt/ts-project"
 _VITEST_BIN = f"{_TS_PROJECT}/node_modules/.bin/vitest"
 _RESULTS_JSON = "/tmp/vitest-results.json"
 _REMOTE_WS = "/workspace"
+_REMOTE_CONFIG = "/tmp/vitest.config.ts"
 
 # Injected alongside every pulse so vitest knows this is an ESM workspace
 _WORKSPACE_PACKAGE_JSON = '{"type":"module","name":"pulse"}'
 
-# Vitest config written to /workspace each pulse so Vite can write its timestamp
-# cache alongside it (ace user owns /workspace, not /opt/ts-project)
-_WORKSPACE_VITEST_CONFIG = """\
+# Vitest config is copied into the container's writable /tmp (not /workspace)
+# each pulse. Vite's config loader bundles this file and writes a compiled
+# `<config>.timestamp-*.mjs` file *next to it* as an unavoidable side effect of
+# loading it — that write target has to be writable, and /workspace is now
+# read-only (see podman_runner.py), so the config can't live there anymore.
+_VITEST_CONFIG = """\
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
   cacheDir: '/tmp/vitest-cache',
@@ -69,6 +74,17 @@ class TypeScriptRunner(PodmanRunner):
             test_timeout=test_timeout,
         )
 
+    def start(self) -> None:
+        super().start()
+        # The vitest config now lives in /tmp (see _REMOTE_CONFIG), so it needs
+        # its own node_modules symlink to resolve 'vitest/config' — the one in
+        # /workspace only helps modules loaded from within the workspace.
+        subprocess.run(
+            ["podman", "exec", self._name,
+             "ln", "-sf", f"{_TS_PROJECT}/node_modules", "/tmp/node_modules"],
+            capture_output=True,
+        )
+
     def send_pulse(self, files: dict[str, str]) -> PulseResult:
         import shutil
 
@@ -79,21 +95,35 @@ class TypeScriptRunner(PodmanRunner):
             else:
                 existing.unlink()
 
-        # Inject ESM marker and vitest config into workspace (ace owns /workspace,
-        # so Vite can write its .timestamp cache file alongside the config)
+        # Inject ESM marker (read-only workspace is fine for this — node only
+        # reads package.json, never writes it)
         (self._host_ws / "package.json").write_text(_WORKSPACE_PACKAGE_JSON)
-        (self._host_ws / "vitest.config.ts").write_text(_WORKSPACE_VITEST_CONFIG)
+
+        # Vitest config goes into the container's writable /tmp via podman cp,
+        # not the read-only workspace (see _VITEST_CONFIG docstring above).
+        with tempfile.NamedTemporaryFile("w", suffix=".ts", delete=False) as f:
+            f.write(_VITEST_CONFIG)
+            local_config = f.name
+        try:
+            subprocess.run(
+                ["podman", "cp", local_config, f"{self._name}:{_REMOTE_CONFIG}"],
+                check=True,
+                capture_output=True,
+            )
+        finally:
+            Path(local_config).unlink(missing_ok=True)
 
         for name, content in files.items():
             (self._host_ws / name).write_text(content)
 
         # Symlink node_modules into workspace so vitest.config.ts can resolve
-        # 'vitest/config' via ESM without NODE_PATH (which ESM ignores).
-        subprocess.run(
-            ["podman", "exec", self._name,
-             "ln", "-sf", f"{_TS_PROJECT}/node_modules", f"{_REMOTE_WS}/node_modules"],
-            capture_output=True,
-        )
+        # 'vitest/config' via ESM without NODE_PATH (which ESM ignores). Created
+        # from the host side, not via podman exec: the workspace mount is
+        # read-only inside the container, so the container can't create it
+        # itself. The symlink target ("/opt/ts-project/node_modules") only needs
+        # to resolve inside the container's filesystem, not the host's — that's
+        # fine, since only the container ever reads through it.
+        (self._host_ws / "node_modules").symlink_to(f"{_TS_PROJECT}/node_modules")
 
         _vitest_timeout = max(60, self._test_timeout * 6)
         try:
@@ -102,7 +132,7 @@ class TypeScriptRunner(PodmanRunner):
                     "podman", "exec", "--workdir", _TS_PROJECT, self._name,
                     "node", _VITEST_BIN,
                     "run",
-                    "--config", f"{_REMOTE_WS}/vitest.config.ts",
+                    "--config", _REMOTE_CONFIG,
                     "--reporter", "json",
                     "--outputFile", _RESULTS_JSON,
                 ],
