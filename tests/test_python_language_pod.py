@@ -179,13 +179,12 @@ class TestRunGreen:
 # ---------------------------------------------------------------------------
 # run_refactor
 #
-# Current behaviour: run_refactor does NOT call worker.generate_refactor — it
-# re-reads the existing test/impl files from disk and re-pulses them through
-# the orchestrator (a "still green" verification step, not code generation).
-# This differs from the legacy agent-wrapping design, which did call
-# _refactor_code(). Tests here assert actual current behaviour rather than
-# the old expectation — see ace_enterprise-vzp notes for whether this gap
-# (REFACTOR never generates refactored code) is intentional.
+# Calls worker.generate_refactor(spec, current_code=...) to produce a
+# refactored implementation, then pulses test+refactored-impl through the
+# orchestrator. Only commits the refactor to disk if the pulse still passes —
+# a failed refactor must not clobber a working implementation on disk
+# (ace_enterprise-3dg; previously this was a no-op verification step that
+# never called generate_refactor at all).
 # ---------------------------------------------------------------------------
 
 class TestRunRefactor:
@@ -194,29 +193,67 @@ class TestRunRefactor:
         result = pod.run_refactor(spec(tmp_path))
         assert isinstance(result, PhaseResult)
 
-    def test_does_not_call_generate_refactor(self, tmp_path):
+    def test_calls_generate_refactor(self, tmp_path):
         pod = make_pod(tmp_path)
         pod.run_refactor(spec(tmp_path))
-        pod._worker.generate_refactor.assert_not_called()
+        pod._worker.generate_refactor.assert_called_once()
 
-    def test_pulses_existing_files_from_disk(self, tmp_path):
+    def test_passes_current_code_to_generate_refactor(self, tmp_path):
         pod = make_pod(tmp_path)
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo(): pass  # original")
+
+        pod.run_refactor(s)
+
+        _, kwargs = pod._worker.generate_refactor.call_args
+        assert kwargs["current_code"] == "def foo(): pass  # original"
+
+    def test_pulses_test_and_refactored_impl(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod._worker.generate_refactor.return_value = "def foo(): pass  # refactored"
         s = spec(tmp_path)
         s.test_file.parent.mkdir(parents=True, exist_ok=True)
         s.test_file.write_text("def test_foo(): pass")
-        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
-        s.implementation_file.write_text("def foo(): pass")
 
         pod.run_refactor(s)
 
         files = pod._orchestrator.pulse.call_args.args[0]
         assert files[s.test_file.name] == "def test_foo(): pass"
-        assert files[s.implementation_file.name] == "def foo(): pass"
+        assert files[s.implementation_file.name] == "def foo(): pass  # refactored"
 
     def test_passed_reflects_pulse_result(self, tmp_path):
         pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
         result = pod.run_refactor(spec(tmp_path))
         assert result.passed
+
+    def test_commits_refactored_code_when_pulse_passes(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
+        pod._worker.generate_refactor.return_value = "def foo(): pass  # refactored"
+        s = spec(tmp_path)
+
+        pod.run_refactor(s)
+
+        assert s.implementation_file.read_text() == "def foo(): pass  # refactored"
+
+    def test_does_not_clobber_working_impl_when_refactor_fails(self, tmp_path):
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="FAILED", error=None))
+        pod._worker.generate_refactor.return_value = "def foo(): broken_refactor"
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo(): pass  # working original")
+
+        result = pod.run_refactor(s)
+
+        assert not result.passed
+        assert s.implementation_file.read_text() == "def foo(): pass  # working original"
+
+    def test_forbidden_import_blocks_before_container(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod._worker.generate_refactor.return_value = "import os\ndef foo(): os.system('x')"
+        result = pod.run_refactor(spec(tmp_path))
+        assert result.error is not None and result.error.startswith("ForbiddenImport:")
+        pod._orchestrator.pulse.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

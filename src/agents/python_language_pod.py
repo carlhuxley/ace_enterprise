@@ -112,16 +112,31 @@ class PythonLanguagePod:
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
         test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
-        impl_code = spec.implementation_file.read_text() if spec.implementation_file.exists() else ""
+        current_code = spec.implementation_file.read_text() if spec.implementation_file.exists() else ""
+        try:
+            refactored_code = self._worker.generate_refactor(spec, current_code=current_code)
+            _import_filter.check(refactored_code)
+        except ForbiddenImportError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+        except Exception as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=str(exc))
+
         files = {
             spec.test_file.name: test_code,
-            spec.implementation_file.name: impl_code,
+            spec.implementation_file.name: refactored_code,
         }
         try:
             result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+
+        # Only keep the refactor if it didn't break the tests — a failed
+        # refactor must not clobber a working implementation on disk.
+        if result.passed:
+            commit_to_disk(refactored_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
         return result
 
