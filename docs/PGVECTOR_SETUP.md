@@ -483,7 +483,7 @@ This will:
 1. **Extract more patterns**: Run Gherkin extraction on your codebases
 2. **Build pattern library**: Accumulate patterns across projects
 3. **Enable recommendations**: Use semantic search for code suggestions
-4. **Cross-language migration**: Use patterns for Go/Rust/Java generation
+4. **Cross-language migration**: Use patterns for Go generation
 5. **Monitor performance**: Track search latency and accuracy
 
 ## Resources

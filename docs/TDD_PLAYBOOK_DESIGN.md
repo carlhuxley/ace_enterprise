@@ -8,7 +8,7 @@ The TDD playbook is **language-agnostic** and focuses on Test-Driven Development
 
 ### Domain: `tdd_general`
 
-This playbook captures cross-language TDD knowledge that can be applied to Python, JavaScript, Java, Go, Rust, etc.
+This playbook captures cross-language TDD knowledge that can be applied to Python, TypeScript, Go, and other languages as pods are added.
 
 ---
 
@@ -238,23 +238,11 @@ While the TDD principles are universal, each language has its own ecosystem:
 - Testing async code (promises, async/await)
 - React Testing Library patterns
 
-### `tdd_java`
-- JUnit patterns
-- Mockito usage
-- AssertJ assertions
-- Spring Boot testing
-
 ### `tdd_go`
 - Go testing package patterns
 - Table-driven tests
 - Testify assertions
 - Mock generation
-
-### `tdd_rust`
-- Built-in test framework
-- Property-based testing (proptest)
-- Integration vs unit test placement
-- Mocking strategies in Rust
 
 ---
 

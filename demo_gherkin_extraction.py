@@ -4,7 +4,7 @@ Demo: Extract Gherkin from Existing Code
 This demonstrates reverse-engineering Gherkin scenarios from existing Python code and tests.
 The extracted Gherkin can then be used for:
 - Safe refactoring
-- Cross-language migration (Python → Go/Rust/Java)
+- Cross-language migration (Python → Go)
 - Documentation generation
 - Legacy system understanding
 """
@@ -282,7 +282,7 @@ def demonstrate_extraction():
    ✓ Clean implementation, same behavior
 
 3. CROSS-LANGUAGE MIGRATION
-   Implement in Go, Rust, Java, or TypeScript:
+   Implement in Go:
 
    # Generate Go step definitions
    python generate_steps_go.py extracted_gherkin/oauth.feature

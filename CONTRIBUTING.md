@@ -337,7 +337,7 @@ Update documentation when:
 
 - **GitHub Issues**: https://github.com/carlhuxley/ace_enterprise/issues
 - **Discussions**: https://github.com/carlhuxley/ace_enterprise/discussions
-- **Email**: (Add contact email if desired)
+- **Security issues**: See [SECURITY.md](SECURITY.md) — do not file these as public issues
 
 ## Recognition
 

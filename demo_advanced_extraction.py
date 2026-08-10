@@ -197,7 +197,6 @@ def demonstrate_real_codebase_extraction():
    Services:
    - Python: Research experimentation
    - Go: Production inference
-   - Rust: Real-time edge processing
 
    All services share same Gherkin specs for:
    - Experiment tracking

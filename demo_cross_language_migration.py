@@ -188,7 +188,7 @@ def demonstrate_cross_language_migration():
    - Consistent behavior guaranteed
 
 ✅ PERFORMANCE OPTIMIZATION
-   - Reimplement bottlenecks in Go/Rust
+   - Reimplement bottlenecks in Go
    - Same behavior, better performance
    - Measured improvement, not guessed
 

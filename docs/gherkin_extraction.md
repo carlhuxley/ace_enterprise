@@ -1,35 +1,21 @@
-# Gherkin Extraction - Reverse Engineering for Safe Refactoring
+# Gherkin Extraction — Reverse Engineering for Safe Refactoring
 
-**Status:** Prototype Complete
-**Created:** 2025-12-06
-**Purpose:** Extract Gherkin from existing code to enable safe refactoring and cross-language migration
+The Gherkin Extraction Agent reverse-engineers Gherkin acceptance tests from
+existing Python code and tests. This enables:
 
----
+1. **Safe refactoring** — extract specs, rebuild with a clean implementation
+2. **Cross-language migration** — Python → Go, verified against the same specs
+3. **Documentation generation** — auto-generate business-readable docs
+4. **Legacy system understanding** — understand what code actually does
 
-## Overview
+## The problem
 
-The Gherkin Extraction Agent reverse-engineers Gherkin acceptance tests from existing Python code and tests. This enables:
+Organizations have valuable code that needs refactoring, migration, or
+documentation, but traditional approaches risk breaking existing behavior,
+losing institutional knowledge, or shipping an incomplete migration with no
+way to verify correctness.
 
-1. **Safe Refactoring** - Extract specs, rebuild with clean implementation
-2. **Cross-Language Migration** - Python → Go/Rust/Java/TypeScript
-3. **Documentation Generation** - Auto-generate business-readable docs
-4. **Legacy System Understanding** - Understand what code actually does
-
-## The Problem
-
-Organizations have valuable code that needs:
-- **Refactoring** - Clean up technical debt safely
-- **Migration** - Move to modern languages/frameworks
-- **Documentation** - Understand legacy systems
-- **Preservation** - Keep behavior while improving implementation
-
-But traditional approaches risk:
-- Breaking existing behavior
-- Losing institutional knowledge
-- Incomplete migration
-- No verification of correctness
-
-## The Solution
+## The solution
 
 ```
 Existing Code + Tests
@@ -43,44 +29,35 @@ Validate new implementation passes same specs
 Behavior preserved!
 ```
 
----
-
 ## Architecture
 
-### Components
-
-**1. GherkinExtractionAgent** (`src/agents/gherkin_extraction_agent.py`)
+**`GherkinExtractionAgent`** (`src/agents/gherkin_extraction_agent.py`)
 - Analyzes Python code and tests
 - Extracts business scenarios
-- Generates Gherkin feature files
-- Creates step definitions
+- Generates Gherkin feature files and step definitions
 
-**2. CodeAnalyzer**
-- Parses Python AST
-- Extracts classes, methods, signatures
-- Identifies API contracts
+**`CodeAnalyzer`** — parses Python AST, extracts classes, method signatures,
+and API contracts.
 
-**3. TestAnalyzer**
-- Analyzes pytest/unittest tests
-- Identifies Given/When/Then patterns
-- Extracts assertions and expectations
+**`TestAnalyzer`** — analyzes pytest/unittest tests, identifies
+Given/When/Then patterns, extracts assertions and expectations.
 
-**4. GoStepGenerator** (`src/agents/go_step_generator.py`)
-- Generates Go/Cucumber step definitions
-- Creates test runners
-- Scaffolds implementation
-
----
+**`GoStepGenerator`** (`src/agents/go_step_generator.py`) — the one
+implemented cross-language target today: generates Go/Cucumber (`godog`)
+step definitions, a test runner, and `go.mod` scaffolding from an extracted
+feature file.
 
 ## Workflow
 
-### Step 1: Extract from Python
+### 1. Extract from Python
 
 ```bash
-python demo_gherkin_extraction.py
+python3 demo_gherkin_extraction.py
 ```
 
-**Input:**
+Given Python source and its tests, the agent extracts a Gherkin feature file
+and matching step definitions:
+
 ```python
 # oauth.py
 class OAuthClient:
@@ -91,19 +68,6 @@ class OAuthClient:
         return f"https://auth.example.com?client_id={self.client_id}"
 ```
 
-```python
-# test_oauth.py
-def test_create_oauth_client():
-    client = OAuthClient("app_123", "secret")
-    assert client.client_id == "app_123"
-
-def test_generate_authorization_url():
-    client = OAuthClient("app_123", "secret")
-    url = client.generate_authorization_url("https://myapp.com/callback", "read")
-    assert "client_id=app_123" in url
-```
-
-**Output:**
 ```gherkin
 Feature: OAuth Authentication
   OAuth 2.0 client for authorization code flow.
@@ -118,264 +82,15 @@ Feature: OAuth Authentication
     Then the URL should contain the client_id parameter
 ```
 
-### Step 2: Generate Go Implementation
-
-```bash
-python demo_cross_language_migration.py
-```
-
-**Output:**
-```go
-// oauth_steps.go
-package steps
-
-type OauthContext struct {
-    client *OAuthClient
-    url    string
-}
-
-func (ctx *OauthContext) anOAuthClientWith(clientID, clientSecret string) error {
-    // TODO: Implement
-    ctx.client = &OAuthClient{
-        ClientID:     clientID,
-        ClientSecret: clientSecret,
-    }
-    return nil
-}
-```
-
-### Step 3: Implement and Validate
-
-```bash
-# Implement Go code
-cd go_oauth_implementation
-# Edit steps/oauth_steps.go
-
-# Run tests
-go test -v
-
-# Verify both pass same specs
-behave features/oauth.feature  # Python
-go test -v                      # Go
-
-# ✓ Both pass = behavior preserved!
-```
-
----
-
-## Use Cases
-
-### 1. Python Monolith → Go Microservices
-
-```
-Legacy Python Monolith (10 years old, 100K LOC)
-    ↓
-Extract Gherkin for each module
-    ↓
-Migrate incrementally:
-  - Auth Service → Go
-  - User Service → Go
-  - Payment Service → Go
-    ↓
-Each service verified against original specs
-```
-
-**Benefits:**
-- Incremental migration (one module at a time)
-- Behavior verification (specs don't lie)
-- Rollback safety (can revert if needed)
-- Performance gains (Go is faster than Python)
-
-### 2. Performance Critical Path → Rust
-
-```
-Python ML Pipeline (slow data processing)
-    ↓
-Extract Gherkin for core logic
-    ↓
-Reimplement in Rust
-    ↓
-10x performance improvement, same behavior
-```
-
-### 3. Legacy System Documentation
-
-```
-10-year-old codebase, no docs, original developers gone
-    ↓
-Extract Gherkin
-    ↓
-Business-readable documentation of what it actually does
-```
-
-### 4. Polyglot Microservices
-
-```
-Same Gherkin specs used by:
-  - Python API Gateway
-  - Go User Service
-  - Rust Payment Service
-  - TypeScript BFF
-
-All pass same acceptance tests = consistent behavior
-```
-
----
-
-## Demo Walkthrough
-
-### Run the Extraction Demo
-
-```bash
-python3 demo_gherkin_extraction.py
-```
-
-**What it does:**
-1. Creates sample OAuth code and tests
-2. Analyzes code structure
-3. Analyzes test patterns
-4. Generates Gherkin scenarios
-5. Creates step definitions
-6. Calculates confidence score
-
-**Output:**
-```
-✓ Found 1 classes
-✓ Found 4 test scenarios
-✓ Generated 4 Gherkin scenarios
-✓ Confidence score: 100.00%
-
-Files created:
-  - extracted_gherkin/oauth.feature
-  - extracted_gherkin/steps/oauth_steps.py
-```
-
-### Run the Cross-Language Migration Demo
+### 2. Generate the Go implementation
 
 ```bash
 python3 demo_cross_language_migration.py
 ```
 
-**What it does:**
-1. Extracts Gherkin from Python
-2. Generates Go step definitions
-3. Creates Go test runner
-4. Scaffolds Go implementation
-5. Provides README with next steps
+Produces a scaffolded Go package (`steps/oauth_steps.go`, `steps/oauth_test.go`,
+`go.mod`) with `godog` step bindings ready to implement:
 
-**Output:**
-```
-Files created:
-  - go_oauth_implementation/features/oauth.feature
-  - go_oauth_implementation/steps/oauth_steps.go
-  - go_oauth_implementation/steps/oauth_test.go
-  - go_oauth_implementation/go.mod
-  - go_oauth_implementation/README.md
-```
-
----
-
-## Confidence Scoring
-
-The agent calculates a confidence score based on:
-
-**Factors:**
-- Has tests? (40%)
-- Test coverage (30%)
-- Has docstrings? (20%)
-- Clear assertions? (10%)
-
-**Interpretation:**
-- 100%: Excellent - comprehensive tests, good docs
-- 70-99%: Good - some tests, partial coverage
-- 40-69%: Fair - minimal tests, may need manual review
-- <40%: Low - code without tests, extraction is speculative
-
-**Warnings:**
-- "No tests found" - extraction based solely on code structure
-- "N tests have no assertions" - unclear expected behavior
-- "No classes or functions found" - may be empty file
-
----
-
-## Analysis Strategies
-
-### Code Analysis
-
-**What it extracts:**
-- Class names and structure
-- Method signatures (names, parameters, return types)
-- Constructor parameters
-- Docstrings
-- Type hints
-
-**Example:**
-```python
-class OAuthClient:
-    def generate_authorization_url(
-        self,
-        redirect_uri: str,
-        scope: str
-    ) -> str:
-        """Generate OAuth authorization URL."""
-```
-
-**Extracted:**
-- Class: OAuthClient
-- Method: generate_authorization_url
-- Params: redirect_uri (str), scope (str)
-- Returns: str
-- Docstring: "Generate OAuth authorization URL."
-
-### Test Analysis
-
-**What it extracts:**
-- Test function names
-- Setup actions (Given)
-- Actions being tested (When)
-- Assertions (Then)
-- Test docstrings
-
-**Example:**
-```python
-def test_generate_authorization_url_with_state():
-    """Test generating URL with CSRF state parameter."""
-    client = OAuthClient("app_123", "secret")  # Setup
-    url = client.generate_authorization_url(...)  # Action
-    assert "state=token" in url  # Assertion
-```
-
-**Extracted:**
-- Scenario: "Generate authorization url with state"
-- Given: "an OAuth client with client_id and client_secret"
-- When: "I generate an authorization URL with state"
-- Then: "the URL should contain the state parameter"
-
-### Scenario Generation
-
-**Test pattern → Gherkin:**
-
-| Test Pattern | Gherkin Step |
-|-------------|--------------|
-| `obj = Class(params)` | `Given a {class} with {params}` |
-| `result = obj.method(args)` | `When I {method} with {args}` |
-| `assert result == expected` | `Then {result} should be {expected}` |
-| `assert value in collection` | `Then {collection} should contain {value}` |
-| `assert value is not None` | `Then {value} should not be empty` |
-
----
-
-## Cross-Language Support
-
-### Currently Supported
-
-**Go (Cucumber):**
-- Step definition generation
-- Test runner scaffolding
-- go.mod creation
-- README with instructions
-
-**Example Go Output:**
 ```go
 package steps
 
@@ -389,163 +104,65 @@ func (ctx *OauthContext) InitializeScenario(sc *godog.ScenarioContext) {
     sc.Step(`^I generate an authorization URL$`, ctx.iGenerateAuthURL)
     sc.Step(`^the URL should contain (.+)$`, ctx.urlShouldContain)
 }
-
-func (ctx *OauthContext) anOAuthClientWith(params string) error {
-    // TODO: Implement
-    return nil
-}
 ```
 
-### Future Language Support
-
-**Planned:**
-- Rust (Cucumber-Rust)
-- Java (Cucumber-JVM)
-- TypeScript (Cucumber-JS)
-- C# (SpecFlow)
-
-**Template structure:** Each language generator follows same pattern:
-1. Parse Gherkin
-2. Generate step definition scaffolds
-3. Create test runner
-4. Generate build configuration
-5. Provide implementation README
-
----
-
-## Integration with ACE Strategic Vision
-
-This aligns perfectly with ACE's institutional knowledge infrastructure:
-
-### Knowledge Extraction
-- **Captures:** What legacy code actually does
-- **Preserves:** Behavior as language-agnostic specs
-- **Documents:** Business logic in readable format
-
-### Cross-Project Learning
-- **Patterns:** Same Gherkin used across services
-- **Reuse:** Proven specs applied to new implementations
-- **Validation:** All services verified against specs
-
-### Provenance Tracking
-- **Original:** Python codebase and tests
-- **Extracted:** Gherkin specs with timestamp
-- **Implementations:** Go/Rust/Java with verification status
-- **Audit trail:** Full history of migration
-
-### Natural Selection
-- **Gherkin persists:** Language-agnostic specs survive
-- **Implementations evolve:** Python → Go → Rust as needs change
-- **Behavior preserved:** Specs ensure consistency
-
----
-
-## Limitations and Improvements
-
-### Current Limitations
-
-1. **Python AST only** - Only analyzes Python code
-   - Future: Support other languages as source
-
-2. **Simple pattern matching** - Basic test → Gherkin conversion
-   - Future: Use LLM for semantic understanding
-
-3. **Manual step implementation** - Generated steps need coding
-   - Future: Suggest implementations based on code analysis
-
-4. **Single-file analysis** - One code file at a time
-   - Future: Analyze entire modules/packages
-
-5. **No fixture support** - Doesn't handle complex test fixtures
-   - Future: Extract fixtures as Background steps
-
-### Planned Improvements
-
-**Phase 1: Enhanced Extraction**
-- LLM-based semantic analysis for better scenario generation
-- Support for pytest fixtures and parametrized tests
-- Multi-file analysis (entire modules)
-- Confidence explanation (why 75% not 100%?)
-
-**Phase 2: More Languages**
-- Java/Spring Boot as source
-- TypeScript/JavaScript as source
-- Rust as target language
-- C# as target language
-
-**Phase 3: Smart Implementation**
-- Suggest step implementations based on code
-- Auto-implement simple assertions
-- Migration planning (sequence modules optimally)
-
-**Phase 4: Validation**
-- Run extracted Gherkin against original code
-- Compare behaviors (Python vs Go outputs)
-- Regression detection
-
----
-
-## Files Created
-
-### Core Agent
-```
-src/agents/gherkin_extraction_agent.py  (900 lines)
-  - GherkinExtractionAgent
-  - CodeAnalyzer
-  - TestAnalyzer
-  - Data models for extraction results
-```
-
-### Cross-Language Support
-```
-src/agents/go_step_generator.py  (300 lines)
-  - GoStepGenerator
-  - Go code generation
-  - Test runner generation
-```
-
-### Demos
-```
-demo_gherkin_extraction.py  (200 lines)
-  - Extract from Python code demo
-  - Shows confidence scoring
-  - Displays analysis details
-
-demo_cross_language_migration.py  (150 lines)
-  - End-to-end Python → Go workflow
-  - Shows both extraction and generation
-  - Explains next steps
-```
-
-### Generated Examples
-```
-examples/oauth_legacy/
-  - oauth.py (sample Python code)
-  - test_oauth.py (sample tests)
-
-extracted_gherkin/
-  - oauth.feature (extracted Gherkin)
-  - steps/oauth_steps.py (Python step defs)
-
-go_oauth_implementation/
-  - features/oauth.feature (Gherkin for Go)
-  - steps/oauth_steps.go (Go step defs)
-  - steps/oauth_test.go (Go test runner)
-  - go.mod (Go dependencies)
-  - README.md (implementation guide)
-```
-
----
-
-## Quick Start
-
-### 1. Extract Gherkin from Your Code
+### 3. Implement and validate
 
 ```bash
-python3 demo_gherkin_extraction.py
+# Implement the generated Go steps, then run both suites against
+# the same feature file:
+behave features/oauth.feature   # Python
+go test -v                      # Go
+
+# Both pass = behavior preserved.
 ```
 
-Or use the agent directly:
+Both demo scripts write their output into untracked local directories
+(`extracted_gherkin/`, `go_oauth_implementation/`) — they're regenerated on
+each run and aren't committed.
+
+## Confidence scoring
+
+The agent scores each extraction based on: has tests? (40%), test coverage
+(30%), has docstrings? (20%), clear assertions? (10%).
+
+- **100%** — excellent, comprehensive tests and docs
+- **70–99%** — good, some tests, partial coverage
+- **40–69%** — fair, minimal tests, may need manual review
+- **<40%** — low, code without tests — extraction is speculative
+
+## Analysis strategies
+
+**Code analysis** extracts class names, method signatures (names,
+parameters, return types), constructor parameters, docstrings, and type
+hints.
+
+**Test analysis** extracts test function names, setup actions (Given),
+actions under test (When), assertions (Then), and test docstrings — matched
+against the pattern table below.
+
+| Test Pattern | Gherkin Step |
+|---|---|
+| `obj = Class(params)` | `Given a {class} with {params}` |
+| `result = obj.method(args)` | `When I {method} with {args}` |
+| `assert result == expected` | `Then {result} should be {expected}` |
+| `assert value in collection` | `Then {collection} should contain {value}` |
+| `assert value is not None` | `Then {value} should not be empty` |
+
+## Current scope and limitations
+
+- **Python AST only** as the extraction source — no other source languages
+  are analyzed today.
+- **Go is the only generated target** (`GoStepGenerator`). Extending to
+  other Cucumber-family targets (Rust, Java, TypeScript, C#) would follow
+  the same generator pattern but isn't implemented.
+- **Simple pattern matching**, not LLM-based semantic understanding, drives
+  test → Gherkin conversion.
+- Generated step implementations are scaffolds — a human (or the TDD agent)
+  still has to fill them in.
+- Single-file analysis only; no fixture/parametrized-test support yet.
+
+## Quick start
 
 ```python
 from src.agents.gherkin_extraction_agent import GherkinExtractionAgent
@@ -553,116 +170,27 @@ from src.agents.gherkin_extraction_agent import GherkinExtractionAgent
 agent = GherkinExtractionAgent()
 result = agent.extract_from_codebase(
     code_path=Path("my_module.py"),
-    test_path=Path("test_my_module.py")
+    test_path=Path("test_my_module.py"),
 )
 
-# Write Gherkin
 agent.write_gherkin_file(result.feature, Path("my_module.feature"))
-
-# Write step definitions
 agent.write_step_definitions(
     result.step_definitions,
     result.code_analysis,
-    Path("steps/my_module_steps.py")
+    Path("steps/my_module_steps.py"),
 )
 ```
-
-### 2. Generate Go Implementation
-
-```bash
-python3 demo_cross_language_migration.py
-```
-
-Or use the generator directly:
 
 ```python
 from src.agents.go_step_generator import GoStepGenerator
 
 generator = GoStepGenerator(package_name="steps")
-
-# Generate step definitions
 generator.generate_from_feature_file(
     feature_path=Path("my_module.feature"),
-    output_dir=Path("go_impl/steps")
+    output_dir=Path("go_impl/steps"),
 )
-
-# Generate test runner
 generator.generate_test_runner(
     output_dir=Path("go_impl/steps"),
-    feature_name="my_module"
+    feature_name="my_module",
 )
 ```
-
-### 3. Implement and Validate
-
-```bash
-# Implement Go code
-cd go_impl
-vim steps/my_module_steps.go
-
-# Run tests
-go test -v
-
-# Verify against original
-behave features/my_module.feature  # Python
-go test -v                          # Go
-```
-
----
-
-## Success Metrics
-
-✅ **Extraction Quality**
-- Confidence score: 100% on sample OAuth code
-- 4/4 scenarios correctly extracted
-- All assertions captured
-
-✅ **Cross-Language Generation**
-- Go step definitions generated
-- Test runner created
-- Build configuration scaffolded
-- README with clear next steps
-
-✅ **Value Proposition**
-- Safe migration path established
-- Behavior preservation guaranteed
-- Language-agnostic specs created
-- Incremental migration enabled
-
----
-
-## Next Steps
-
-### For Production Use
-
-1. **Test on real codebases** - Extract from actual legacy systems
-2. **Gather feedback** - What extraction quality issues occur?
-3. **Improve accuracy** - Add LLM semantic analysis
-4. **Add languages** - Support Java, Rust, TypeScript
-5. **Validation** - Auto-run extracted Gherkin against original code
-
-### Integration with TDD Agent
-
-The extracted Gherkin can feed directly into the autonomous TDD agent:
-
-```bash
-# Extract Gherkin from legacy Python
-python extract_gherkin.py --code legacy.py --test test_legacy.py
-
-# Rebuild with TDD agent
-python demo_oauth_tdd.py --gherkin extracted/legacy.feature
-
-# Clean implementation, same behavior!
-```
-
-This creates a full loop:
-1. Extract specs from legacy code
-2. Rebuild with modern TDD approach
-3. Validate behavior preserved
-4. Migrate to new language if desired
-
----
-
-**Status:** ✅ Prototype Complete
-**Next Review:** After testing on real legacy codebases
-**Feedback:** Open issues for extraction quality improvements

@@ -223,5 +223,4 @@ Each phase: create package, update imports, maintain backwards compat in main re
 - **Adopt what you need**: Don't want ML? Don't install it.
 - **Clearer boundaries**: Each package has a job.
 - **Easier contribution**: Work on one package without understanding all.
-- **Flexible licensing**: Open core, commercial add-ons.
 - **Applications separate**: Digital twin isn't ACE bloat, it's a tool using ACE.
