@@ -44,7 +44,7 @@ The autonomous TDD agent now uses **Gherkin scenarios to directly drive unit tes
 
 ### 1. Write Gherkin Scenarios
 
-**Example:** `gherkin_acceptance_tests/oauth.feature`
+**Example:** `gherkin_specs/oauth.feature`
 ```gherkin
 Feature: OAuth Authentication
   As a third-party application
@@ -191,7 +191,7 @@ This architecture can be enhanced to full ATDD **without major refactoring**:
 agent = AutonomousTDDAgent(...)
 result = agent.build_feature(
     requirement="OAuth authentication system...",
-    gherkin_dir=Path("gherkin_acceptance_tests")  # ← Provide Gherkin directory
+    gherkin_dir=Path("gherkin_specs")  # ← Provide Gherkin directory
 )
 ```
 
@@ -211,10 +211,6 @@ result = agent.build_feature(
 - `src/agents/autonomous_tdd_agent.py:2331-2400` - Gherkin parser (`_parse_gherkin_scenarios()`)
 - `src/agents/autonomous_tdd_agent.py:188-201` - Gherkin-driven mode detection
 - `src/agents/autonomous_tdd_agent.py:433-525` - Test planning with Gherkin context
-
-**Demo:**
-- `demo_gherkin_tdd.py` - Demonstrates Gherkin-driven TDD
-- `gherkin_acceptance_tests/oauth.feature` - Example Gherkin scenarios
 
 ## Benefits vs Traditional TDD
 

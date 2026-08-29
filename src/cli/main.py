@@ -102,13 +102,6 @@ def cmd_tdd(args: argparse.Namespace) -> int:
             print(f"error: feature file not found: {feature_path}", file=sys.stderr)
             return 1
 
-    # Derive requirement from feature file if not given
-    requirement = args.requirement
-    if requirement is None:
-        requirement = _extract_requirement(feature_path)
-
-    gherkin_dir = feature_path.parent
-
     print(f"Project:    {project_root}")
     print(f"Feature:    {feature_path.relative_to(project_root)}")
     print(f"Playbook:   {config.playbook_id} ({config.playbook_scope})")
@@ -116,22 +109,20 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     print(f"Source →    {config.src_dir.relative_to(project_root)}")
     print()
 
-    agent = build_agent(config)
-    agent.skip_learn = args.no_learn
-    result = agent.build_feature(requirement=requirement, gherkin_dir=gherkin_dir)
+    handle = build_agent(config, skip_learn=args.no_learn)
+    try:
+        # requirement=None lets build_from_feature derive it from the Gherkin
+        # file itself (title + scenarios); --requirement overrides that.
+        result = handle.build_from_feature(feature_path, requirement=args.requirement)
+    finally:
+        handle.stop()
 
+    test_file, impl_file = handle.file_paths_for(feature_path)
     print()
-    print(f"Done — {len(result.test_files)} test file(s), {len(result.implementation_files)} implementation file(s)")
-    return 0
-
-
-def _extract_requirement(feature_file: Path) -> str:
-    """Pull the Feature: line from a .feature file as the requirement string."""
-    for line in feature_file.read_text().splitlines():
-        line = line.strip()
-        if line.lower().startswith("feature:"):
-            return line[len("feature:"):].strip()
-    return feature_file.stem.replace("_", " ").replace("-", " ")
+    print(f"{'Done' if result.success else 'Incomplete'} — {result.iterations} cycle(s)")
+    print(f"  test:            {test_file}")
+    print(f"  implementation:  {impl_file}")
+    return 0 if result.success else 1
 
 
 def main() -> None:

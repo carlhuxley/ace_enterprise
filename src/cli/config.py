@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -24,6 +24,7 @@ class ProjectConfig:
     playbook_id: str = ""
     promote_threshold: float = 0.85
     max_iterations: int = 20
+    team_id: str | None = None
 
     def discover_features(self) -> list[Path]:
         """Return all .feature files in <project>/features/, falling back to project root."""
@@ -60,6 +61,7 @@ class ProjectConfig:
             playbook_id=playbook_id,
             promote_threshold=float(raw.get("promote_threshold", 0.85)),
             max_iterations=int(raw.get("max_iterations", 20)),
+            team_id=raw.get("team_id"),
         )
 
 

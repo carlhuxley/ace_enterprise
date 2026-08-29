@@ -212,9 +212,60 @@ class TestPodFactory:
         )
         assert isinstance(pod, GoLanguagePod)
 
+    def test_create_typescript_returns_typescript_pod(self, tmp_path):
+        from src.agents.typescript_language_pod import TypeScriptLanguagePod
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        worker.llm_client.generate.return_value = {
+            "content": "", "tokens_used": 0, "latency_ms": 0, "model": "gpt-4o"
+        }
+        pod = PodFactory.create(
+            "typescript", worker=worker, project_root=tmp_path, orchestrator=MagicMock()
+        )
+        assert isinstance(pod, TypeScriptLanguagePod)
+
     def test_unsupported_language_raises_value_error(self):
         with pytest.raises(ValueError, match="ruby"):
             PodFactory.create("ruby", llm_client=MagicMock())
+
+
+# ---------------------------------------------------------------------------
+# PolyglotTDDRunner -> PodFactory wiring (ace_enterprise: PolyglotTDDRunner
+# used to call factory.create(language) with no kwargs, which KeyErrors
+# against the real PodFactory outside of tests that mock the factory)
+# ---------------------------------------------------------------------------
+
+class TestPodKwargsPassthrough:
+    def test_run_passes_pod_kwargs_to_real_pod_factory(self, tmp_path):
+        from src.agents.python_language_pod import PythonLanguagePod
+        from src.agents.polyglot_tdd_runner import PodFactory
+
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        worker.llm_client.generate.return_value = {"content": "", "tokens_used": 0}
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = _passing()
+
+        runner = PolyglotTDDRunner(
+            PodFactory,
+            pod_kwargs={
+                "python": {
+                    "worker": worker,
+                    "project_root": tmp_path,
+                    "orchestrator": orchestrator,
+                }
+            },
+        )
+        result = _run(runner, languages=["python"], tmp_path=tmp_path)
+        assert "python" in result.language_results
+
+    def test_run_without_pod_kwargs_still_works_with_mock_factory(self, tmp_path):
+        # Backward compatibility: a factory that ignores kwargs (as in the
+        # other tests in this file) must keep working with no pod_kwargs set.
+        pod = _stub_pod()
+        runner = PolyglotTDDRunner(_factory({"python": pod}))
+        result = _run(runner, languages=["python"], tmp_path=tmp_path)
+        assert "python" in result.language_results
 
 
 # ---------------------------------------------------------------------------
@@ -243,3 +294,83 @@ class TestIntegration:
         report_dict = result.efficiency_report.to_dict()
         assert "token_efficiency" in report_dict
         assert report_dict["token_efficiency"]["comparison"]["most_efficient"] == "go"
+
+
+# ---------------------------------------------------------------------------
+# Parity with IterativeTDDRunner: audit trail + AST redundancy pre-check,
+# both running through the exact same TDDCycleRunner engine (not a copy).
+# ---------------------------------------------------------------------------
+
+class _SpyAuditClient:
+    def __init__(self):
+        self.events = []
+
+    def emit_simple(self, *, event_type, actor_id, payload, playbook_id=None):
+        self.events.append(dict(event_type=event_type, payload=payload, playbook_id=playbook_id))
+        return True
+
+
+class TestAuditTrailParity:
+    def test_no_audit_client_by_default(self, tmp_path):
+        pod = _stub_pod()
+        runner = PolyglotTDDRunner(_factory({"python": pod}))
+        result = _run(runner, languages=["python"], tmp_path=tmp_path)
+        assert "python" in result.language_results  # doesn't raise without one
+
+    def test_emits_events_through_real_tdd_cycle_runner(self, tmp_path):
+        from src.agents.python_language_pod import PythonLanguagePod
+        from src.agents.polyglot_tdd_runner import PodFactory
+
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        worker.llm_client.generate.return_value = {"content": "", "tokens_used": 0}
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = PhaseResult(passed=True, output="1 passed")
+
+        audit = _SpyAuditClient()
+        runner = PolyglotTDDRunner(
+            PodFactory,
+            pod_kwargs={"python": {
+                "worker": worker, "project_root": tmp_path, "orchestrator": orchestrator,
+            }},
+            audit_client=audit,
+            playbook_id="my-playbook",
+        )
+        _run(runner, languages=["python"], tmp_path=tmp_path)
+
+        from src.audit.schemas import AuditEventType
+        types = {e["event_type"] for e in audit.events}
+        assert AuditEventType.CYCLE_COMPLETED in types
+        assert all(e["playbook_id"] == "my-playbook" for e in audit.events)
+
+
+class TestRedundancyPreCheckParity:
+    def test_no_redundancy_checker_by_default(self, tmp_path):
+        pod = _stub_pod()
+        runner = PolyglotTDDRunner(_factory({"python": pod}))
+        _run(runner, languages=["python"], tmp_path=tmp_path)
+        pod.run_red.assert_called_once()
+
+    def test_redundant_test_file_skips_without_touching_the_pod(self, tmp_path):
+        from src.agents.redundancy_checker import RedundancyPreChecker
+
+        # test_file.stem ("test_login") exact-matches an already-present
+        # test function of the same name -> the checker's strongest signal.
+        test_file = Path(tmp_path) / "test_login.py"
+        test_file.write_text("def test_login():\n    assert login(1) == True\n")
+
+        pod = _stub_pod()
+        runner = PolyglotTDDRunner(
+            _factory({"python": pod}),
+            redundancy_checker=RedundancyPreChecker(),
+        )
+        result = runner.run(
+            feature_requirement="login",
+            test_file=test_file,
+            implementation_file=Path(tmp_path) / "auth.py",
+            languages=["python"],
+        )
+
+        pod.run_red.assert_not_called()
+        pod.run_green.assert_not_called()
+        assert result.language_results["python"].green.passed is True

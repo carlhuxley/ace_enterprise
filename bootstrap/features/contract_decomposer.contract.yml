@@ -23,15 +23,15 @@ typescript_output:
         - name: LLMClient
           description: Minimal interface satisfied by any client with a generate method
           methods:
-            - generate(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<{ content: string }>
+            - "generate(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<{ content: string }>"
       classes:
         - name: DecompositionError
           extends: Error
         - name: ContractDecomposer
           constructor: "(config?: Partial<DecomposerConfig>)"
           methods:
-            - decompose(requirement: string): Promise<ContractSpec[]>
-            - setLlmClient(client: LLMClient): void
+            - "decompose(requirement: string): Promise<ContractSpec[]>"
+            - "setLlmClient(client: LLMClient): void"
 
 constraints:
   - decompose() is async (the LLM call is awaited)

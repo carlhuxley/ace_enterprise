@@ -497,6 +497,13 @@ class LLMClient:
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens or 4096,  # OpenRouter requires explicit max_tokens
+                # Reasoning-capable models (DeepSeek, etc.) spend max_tokens on
+                # internal <reasoning> content before ever emitting `content` --
+                # confirmed live: even a trivial "say hi" prompt returned
+                # content=None, finish_reason="length" without this. Nothing in
+                # this codebase consumes result["reasoning"], so disable it
+                # outright rather than losing max_tokens budget to it silently.
+                "reasoning": {"exclude": True},
             }
             # Prevent silent fallback to a different provider (e.g. DeepSeek) when
             # a named Anthropic model is requested. Free-tier models keep fallbacks
@@ -524,8 +531,34 @@ class LLMClient:
                     # Extract content, handling potential None
                     content = data["choices"][0]["message"]["content"]
                     if content is None:
-                        logger.warning(f"OpenRouter returned None content for {model}, trying fallback")
-                        break  # Try next model
+                        finish_reason = data["choices"][0].get("finish_reason")
+                        last_error = RuntimeError(
+                            f"{model} returned no content (finish_reason={finish_reason})"
+                        )
+                        # Confirmed live at ~18% of calls against
+                        # qwen/qwen3-coder-30b-a3b-instruct despite
+                        # reasoning:{exclude:true} above -- an empty
+                        # completion is frequently transient (the very next
+                        # call to the same model often succeeds), but this
+                        # used to `break` straight to "try next model"
+                        # after a single occurrence, burning none of the
+                        # retry budget every other transient failure mode
+                        # here gets. Retry with the same backoff as 429/5xx
+                        # before giving up on this model.
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(
+                                f"OpenRouter: {last_error}, retrying in {delay}s "
+                                f"(attempt {attempt + 1}/{max_retries})"
+                            )
+                            time.sleep(delay)
+                            continue
+                        else:
+                            logger.warning(
+                                f"OpenRouter: {model} returned no content after "
+                                f"{max_retries} attempts, trying fallback"
+                            )
+                            break  # Try next model
 
                     usage = data.get("usage", {})
                     return {

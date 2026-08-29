@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PYTHON="$REPO_ROOT/.venv/bin/python"
 SCRIPT="$REPO_ROOT/generate_live_docs.py"
+RUFF="$REPO_ROOT/.venv/bin/ruff"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "pre-commit: .venv/bin/python not found, skipping live docs generation" >&2
@@ -21,6 +22,33 @@ if "$PYTHON" "$SCRIPT"; then
   echo "pre-commit: docs staged"
 else
   echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+fi
+
+# --- ruff: lint the .py files in this commit --------------------------------
+# Unlike docs generation above, this CAN block the commit. Checks the full
+# current content of each staged file (not just the diff), matching how the
+# `pre-commit` framework's own ruff hook behaves -- so touching an old file
+# that already has unrelated lint debt will surface it. That's intentional:
+# it's the same bar CI holds new PRs to, just enforced earlier.
+mapfile -t STAGED_PY < <(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+
+if [[ ${#STAGED_PY[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+if [[ ! -x "$RUFF" ]]; then
+  echo "pre-commit: .venv/bin/ruff not found (run 'uv sync'), skipping lint check" >&2
+  exit 0
+fi
+
+echo "pre-commit: running ruff on ${#STAGED_PY[@]} staged Python file(s)..."
+"$RUFF" check --fix --quiet "${STAGED_PY[@]}" >/dev/null 2>&1 || true
+git add -- "${STAGED_PY[@]}"
+
+if ! "$RUFF" check --quiet "${STAGED_PY[@]}"; then
+  echo "pre-commit: ruff found issues that couldn't be auto-fixed -- commit blocked." >&2
+  echo "pre-commit: fix them, or use 'git commit --no-verify' to bypass." >&2
+  exit 1
 fi
 
 exit 0

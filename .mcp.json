@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "ace": {
-      "command": "/home/ch_dev/ace_enterprise/venv/bin/python",
-      "args": ["-m", "mcp_server", "--playbook-file", "./playbook.json"],
-      "cwd": "/home/ch_dev/ace_enterprise"
+      "command": "python",
+      "args": ["-m", "mcp_server", "--playbook-file", "./playbook.json"]
     }
   }
 }

@@ -91,6 +91,7 @@ class ContextGraphRetriever:
         context: RetrievalContext | None = None,
         query_embedding: list[float] | None = None,
         top_k: int | None = None,
+        min_confidence: float = 0.5,
     ) -> KnowledgeResponse:
         """
         Execute the CGR³ pipeline.
@@ -101,6 +102,13 @@ class ContextGraphRetriever:
             context: Request context for ranking/reasoning
             query_embedding: Pre-computed query embedding (optional)
             top_k: Override number of results (optional)
+            min_confidence: Forwarded to the base retriever's own confidence
+                filter. Without this, base_retriever.retrieve() silently
+                re-applies its own 0.5 default regardless of what a caller
+                like InstitutionalKnowledgeService.get_guidance() was told --
+                a freshly Curator-written bullet (confidence 0.3, see
+                src/playbook/manager.py's apply_delta) could never be
+                retrieved even with get_guidance(min_confidence=0.0).
 
         Returns:
             KnowledgeResponse with categorized results
@@ -117,6 +125,7 @@ class ContextGraphRetriever:
             query=query,
             bullets=bullets,
             query_embedding=query_embedding,
+            min_confidence=min_confidence,
         )
 
         if not candidates:

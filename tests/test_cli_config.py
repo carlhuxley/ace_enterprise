@@ -126,6 +126,17 @@ def test_promote_threshold_read_from_config_file(tmp_path):
     assert config.promote_threshold == pytest.approx(0.9)
 
 
+def test_team_id_defaults_to_none(tmp_path):
+    config = ProjectConfig.load(_project(tmp_path))
+    assert config.team_id is None
+
+
+def test_team_id_read_from_config_file(tmp_path):
+    project = _project(tmp_path, config_yaml="team_id: payments\n")
+    config = ProjectConfig.load(project)
+    assert config.team_id == "payments"
+
+
 # ---------------------------------------------------------------------------
 # feature file discovery
 # ---------------------------------------------------------------------------

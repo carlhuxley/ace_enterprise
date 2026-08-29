@@ -22,7 +22,7 @@ class ImportValidationError(Exception):
                 messages.append(f"  {imp} -> {suggestion}")
             else:
                 messages.append(f"  {imp} (no suggestion found)")
-        super().__init__(f"Invalid import paths:\n" + "\n".join(messages))
+        super().__init__("Invalid import paths:\n" + "\n".join(messages))
 
 
 class ImportValidator:

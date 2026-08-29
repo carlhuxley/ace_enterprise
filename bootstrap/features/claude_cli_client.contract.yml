@@ -25,14 +25,14 @@ typescript_output:
         - name: ClaudeCliClient
           constructor: "(timeout?: number)"  # default 300 seconds
           methods:
-            - generate(prompt: string, temperature?: number): LLMResponse
+            - "generate(prompt: string, temperature?: number): LLMResponse"
 
 constraints:
   - Use spawnSync from 'node:child_process' (synchronous, mirrors Python subprocess.run)
   - Pass args: ['--print', '--output-format', 'text', prompt]
   - Filter process.env to exclude all keys starting with 'CLAUDE' before passing
     env to the subprocess — prevents nested-session exit-1 from the CLI
-  - On non-zero exit code throw Error(`claude CLI error (exit ${code}): ${stderr}`)
+  - "On non-zero exit code throw Error(`claude CLI error (exit ${code}): ${stderr}`)"
   - Return value content is result.stdout.trim() (strip leading/trailing whitespace)
   - temperature parameter is accepted for interface compatibility but not forwarded
     to the CLI (the CLI does not expose a temperature flag)

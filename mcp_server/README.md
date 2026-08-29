@@ -2,6 +2,8 @@
 
 Model Context Protocol (MCP) server exposing ACE's institutional knowledge service to Claude Code, Claude Desktop, and other MCP-compatible clients.
 
+**This is a local development tool, not a deployable service.** It communicates over stdio (see [Protocol](#protocol) below) and is spawned as a subprocess by your MCP client on your own machine — there's no network listener, authentication, or remote-access story here, unlike `services/ace-audit/` which is a real deployable service.
+
 ## Overview
 
 The ACE MCP Server provides context-aware knowledge retrieval using CGR³ (Context Graph Retrieve-Rank-Reason). It enables AI assistants to:

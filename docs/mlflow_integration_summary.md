@@ -31,7 +31,7 @@ Integrated ACE's institutional knowledge capture with MLflow's experiment tracki
    - Compare runs including decision differences
    - Get recommendations based on parameters
 
-4. **Comprehensive Demo** (`demo_mlflow_ace.py`)
+4. **Comprehensive Demo** (`demos/demo_mlflow_ace.py`)
    - Simulates 3 ML experiments with decision capture
    - Shows pattern extraction from multiple runs
    - Demonstrates all query capabilities
@@ -56,7 +56,7 @@ ace_enterprise/
 │   ├── mlflow_callback.py            ← Auto-capture callback (244 lines)
 │   └── query_interface.py            ← Unified queries (350 lines)
 │
-├── demo_mlflow_ace.py                ← NEW: Demo (527 lines)
+├── demos/demo_mlflow_ace.py         ← NEW: Demo (527 lines)
 ├── requirements-ml.txt               ← NEW: ML dependencies
 │
 └── docs/
@@ -156,7 +156,7 @@ for decision in query.get_decision_history():
 
 ## Demo Walkthrough
 
-The demo (`demo_mlflow_ace.py`) shows:
+The demo (`demos/demo_mlflow_ace.py`) shows:
 
 1. **Experiment 1 - Baseline**
    - Decision: Use default hyperparameters
@@ -233,7 +233,7 @@ cv_patterns = [p for p in patterns if "computer_vision" in p.domain_tags]
 
 ## Integration with ACE Strategic Vision
 
-This aligns with the ACE Strategic Plan (docs/ACE_STRATEGIC_PLAN.md):
+This aligns with ACE's institutional knowledge infrastructure direction:
 
 **Core Pivot:** Institutional knowledge infrastructure
 - ✅ ML experiments are a perfect fit (high volume, high cost, poor documentation)
@@ -259,7 +259,7 @@ This aligns with the ACE Strategic Plan (docs/ACE_STRATEGIC_PLAN.md):
 
 ### Immediate (Can do now)
 1. Install dependencies: `pip install -r requirements-ml.txt`
-2. Run demo: `python demo_mlflow_ace.py`
+2. Run demo: `python demos/demo_mlflow_ace.py`
 3. Start using in real experiments
 4. Gather feedback on schema and API
 
@@ -335,7 +335,7 @@ This aligns with the ACE Strategic Plan (docs/ACE_STRATEGIC_PLAN.md):
 | `src/ml/experiment_knowledge.py` | 213 | Knowledge schema |
 | `src/ml/mlflow_callback.py` | 244 | Auto-capture callback |
 | `src/ml/query_interface.py` | 350 | Unified queries |
-| `demo_mlflow_ace.py` | 527 | End-to-end demo |
+| `demos/demo_mlflow_ace.py` | 527 | End-to-end demo |
 | `requirements-ml.txt` | 14 | Dependencies |
 | `docs/mlflow_integration.md` | 600+ | Full documentation |
 | `docs/mlflow_integration_summary.md` | This file | Summary |

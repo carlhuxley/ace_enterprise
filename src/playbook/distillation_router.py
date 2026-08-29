@@ -33,7 +33,7 @@ from src.playbook.clustering import (
     build_distillation_playbook,
 )
 from src.playbook.manager import PlaybookManager
-from src.storage.schemas import Bullet, Playbook
+from src.storage.schemas import Bullet
 from src.utils.embedding import get_embedding_service
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,6 @@
 """Tests for PlaybookManager core operations (ace_enterprise-xji)."""
+from unittest.mock import patch
+
 import pytest
 
 from src.playbook.manager import PlaybookManager
@@ -18,6 +20,18 @@ def _add(pm, playbook_id, section, content, tags=None):
         playbook_id,
         BulletCreate(section=section, content=content, tags=tags or []),
     )
+
+
+class _FakeEmbeddingService:
+    """Deterministic stand-in for get_embedding_service(): maps exact text
+    to a pre-set vector, so cosine similarity in a test is fully controlled
+    instead of depending on a real sentence-transformers model's output."""
+
+    def __init__(self, vectors: dict[str, list[float]]):
+        self._vectors = vectors
+
+    def embed_text(self, text: str) -> list[float]:
+        return self._vectors[text]
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +175,59 @@ class TestApplyDelta:
         result = pm.apply_delta("pb1", [DeltaBullet(content="use type hints", section="strategies_and_hard_rules")])
         assert result == []
 
+    def test_semantic_near_duplicate_skipped(self, tmp_path):
+        """Two differently-worded bullets about the same point must be
+        caught even though neither is an exact string match -- found via
+        forensic analysis of real curated output: batches of bullets from
+        one failure often restate the same point in different words (e.g.
+        "Use os.path.abspath..." / "Check for path traversal..."), and the
+        old exact-match-only check let every one of them through."""
+        fake_service = _FakeEmbeddingService({
+            "Use os.path.abspath to resolve file paths safely": [1.0, 0.0],
+            "Always resolve file paths safely with os.path.abspath": [0.99, 0.01],
+        })
+        pm = _manager(tmp_path)
+        pm.enable_redundancy_checking = True
+        pm.get_or_create_playbook("pb1")
+        with patch("src.playbook.manager.get_embedding_service", return_value=fake_service):
+            _add(pm, "pb1", "strategies_and_hard_rules", "Use os.path.abspath to resolve file paths safely")
+            result = pm.apply_delta("pb1", [DeltaBullet(
+                content="Always resolve file paths safely with os.path.abspath",
+                section="strategies_and_hard_rules",
+            )])
+        assert result == []
+
+    def test_semantically_different_bullet_is_still_added(self, tmp_path):
+        fake_service = _FakeEmbeddingService({
+            "Use os.path.abspath to resolve file paths safely": [1.0, 0.0],
+            "Use hmac.compare_digest for timing-safe comparisons": [0.0, 1.0],
+        })
+        pm = _manager(tmp_path)
+        pm.enable_redundancy_checking = True
+        pm.get_or_create_playbook("pb1")
+        with patch("src.playbook.manager.get_embedding_service", return_value=fake_service):
+            _add(pm, "pb1", "strategies_and_hard_rules", "Use os.path.abspath to resolve file paths safely")
+            result = pm.apply_delta("pb1", [DeltaBullet(
+                content="Use hmac.compare_digest for timing-safe comparisons",
+                section="strategies_and_hard_rules",
+            )])
+        assert len(result) == 1
+
+    def test_redundancy_check_degrades_gracefully_when_embedding_fails(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.enable_redundancy_checking = True
+        pm.get_or_create_playbook("pb1")
+        _add(pm, "pb1", "strategies_and_hard_rules", "use type hints everywhere")
+        with patch("src.playbook.manager.get_embedding_service", side_effect=RuntimeError("model unavailable")):
+            # Different content, so no exact-match short-circuit -- must
+            # fall through the embedding failure without raising, and
+            # (conservatively) not treat it as redundant.
+            result = pm.apply_delta("pb1", [DeltaBullet(
+                content="always annotate function signatures",
+                section="strategies_and_hard_rules",
+            )])
+        assert len(result) == 1
+
     def test_raises_for_unknown_playbook(self, tmp_path):
         pm = _manager(tmp_path)
         with pytest.raises(ValueError, match="not found"):
@@ -170,6 +237,54 @@ class TestApplyDelta:
         pm = _manager(tmp_path)
         pm.get_or_create_playbook("pb1")
         assert pm.apply_delta("pb1", []) == []
+
+
+# ---------------------------------------------------------------------------
+# apply_delta: CGR3 context fields (team_id, project_ids, applicable_domains,
+# tech_context) on DeltaBullet -- these used to not exist on DeltaBullet at
+# all, so Curator-synthesized bullets could never carry team/project/tech
+# scoping regardless of what the caller knew.
+# ---------------------------------------------------------------------------
+
+class TestApplyDeltaContextFields:
+    def test_team_id_forwarded_to_persisted_bullet(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        result = pm.apply_delta("pb1", [
+            DeltaBullet(content="x", section="strategies_and_hard_rules", team_id="payments"),
+        ])
+        assert result[0].team_id == "payments"
+
+    def test_project_ids_forwarded(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        result = pm.apply_delta("pb1", [
+            DeltaBullet(content="x", section="strategies_and_hard_rules", project_ids=["proj-a"]),
+        ])
+        assert result[0].project_ids == ["proj-a"]
+
+    def test_applicable_domains_forwarded(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        result = pm.apply_delta("pb1", [
+            DeltaBullet(content="x", section="strategies_and_hard_rules", applicable_domains=["fintech"]),
+        ])
+        assert result[0].applicable_domains == ["fintech"]
+
+    def test_tech_context_forwarded(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        result = pm.apply_delta("pb1", [
+            DeltaBullet(content="x", section="strategies_and_hard_rules", tech_context={"python": ">=3.10"}),
+        ])
+        assert result[0].tech_context == {"python": ">=3.10"}
+
+    def test_context_fields_default_to_none(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        result = pm.apply_delta("pb1", [DeltaBullet(content="x", section="strategies_and_hard_rules")])
+        assert result[0].team_id is None
+        assert result[0].project_ids is None
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +624,65 @@ class TestGetStatistics:
 # ---------------------------------------------------------------------------
 
 class TestPersistence:
+    def test_context_fields_survive_reload(self, tmp_path):
+        """Regression: valid_from/valid_until/tech_context/created_by_type/
+        created_by_id/source_conversation_id used to be dropped by both
+        _save_playbook (never written to the JSON) and _load_playbook (never
+        read back even when present) -- team_id/project_ids/applicable_domains
+        already round-tripped correctly, these didn't."""
+        from datetime import UTC, datetime as dt
+
+        storage = str(tmp_path / "playbooks")
+        pm1 = PlaybookManager(storage_path=storage)
+        pb = pm1.create_playbook(PlaybookCreate(domain="test", base_model="gpt-4o"))
+        valid_from = dt(2026, 1, 1, tzinfo=UTC)
+        bullet = pm1.add_bullet(pb.playbook_id, BulletCreate(
+            section="strategies_and_hard_rules",
+            content="context-rich bullet",
+            team_id="payments",
+            project_ids=["proj-a"],
+            applicable_domains=["fintech"],
+            tech_context={"python": ">=3.10"},
+            valid_from=valid_from,
+            created_by_type="human",
+            created_by_id="carl@example.com",
+            source_conversation_id="conv-123",
+        ))
+
+        pm2 = PlaybookManager(storage_path=storage)
+        reloaded = next(b for b in pm2.get_section_bullets(pb.playbook_id, "strategies_and_hard_rules") if b.id == bullet.id)
+
+        assert reloaded.team_id == "payments"
+        assert reloaded.project_ids == ["proj-a"]
+        assert reloaded.applicable_domains == ["fintech"]
+        assert reloaded.tech_context == {"python": ">=3.10"}
+        assert reloaded.valid_from == valid_from
+        assert reloaded.created_by_type == "human"
+        assert reloaded.created_by_id == "carl@example.com"
+        assert reloaded.source_conversation_id == "conv-123"
+
+    def test_model_provenance_survives_reload(self, tmp_path):
+        """created_by_model/model_provider/license_type were saved to disk
+        but never read back on load -- a fresh PlaybookManager instance
+        would silently lose them even though the JSON file had them."""
+        storage = str(tmp_path / "playbooks")
+        pm1 = PlaybookManager(storage_path=storage)
+        pb = pm1.create_playbook(PlaybookCreate(domain="test", base_model="gpt-4o"))
+        bullet = pm1.add_bullet(pb.playbook_id, BulletCreate(
+            section="strategies_and_hard_rules",
+            content="model-attributed bullet",
+            created_by_model="qwen2.5-coder:14b",
+            model_provider="ollama",
+            license_type="apache-2.0",
+        ))
+
+        pm2 = PlaybookManager(storage_path=storage)
+        reloaded = next(b for b in pm2.get_section_bullets(pb.playbook_id, "strategies_and_hard_rules") if b.id == bullet.id)
+
+        assert reloaded.created_by_model == "qwen2.5-coder:14b"
+        assert reloaded.model_provider == "ollama"
+        assert reloaded.license_type == "apache-2.0"
+
     def test_bullet_survives_reload(self, tmp_path):
         storage = str(tmp_path / "playbooks")
         pm1 = PlaybookManager(storage_path=storage)

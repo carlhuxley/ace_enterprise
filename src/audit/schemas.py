@@ -7,7 +7,7 @@ the audit service. They define the structure of audit events and queries.
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -81,6 +81,19 @@ class AuditEvent(BaseModel):
         """Compute SHA-256 hash of this event's content."""
         # Exclude hash fields from the hash computation
         content = self.model_dump(exclude={"event_hash"})
+        # Normalize the timestamp before hashing. SQLite's DateTime(timezone=True)
+        # column does not actually preserve tzinfo on read-back (confirmed live:
+        # a timezone-aware datetime.now(UTC) written at emit time round-trips as
+        # naive), so str(timestamp) differs between the event that was hashed at
+        # write time and the same row reconstructed for verify_full_chain() --
+        # a false-positive "tampered" result with nothing actually altered.
+        # Treating naive as UTC and always formatting the same way makes the
+        # hash depend only on the actual instant, not on tzinfo round-trip noise.
+        timestamp = content.get("timestamp")
+        if isinstance(timestamp, datetime):
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            content["timestamp"] = timestamp.astimezone(UTC).isoformat()
         content_str = json.dumps(content, sort_keys=True, default=str)
         return hashlib.sha256(content_str.encode()).hexdigest()
 

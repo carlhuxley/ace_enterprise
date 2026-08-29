@@ -175,6 +175,12 @@ class TypeScriptWorkerAgent:
             return _DEFAULT_HARD_RULES
 
 
+_TS_CODE_START = re.compile(
+    r"^(import\s|export\s|const\s|let\s|var\s|function\s|async function\s|class\s|interface\s|type\s)",
+    re.MULTILINE,
+)
+
+
 def _extract_code(content: str) -> str:
     for lang in ("typescript", "ts", ""):
         pattern = rf"```{lang}\n(.*?)```" if lang else r"```\w*\n(.*?)```"
@@ -185,4 +191,10 @@ def _extract_code(content: str) -> str:
     match = re.search(r"```(?:\w+)?\n(.*?)$", content, re.DOTALL)
     if match:
         return match.group(1).strip()
+    # No fence at all -- the LLM occasionally skips it and replies with a
+    # conversational preamble directly followed by source. Drop everything
+    # before the first line that's actually TypeScript.
+    code_match = _TS_CODE_START.search(content)
+    if code_match:
+        return content[code_match.start():].strip()
     return content.strip()

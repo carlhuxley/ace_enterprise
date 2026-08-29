@@ -185,7 +185,7 @@ This directory contains ACE Enterprise metadata for the `{project_name}` project
 
 To build a feature:
 ```bash
-ace build-feature path/to/feature.feature
+ace tdd --feature path/to/feature.feature
 ```
 
 To view decisions:
@@ -195,7 +195,6 @@ ls .ace/decisions/
 
 ## Documentation
 
-- [ACE Strategic Plan](https://github.com/carlhuxley/ace_enterprise/blob/main/docs/ACE_STRATEGIC_PLAN.md)
 - [Gherkin-Driven TDD](https://github.com/carlhuxley/ace_enterprise/blob/main/docs/gherkin_driven_unit_tests.md)
 """)
 

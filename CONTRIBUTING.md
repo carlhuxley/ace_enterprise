@@ -289,21 +289,39 @@ We believe:
 ```
 ace_enterprise/
 ├── src/                    # Source code
-│   ├── agents/            # TDD and test review agents
-│   ├── ensemble/          # Model ensemble and learning
-│   ├── playbook/          # Playbook management
-│   ├── project/           # Project detection and config
-│   ├── storage/           # Data schemas and storage
-│   └── utils/             # Utilities (LLM client, etc.)
-├── tests/                 # Test suite
-├── docs/                  # Documentation
-├── features/              # Example Gherkin features
-├── data/                  # Playbooks and knowledge
-│   └── playbooks/         # Domain-specific playbooks
-├── ace_cli.py            # Main CLI interface
-├── demo_*.py             # Demo scripts
-├── requirements.txt       # Core dependencies
-└── requirements-ml.txt    # ML/MLflow dependencies
+│   ├── agents/            # Language pods (Python/TypeScript/Go), TDD agent, test review
+│   ├── audit/              # Hash-chained audit trail (store, collector, query API, checkpoint)
+│   ├── benchmark/          # Blind evaluation rubrics, semantic/production analysis
+│   ├── broker/             # Adaptive capability broker, Bayesian routing
+│   ├── cli/                 # `ace` CLI entry point (registered in pyproject.toml)
+│   ├── contracts/          # Contract-driven development (decomposer, architect, validator)
+│   ├── core/                # Generator / Reflector / Curator (ACE learning loop)
+│   ├── ensemble/           # Model ensemble learning, voting, consensus
+│   ├── ml/                  # MLflow integration
+│   ├── playbook/           # Playbook management, retrieval, distillation
+│   ├── project/            # Project detection and config
+│   ├── reliability/        # Playbook/TDD-cycle reliability analysis
+│   ├── retrieval/          # CGR³ (Retrieve-Rank-Reason) semantic retrieval
+│   ├── storage/            # Data schemas, repository, experiment logging
+│   └── utils/               # LLM client, embeddings, and other shared utilities
+├── tests/                  # Test suite (pytest)
+├── demos/                  # Runnable demo scripts, one per showcased capability
+├── examples/               # Sample fixtures the demos operate on
+├── scripts/                # Operational/utility scripts (playbook inspection, migration, etc.)
+├── docs/                   # Documentation, including docs/adr/ (Architecture Decision Records)
+├── docker/                 # Podman/Docker harness images for the sandboxed language pods
+├── bootstrap/              # Clean-room synthesis pipeline (private → public TypeScript)
+├── mcp_server/             # MCP server for Claude Code integration
+├── services/               # Standalone deployable services (e.g. ace-audit)
+├── packages/               # uv workspace member packages (ace-core, ace-storage, etc.)
+├── features/               # Example Gherkin acceptance-test specs
+├── data/                   # Playbooks and knowledge
+│   └── playbooks/          # Domain-specific playbooks
+├── alembic/                # Database migrations
+├── run_cycle.py            # End-to-end iterative TDD cycle example
+├── generate_live_docs.py   # Regenerates docs/SYSTEM_ARCHITECTURE.md from source
+├── generate_live_context.py # Regenerates CONTEXT.md from source
+└── pyproject.toml          # Build config, dependencies, `ace` console script
 ```
 
 ## Documentation

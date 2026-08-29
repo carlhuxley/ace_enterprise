@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from src.contracts.contract_driven import InterfaceContract, TestCase, Fixtures
+from src.contracts.contract_driven import Fixtures, InterfaceContract, TestCase
 
 logger = logging.getLogger(__name__)
 

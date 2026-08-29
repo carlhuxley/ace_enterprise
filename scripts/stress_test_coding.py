@@ -8,6 +8,7 @@ Run from ace_enterprise root:
     python scripts/stress_test_coding.py
 """
 
+import json
 import subprocess
 import sys
 import time
@@ -17,6 +18,11 @@ from pathlib import Path
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError  # noqa: E402
+from src.agents.podman_runner import PodmanRunner  # noqa: E402
+
+_RESULT_MARKER = "===STRESS_TEST_RESULT==="
 
 
 @dataclass
@@ -122,7 +128,43 @@ TEST_CASES = [
 ]
 
 
-def run_coding_task(prompt: str, validation: str, timeout: int) -> dict:
+def _build_stress_test_script(code: str, validation: str) -> str:
+    """Pytest driver that execs/evals model-generated code *inside the sandbox*
+    and reports the result via a marked stdout line, mirroring the pattern in
+    src/contracts/contract_driven.py's _build_validation_script."""
+    return f'''
+import json
+
+_MARKER = {_RESULT_MARKER!r}
+_CODE = {code!r}
+_VALIDATION = {validation!r}
+
+
+def test_stress_case():
+    result = {{"valid": False, "error": None}}
+    exec_globals = {{}}
+    try:
+        exec(_CODE, exec_globals)
+        result["valid"] = bool(eval(_VALIDATION, exec_globals))
+    except Exception as e:
+        result["error"] = f"Validation failed: {{str(e)[:100]}}"
+    raise AssertionError(_MARKER + json.dumps(result))
+'''
+
+
+def _parse_stress_marker(output: str | None) -> dict | None:
+    for line in (output or "").splitlines():
+        idx = line.find(_RESULT_MARKER)
+        if idx == -1:
+            continue
+        try:
+            return json.loads(line[idx + len(_RESULT_MARKER):])
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def run_coding_task(prompt: str, validation: str, timeout: int, orchestrator: PodmanOrchestrator) -> dict:
     """Execute a coding task and validate the result."""
 
     # Direct model generation without agent - cleaner code extraction
@@ -181,30 +223,37 @@ print("OUTPUT_END")
         # Strip leading/trailing whitespace
         code = code.strip()
 
-        # Try to validate the code
+        # Validate the generated code inside the Podman sandbox -- never
+        # exec/eval model output in-process on the host.
         try:
-            # Execute the generated code
-            exec_globals = {}
-            exec(code, exec_globals)
-
-            # Run validation
-            is_valid = eval(validation, exec_globals)
-
-            return {
-                "success": True,
-                "valid": is_valid,
-                "code": code[:500],
-                "elapsed": elapsed,
-                "error": None
-            }
-        except Exception as e:
+            sandbox_script = _build_stress_test_script(code, validation)
+            pulse_result = orchestrator.pulse(sandbox_script)
+        except SecurityBreachError as exc:
             return {
                 "success": True,
                 "valid": False,
                 "code": code[:500],
                 "elapsed": elapsed,
-                "error": f"Validation failed: {str(e)[:100]}"
+                "error": f"SecurityBreach: {exc}"
             }
+
+        payload = _parse_stress_marker(pulse_result.output)
+        if payload is None:
+            return {
+                "success": True,
+                "valid": False,
+                "code": code[:500],
+                "elapsed": elapsed,
+                "error": f"No result from sandbox: {(pulse_result.error or '')[:200]}"
+            }
+
+        return {
+            "success": True,
+            "valid": payload.get("valid", False),
+            "code": code[:500],
+            "elapsed": elapsed,
+            "error": payload.get("error")
+        }
 
     except subprocess.TimeoutExpired:
         return {
@@ -237,51 +286,56 @@ def main():
     current_level = 0
     consecutive_failures = 0
 
-    for test in TEST_CASES:
-        if test.level != current_level:
-            current_level = test.level
-            print(f"\n{'─' * 70}")
-            print(f"LEVEL {current_level}")
-            print("─" * 70)
+    max_timeout = max(test.timeout for test in TEST_CASES)
+    orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=max_timeout))
+    try:
+        for test in TEST_CASES:
+            if test.level != current_level:
+                current_level = test.level
+                print(f"\n{'─' * 70}")
+                print(f"LEVEL {current_level}")
+                print("─" * 70)
 
-        print(f"\n[{test.name}] {test.prompt[:60]}...")
+            print(f"\n[{test.name}] {test.prompt[:60]}...")
 
-        result = run_coding_task(test.prompt, test.validation, test.timeout)
+            result = run_coding_task(test.prompt, test.validation, test.timeout, orchestrator)
 
-        # Track results
-        if test.level not in results_by_level:
-            results_by_level[test.level] = {"passed": 0, "failed": 0, "times": []}
+            # Track results
+            if test.level not in results_by_level:
+                results_by_level[test.level] = {"passed": 0, "failed": 0, "times": []}
 
-        if result["valid"]:
-            results_by_level[test.level]["passed"] += 1
-            consecutive_failures = 0
-            status = "PASS"
-        else:
-            results_by_level[test.level]["failed"] += 1
-            consecutive_failures += 1
-            status = "FAIL"
+            if result["valid"]:
+                results_by_level[test.level]["passed"] += 1
+                consecutive_failures = 0
+                status = "PASS"
+            else:
+                results_by_level[test.level]["failed"] += 1
+                consecutive_failures += 1
+                status = "FAIL"
 
-        results_by_level[test.level]["times"].append(result["elapsed"])
+            results_by_level[test.level]["times"].append(result["elapsed"])
 
-        all_results.append({
-            "level": test.level,
-            "name": test.name,
-            "valid": result["valid"],
-            "elapsed": result["elapsed"],
-            "error": result["error"]
-        })
+            all_results.append({
+                "level": test.level,
+                "name": test.name,
+                "valid": result["valid"],
+                "elapsed": result["elapsed"],
+                "error": result["error"]
+            })
 
-        print(f"  Status: {status}")
-        print(f"  Time: {result['elapsed']:.1f}s")
-        if result["error"]:
-            print(f"  Error: {result['error']}")
-        if result["code"] and not result["valid"]:
-            print(f"  Generated: {result['code'][:100]}...")
+            print(f"  Status: {status}")
+            print(f"  Time: {result['elapsed']:.1f}s")
+            if result["error"]:
+                print(f"  Error: {result['error']}")
+            if result["code"] and not result["valid"]:
+                print(f"  Generated: {result['code'][:100]}...")
 
-        # Early termination if too many failures
-        if consecutive_failures >= 3:
-            print(f"\n*** 3 consecutive failures - stopping at level {test.level} ***")
-            break
+            # Early termination if too many failures
+            if consecutive_failures >= 3:
+                print(f"\n*** 3 consecutive failures - stopping at level {test.level} ***")
+                break
+    finally:
+        orchestrator.stop()
 
     # Summary
     print(f"\n{'=' * 70}")

@@ -6,16 +6,30 @@ Handles GREEN retries with error feedback and aborts on security/policy failures
 Optional learning loop: if reflector + curator + playbook_id are provided, a
 Reflector/Curator pass runs after each successful cycle to extract reusable
 patterns and write them back to the playbook.
+
+Optional audit trail: if audit_client is provided, TEST_GENERATED,
+IMPLEMENTATION_GENERATED, PATTERN_LEARNED, and CYCLE_COMPLETED events are
+emitted onto the hash-chained audit log (see src/audit/), same events
+AutonomousTDDAgent used to emit natively.
 """
 import dataclasses
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
+from src.audit.schemas import AuditEventType as _AuditEventType
 
 logger = logging.getLogger(__name__)
+
+# Fallback actor_id when no model_id is supplied (e.g. older callers/tests).
+# PerformanceAggregator groups metrics BY actor_id, so every real caller
+# should pass a model_id that actually identifies the LLM in use --
+# otherwise every agent/model routed through this runner collapses into one
+# indistinguishable bucket and AdaptiveBroker has nothing to route between.
+_ACTOR_ID = "tdd-agent-cycle-runner"
 
 
 @dataclass
@@ -48,6 +62,14 @@ class TDDCycleRunner:
       curator            — Curator instance; synthesises bullets from reflector output
       playbook_id        — target playbook for curator writes (required when using
                            reflector/curator; defaults to "podman_harness")
+      audit_client       — emits TEST_GENERATED/IMPLEMENTATION_GENERATED/
+                           PATTERN_LEARNED/CYCLE_COMPLETED events (e.g. LocalAuditClient)
+      max_red_attempts   — retries RED generation/parsing failures that never
+                           reached the container (e.g. the LLM's own code
+                           doesn't parse) -- distinct from a normal RED PASS
+                           result (test correctly fails with no impl yet),
+                           which is never retried. Security/policy aborts are
+                           never retried either.
     """
 
     def __init__(
@@ -58,6 +80,11 @@ class TDDCycleRunner:
         playbook_id: str = "podman_harness",
         reflector=None,
         curator=None,
+        audit_client=None,
+        max_red_attempts: int = 2,
+        team_id: str | None = None,
+        model_id: str | None = None,
+        task_type: str | None = None,
     ) -> None:
         self._pod = pod
         self._max_green_attempts = max_green_attempts
@@ -65,13 +92,49 @@ class TDDCycleRunner:
         self._playbook_id = playbook_id
         self._reflector = reflector
         self._curator = curator
+        self._audit_client = audit_client
+        self._max_red_attempts = max_red_attempts
+        # Stamped into every bullet Curator writes (see DeltaBullet.team_id /
+        # Curator._parse_synthesis) so ContextScorer.score_team()'s RANK
+        # dimension has real data to score against instead of always hitting
+        # the "no team context" neutral path.
+        self._team_id = team_id
+        # Real model/agent identity (e.g. "openrouter/deepseek/deepseek-v4"
+        # or "claude-cli"), used as the audit actor_id so
+        # PerformanceAggregator.get_all_agent_metrics() can distinguish
+        # agents instead of collapsing everything into the fallback
+        # _ACTOR_ID bucket.
+        self._model_id = model_id or _ACTOR_ID
+        # e.g. the target language ("python"/"typescript"/"go") -- the only
+        # task-classification signal currently available at this layer.
+        self._task_type = task_type
 
     def run(self, spec: PodSpec) -> CycleResult:
+        cycle_start = time.monotonic()
         token_start = len(self._pod.token_usage())
 
         # --- RED ---
+        # All three pods return PhaseResult(output="", error=str(exc)) for
+        # failures during generation/parsing/import-checking (before
+        # orchestrator.pulse() is ever called) -- commit_to_disk() never ran,
+        # so there's no test file yet. Unlike a security/policy abort or a
+        # normal RED result (test correctly fails in the container with no
+        # impl yet, which always has real pytest/vitest/go output), this is
+        # often just LLM output-formatting noise (e.g. an unclosed markdown
+        # fence, a stray non-ASCII character breaking the parser) worth one
+        # retry before giving up -- GREEN already gets this treatment.
         red_result = self._pod.run_red(spec)
-        if _is_abort(red_result):
+        for _ in range(self._max_red_attempts - 1):
+            red_never_pulsed = red_result.output == "" and bool(red_result.error)
+            if _is_abort(red_result) or not red_never_pulsed:
+                break
+            red_result = self._pod.run_red(spec)
+
+        red_never_pulsed = red_result.output == "" and bool(red_result.error)
+        if _is_abort(red_result) or red_never_pulsed:
+            reason = red_result.error if _is_abort(red_result) else (
+                red_result.error or "RED did not write a test file"
+            )
             cycle_result = CycleResult(
                 success=False,
                 feature_requirement=spec.feature_requirement,
@@ -80,10 +143,15 @@ class TDDCycleRunner:
                 refactor_result=None,
                 green_attempts=0,
                 token_usage=self._pod.token_usage()[token_start:],
-                error=f"RED aborted: {red_result.error}",
+                error=f"RED aborted: {reason}",
             )
             self._log(spec, cycle_result)
+            self._emit_cycle_completed(spec, cycle_result, time.monotonic() - cycle_start)
             return cycle_result
+
+        self._emit(_AuditEventType.TEST_GENERATED, {
+            "test_name": spec.test_file.stem, "cycle": spec.cycle_number,
+        })
 
         # --- GREEN with retries ---
         green_result = PhaseResult(passed=False, output="", error=None)
@@ -109,7 +177,12 @@ class TDDCycleRunner:
                 error=green_result.error or "GREEN phase failed",
             )
             self._log(spec, cycle_result)
+            self._emit_cycle_completed(spec, cycle_result, time.monotonic() - cycle_start)
             return cycle_result
+
+        self._emit(_AuditEventType.IMPLEMENTATION_GENERATED, {
+            "file": str(spec.implementation_file), "cycle": spec.cycle_number,
+        })
 
         # --- REFACTOR ---
         refactor_result = self._pod.run_refactor(spec)
@@ -131,6 +204,7 @@ class TDDCycleRunner:
             cycle_result = dataclasses.replace(cycle_result, learned_bullets=learned)
 
         self._log(spec, cycle_result)
+        self._emit_cycle_completed(spec, cycle_result, time.monotonic() - cycle_start)
         return cycle_result
 
     # ------------------------------------------------------------------
@@ -174,6 +248,7 @@ class TDDCycleRunner:
                 task_context={
                     "requirement": spec.feature_requirement,
                     "cycle": spec.cycle_number,
+                    "team_id": self._team_id,
                 },
             )
             self._curator.apply_updates(self._playbook_id, curator_output)
@@ -181,10 +256,47 @@ class TDDCycleRunner:
                 f"TDDCycleRunner: wrote {len(curator_output.delta_bullets)} "
                 f"bullet(s) to playbook '{self._playbook_id}'"
             )
+            if self._audit_client is not None:
+                for bullet in curator_output.delta_bullets:
+                    self._emit(_AuditEventType.PATTERN_LEARNED, {
+                        "section": bullet.section, "content_hash": bullet.content_hash,
+                    })
             return curator_output.delta_bullets
         except Exception as exc:
             logger.warning(f"TDDCycleRunner: learning step failed: {exc}")
             return []
+
+    # ------------------------------------------------------------------
+    # Audit trail
+    # ------------------------------------------------------------------
+
+    def _emit(self, event_type, payload: dict) -> None:
+        if self._audit_client is None:
+            return
+        try:
+            self._audit_client.emit_simple(
+                event_type=event_type,
+                actor_id=self._model_id,
+                payload=payload,
+                playbook_id=self._playbook_id,
+            )
+        except Exception as exc:
+            logger.warning(f"TDDCycleRunner: audit emit failed: {exc}")
+
+    def _emit_cycle_completed(
+        self, spec: PodSpec, result: CycleResult, elapsed_seconds: float
+    ) -> None:
+        # cost/quality_score/complexity are deliberately omitted -- no real
+        # pricing table or quality-scoring instrument exists in this pipeline
+        # yet, and PerformanceAggregator/AdaptiveBroker should never route on
+        # fabricated numbers.
+        self._emit(_AuditEventType.CYCLE_COMPLETED, {
+            "cycle": spec.cycle_number,
+            "success": result.success,
+            "bullets_learned": len(result.learned_bullets),
+            "elapsed_seconds": elapsed_seconds,
+            "task_type": self._task_type,
+        })
 
     # ------------------------------------------------------------------
     # Logging
@@ -196,6 +308,16 @@ class TDDCycleRunner:
         total_tokens = sum(u.input_tokens + u.output_tokens for u in result.token_usage)
         test_code = _read_if_exists(spec.test_file)
         impl_code = _read_if_exists(spec.implementation_file)
+        # Most recent TokenUsage entry carries the freshest model attribution
+        # (LanguagePod._intercept_tokens implementations record it per LLM
+        # call); None for pods/clients that predate this or made no call.
+        actual_model = requested_model = provider = None
+        for usage in reversed(result.token_usage):
+            if usage.actual_model or usage.provider:
+                actual_model = usage.actual_model
+                requested_model = usage.requested_model
+                provider = usage.provider
+                break
         self._experiment_logger.log_tdd_cycle(
             cycle_number=spec.cycle_number,
             requirement=spec.feature_requirement,
@@ -212,6 +334,9 @@ class TDDCycleRunner:
             ],
             playbook_id=self._playbook_id,
             tokens_used=total_tokens,
+            actual_model=actual_model,
+            requested_model=requested_model,
+            provider=provider,
             retry_count=result.green_attempts,
             harness_metadata={
                 "green_attempts": result.green_attempts,

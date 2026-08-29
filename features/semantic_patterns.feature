@@ -3,9 +3,6 @@ Feature: Semantic Code Pattern Detection
   I want to detect design patterns and code quality indicators
   So that I can reward good practices like dependency injection and type hints
 
-  # Implementation: src/broker/semantic_analyzer.py
-  # Tests: tests/test_semantic_analyzer.py
-
   Background:
     Given the SemanticCodeAnalyzer is initialized
 

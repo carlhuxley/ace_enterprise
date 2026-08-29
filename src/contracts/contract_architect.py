@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
-from src.contracts.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+from src.contracts.contract_schema import ContractSpec, FixtureSpec, TestCaseSpec
 from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)

@@ -3,13 +3,13 @@
 Bead: ace_enterprise-nf7
 """
 
+from src.benchmark.rubrics.analysis import AnalysisRubric
 from src.benchmark.rubrics.base import (
     DimensionScore,
     EvaluationRubric,
     RubricResult,
     ScoringDimension,
 )
-from src.benchmark.rubrics.analysis import AnalysisRubric
 from src.benchmark.rubrics.code import CodeGenerationRubric
 from src.benchmark.rubrics.docs import DocumentationRubric
 from src.benchmark.rubrics.tests import TestWritingRubric

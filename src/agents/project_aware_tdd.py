@@ -9,7 +9,6 @@ Provides awareness of project structure to ensure:
 
 from dataclasses import dataclass, field
 
-
 # Keyword to folder mappings for smart file placement
 KEYWORD_FOLDER_MAPPINGS = {
     "broker": "src/broker",
@@ -93,7 +92,7 @@ class ProjectArchitecture:
 class CodeReuseDetector:
     """Detects opportunities for code reuse in the project."""
 
-    def __init__(self, project_name: str = "home-ch_dev-ace_enterprise"):
+    def __init__(self, project_name: str = "ace_enterprise"):
         self.project_name = project_name
         self._utility_cache: dict[str, list[str]] = {}
 

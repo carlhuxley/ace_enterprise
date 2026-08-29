@@ -146,7 +146,7 @@ class TestGherkinFeatureBridgeParse:
         assert spec.scenarios == []
 
     def test_works_with_real_repo_feature_file(self):
-        repo_feature = Path("features/project_aware_tdd.feature")
+        repo_feature = Path("features/tiered_energy_tariff.feature")
         if not repo_feature.exists():
             pytest.skip("feature file not present")
         spec = GherkinFeatureBridge.parse(repo_feature)

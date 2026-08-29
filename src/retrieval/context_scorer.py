@@ -22,12 +22,20 @@ class ContextScorer:
     that explains why the score is low.
     """
 
-    # Default weights for each dimension
+    # Default weights for each dimension. Equal weighting across all 5
+    # documented dimensions (temporal/team/tech_stack/project/domain) --
+    # previously domain was scored by score_domain() but never actually
+    # combined here, so only 4 of the "5-dimension context scoring" the
+    # README describes ever affected ranking. No signal exists for
+    # prioritizing one dimension over another, so equal weight is the least
+    # presumptuous default; override via the `weights` constructor arg if a
+    # deployment wants to prioritize differently.
     DEFAULT_WEIGHTS = {
-        "temporal": 0.25,
-        "team": 0.25,
-        "tech_stack": 0.30,
+        "temporal": 0.20,
+        "team": 0.20,
+        "tech_stack": 0.20,
         "project": 0.20,
+        "domain": 0.20,
     }
 
     def __init__(
@@ -81,6 +89,11 @@ class ContextScorer:
 
         score, gap = self.score_project(bullet, context)
         scores["project"] = score
+        if gap:
+            gaps.append(gap)
+
+        score, gap = self.score_domain(bullet, context)
+        scores["domain"] = score
         if gap:
             gaps.append(gap)
 
@@ -240,32 +253,48 @@ class ContextScorer:
 
         return score, None
 
+    @staticmethod
+    def _parse_version(v: str) -> tuple[int, ...]:
+        """Parse a dotted version string into a tuple of ints for numeric
+        comparison, e.g. "3.11" -> (3, 11), "3.10.2-beta" -> (3, 10, 2).
+        Non-digit suffixes are truncated rather than raising, since
+        tech_context values aren't guaranteed to be strict PEP 440/semver
+        (they're free-form strings like {"python": ">=3.10"})."""
+        parts = []
+        for segment in v.strip().split("."):
+            digits = ""
+            for ch in segment:
+                if not ch.isdigit():
+                    break
+                digits += ch
+            parts.append(int(digits) if digits else 0)
+        return tuple(parts)
+
     def _version_compatible(self, have: str, need: str) -> bool:
         """
         Check if 'have' version satisfies 'need' requirement.
 
-        Simple implementation - just checks prefix match for now.
-        TODO: Proper semver comparison.
+        Numeric, dot-separated comparison (e.g. 3.11 > 3.8) via
+        _parse_version -- was previously lexicographic STRING comparison,
+        so "3.11" >= "3.8" evaluated False (comparing "1" < "8" as
+        characters) even though 3.11 is numerically the newer version. Not
+        full semver (no pre-release/build-metadata precedence), but correct
+        for ordinary major.minor.patch requirements.
         """
-        # Handle comparison operators
-        if need.startswith(">="):
-            need_version = need[2:]
-            return have >= need_version
-        elif need.startswith(">"):
-            need_version = need[1:]
-            return have > need_version
-        elif need.startswith("<="):
-            need_version = need[2:]
-            return have <= need_version
-        elif need.startswith("<"):
-            need_version = need[1:]
-            return have < need_version
-        elif need.startswith("=="):
-            need_version = need[2:]
-            return have == need_version
-        else:
-            # Exact or prefix match
-            return have.startswith(need.split(".")[0])
+        # Handle comparison operators -- ">=" must be checked before ">",
+        # and "<=" before "<", since the shorter prefix also matches.
+        for prefix, satisfies in (
+            (">=", lambda h, n: h >= n),
+            (">", lambda h, n: h > n),
+            ("<=", lambda h, n: h <= n),
+            ("<", lambda h, n: h < n),
+            ("==", lambda h, n: h == n),
+        ):
+            if need.startswith(prefix):
+                return satisfies(self._parse_version(have), self._parse_version(need[len(prefix):]))
+
+        # No operator: exact or prefix match
+        return have.startswith(need.split(".")[0])
 
     def score_project(
         self,

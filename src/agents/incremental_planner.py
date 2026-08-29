@@ -2,8 +2,7 @@
 IncrementalPlanner — determines the next test increment given the current
 state of the test suite and implementation.
 
-Extracted from AutonomousTDDAgent so it can be used with TDDCycleRunner
-without pulling in the full autonomous agent infrastructure.
+Used by IterativeTDDRunner alongside TDDCycleRunner.
 """
 import logging
 import re

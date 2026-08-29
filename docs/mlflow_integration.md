@@ -218,7 +218,7 @@ Run the complete demo:
 pip install mlflow scikit-learn numpy
 
 # Run demo
-python demo_mlflow_ace.py
+python demos/demo_mlflow_ace.py
 ```
 
 **Demo flow:**
@@ -578,9 +578,8 @@ for decision in query.get_decision_history():
 
 ## Documentation Links
 
-- [ACE Strategic Plan](./ACE_STRATEGIC_PLAN.md)
 - [MLflow Documentation](https://mlflow.org/docs/latest/index.html)
-- [Demo Source Code](../demo_mlflow_ace.py)
+- [Demo Source Code](../demos/demo_mlflow_ace.py)
 
 ---
 

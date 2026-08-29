@@ -22,6 +22,37 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_REFINEMENT_PROMPT = """\
+You are refining a MECHANICALLY-GENERATED Gherkin draft for readability. \
+The draft below was derived deterministically from AST analysis of real code \
+and tests -- every Given/When/Then step is already behaviorally accurate.
+
+Your job is ONLY to:
+- Humanize awkward step wording (e.g. "I process with 5, true" -> \
+"I process the order with a quantity of 5 and expedited shipping")
+- Tighten the feature description into a clear, concise summary of intent
+- Where multiple scenarios differ only in their input/output values, collapse \
+them into a single "Scenario Outline" with an "Examples:" table
+
+Rules:
+- Do NOT invent new Given/When/Then steps, scenarios, or behavior not present \
+in the draft -- you are polishing prose, not adding specification
+- Preserve every scenario's actual business meaning exactly
+- Output ONLY valid Gherkin -- no markdown fences, no prose explanation
+
+Draft Gherkin:
+{draft}
+
+Refined Gherkin feature file:"""
+
+
+def _strip_fences(text: str) -> str:
+    """Remove markdown code fences that models sometimes emit despite instructions."""
+    lines = text.splitlines()
+    return "\n".join(
+        line for line in lines if not line.strip().startswith("```")
+    ).strip()
+
 
 @dataclass
 class MethodSignature:
@@ -115,6 +146,13 @@ class ExtractionResult:
     test_analysis: TestAnalysis
     confidence_score: float
     warnings: list[str] = field(default_factory=list)
+    # Set only when an llm_client was configured: the deterministic draft
+    # below, polished for readability (humanized step wording, tightened
+    # description, near-duplicate scenarios collapsed into a Scenario
+    # Outline). None when there's no llm_client, or refinement failed and
+    # fell back to the draft -- callers should treat None as "use
+    # feature/write_gherkin_file's deterministic rendering instead".
+    refined_gherkin: str | None = None
 
 
 class CodeAnalyzer:
@@ -417,11 +455,29 @@ class GherkinExtractionAgent:
         test_analysis = self.test_analyzer.analyze(test_path)
         logger.info(f"Found {len(test_analysis.scenarios)} test scenarios")
 
-        # 3. Generate Gherkin scenarios
+        # 3. Generate Gherkin scenarios (deterministic draft -- structure and
+        # variable anchors from the AST, no LLM involved)
         feature = self._generate_feature(code_analysis, test_analysis, feature_name)
 
-        # 4. Generate step definitions
+        # 4. Generate step definitions. These are keyed to the *deterministic*
+        # draft's exact step text (feature, not refined_gherkin below) so
+        # @given/@when/@then patterns are guaranteed to match -- an LLM
+        # refinement pass that humanizes step wording would break that
+        # exact-string matching if step defs were generated from it instead.
         step_definitions = self._generate_step_definitions(feature, code_analysis)
+
+        # 4.5. Optional LLM refinement pass over the draft -- humanizes step
+        # wording, tightens the description, collapses near-duplicate
+        # scenarios into a Scenario Outline. Best-effort polish of the
+        # human-facing .feature file only; never changes what's behaviorally
+        # specified (the deterministic `feature`/step_definitions above stay
+        # the source of truth for anything that gets executed).
+        refined_gherkin = None
+        if self.llm_client is not None:
+            draft_text = self._render_gherkin_text(feature)
+            refined_gherkin = self._refine_with_llm(draft_text)
+            if refined_gherkin == draft_text:
+                refined_gherkin = None  # refinement was a no-op/fallback -- nothing to prefer over `feature`
 
         # 5. Calculate confidence
         confidence = self._calculate_confidence(code_analysis, test_analysis)
@@ -435,11 +491,34 @@ class GherkinExtractionAgent:
             code_analysis=code_analysis,
             test_analysis=test_analysis,
             confidence_score=confidence,
-            warnings=warnings
+            warnings=warnings,
+            refined_gherkin=refined_gherkin,
         )
 
         logger.info(f"Extraction complete. Confidence: {confidence:.2f}")
         return result
+
+    def _refine_with_llm(self, draft_text: str) -> str:
+        """Best-effort LLM polish pass over the deterministic draft.
+
+        Never a source of new behavior -- every Given/When/Then step already
+        came from real AST analysis of code+tests, so the prompt explicitly
+        forbids inventing steps and only asks for prose/structure polish.
+        Falls back to returning `draft_text` unchanged on any failure or
+        malformed response; refinement is optional, extraction must not
+        depend on it succeeding.
+        """
+        try:
+            prompt = _REFINEMENT_PROMPT.format(draft=draft_text)
+            response = self.llm_client.generate(prompt, temperature=0.0)
+            refined = _strip_fences(response.get("content", "").strip())
+            if "Feature:" not in refined:
+                logger.warning("LLM refinement response had no Feature: header -- keeping deterministic draft")
+                return draft_text
+            return refined[refined.index("Feature:"):]
+        except Exception as exc:
+            logger.warning(f"LLM refinement failed ({exc}) -- keeping deterministic draft")
+            return draft_text
 
     def _generate_feature(
         self,
@@ -687,33 +766,46 @@ class GherkinExtractionAgent:
         # TODO: Could extract parameter names and values more intelligently
         return params.strip()
 
-    def write_gherkin_file(self, feature: GherkinFeature, output_path: Path) -> None:
-        """Write Gherkin feature to file."""
+    def _render_gherkin_text(self, feature: GherkinFeature) -> str:
+        """Deterministically render a GherkinFeature to Gherkin text.
 
+        Shared by write_gherkin_file() and _refine_with_llm()'s draft input
+        -- the exact same rendering the LLM refines, so the draft it sees
+        matches byte-for-byte what would be written if refinement were off.
+        """
+        lines = [f"Feature: {feature.name}"]
+        if feature.description:
+            for line in feature.description.split('\n'):
+                lines.append(f"  {line}")
+        lines.append("")
+
+        for scenario in feature.scenarios:
+            lines.append(f"  Scenario: {scenario.name}")
+            for given_step in scenario.given_steps:
+                lines.append(f"    Given {given_step}")
+            for when_step in scenario.when_steps:
+                lines.append(f"    When {when_step}")
+            for then_step in scenario.then_steps:
+                lines.append(f"    Then {then_step}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def write_gherkin_file(
+        self, feature: GherkinFeature, output_path: Path, gherkin_text: str | None = None
+    ) -> None:
+        """Write Gherkin feature to file.
+
+        gherkin_text: pass ExtractionResult.refined_gherkin here to write the
+        LLM-polished version instead of re-rendering `feature` deterministically
+        (e.g. write_gherkin_file(result.feature, path, result.refined_gherkin)).
+        Defaults to the deterministic rendering when omitted or None.
+        """
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, 'w') as f:
-            # Write feature header
-            f.write(f"Feature: {feature.name}\n")
-            if feature.description:
-                for line in feature.description.split('\n'):
-                    f.write(f"  {line}\n")
-            f.write("\n")
-
-            # Write scenarios
-            for scenario in feature.scenarios:
-                f.write(f"  Scenario: {scenario.name}\n")
-
-                for given_step in scenario.given_steps:
-                    f.write(f"    Given {given_step}\n")
-
-                for when_step in scenario.when_steps:
-                    f.write(f"    When {when_step}\n")
-
-                for then_step in scenario.then_steps:
-                    f.write(f"    Then {then_step}\n")
-
-                f.write("\n")
+        text = gherkin_text if gherkin_text is not None else self._render_gherkin_text(feature)
+        if not text.endswith("\n"):
+            text += "\n"
+        output_path.write_text(text)
 
         logger.info(f"Wrote Gherkin to: {output_path}")
 

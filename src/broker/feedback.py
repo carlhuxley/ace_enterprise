@@ -11,7 +11,6 @@ import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-
 # Expertise weights applied when blending feedback from different provider roles.
 ROLE_WEIGHTS: dict[str, float] = {
     "developer": 1.0,

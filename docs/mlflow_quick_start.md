@@ -144,7 +144,7 @@ ace.update_decision_outcome(
 ## Run the Demo
 
 ```bash
-python demo_mlflow_ace.py
+python demos/demo_mlflow_ace.py
 ```
 
 Shows:
@@ -158,7 +158,7 @@ Shows:
 
 - **Complete Guide:** [docs/mlflow_integration.md](mlflow_integration.md)
 - **Summary:** [docs/mlflow_integration_summary.md](mlflow_integration_summary.md)
-- **Demo Code:** [demo_mlflow_ace.py](../demo_mlflow_ace.py)
+- **Demo Code:** [demos/demo_mlflow_ace.py](../demos/demo_mlflow_ace.py)
 
 ---
 

@@ -150,7 +150,7 @@ Generate bullets that will genuinely help prevent similar mistakes in the future
             content = llm_response["content"]
 
             # Parse bullets and reasoning
-            delta_bullets, reasoning = self._parse_synthesis(content)
+            delta_bullets, reasoning = self._parse_synthesis(content, task_context)
 
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
@@ -197,6 +197,13 @@ Version: {playbook.version}
         if reflector_output.key_insight:
             prompt += f"\n**Key Insight:**\n{reflector_output.key_insight}\n"
 
+        if reflector_output.code_invariant:
+            prompt += (
+                f"\n**Code Invariant (embed this exact expression verbatim, "
+                f"in backticks, in the bullet you write from it -- do not "
+                f"paraphrase it into prose):**\n`{reflector_output.code_invariant}`\n"
+            )
+
         # Available sections
         prompt += """
 
@@ -218,6 +225,10 @@ For each bullet:
 2. Write specific, actionable content
 3. Focus on what to DO, not just what went wrong
 4. Make it generalizable to similar situations
+5. If a Code Invariant was provided above, include that exact expression
+   verbatim (in backticks) in the bullet -- a bullet that only restates the
+   idea in prose ("check the sign of the divisor") without the precise
+   expression ("`math.copysign(1.0, x) < 0`") is not specific enough
 
 Format your response as:
 
@@ -243,17 +254,29 @@ Format your response as:
 
         return prompt
 
-    def _parse_synthesis(self, content: str) -> tuple[list[DeltaBullet], str]:
+    def _parse_synthesis(
+        self, content: str, task_context: dict[str, Any] | None = None,
+    ) -> tuple[list[DeltaBullet], str]:
         """
         Parse LLM synthesis into delta bullets and reasoning.
 
         Args:
             content: Raw LLM response
+            task_context: Caller-supplied context (team_id, project_ids,
+                applicable_domains, tech_context, tags) stamped onto every
+                bullet verbatim -- these are provenance/scoping facts the
+                caller actually knows, not something to ask the LLM to
+                invent. `tags` is for fine-grained topic scoping narrower
+                than `applicable_domains` (e.g. BulletRetriever's
+                required_tags/excluded_tags, or benchmarks/runner.py using
+                it to stop bullets from one unrelated task under a shared
+                domain diluting another task's retry prompt).
 
         Returns:
             Tuple of (delta_bullets, reasoning)
         """
-        delta_bullets = []
+        task_context = task_context or {}
+        delta_bullets: list[DeltaBullet] = []
         reasoning = ""
 
         lines = content.split("\n")
@@ -262,17 +285,49 @@ Format your response as:
         parsing_bullets = False
         reasoning_lines = []
 
+        # A bullet's content can span multiple lines when the model
+        # introduces a fenced code block after a colon (e.g. "Here's a
+        # corrected implementation:\n```python\n...\n```"). Only the intro
+        # line matched "-"/"*" below, so the fence that followed it was
+        # silently dropped -- found via forensic analysis of a real
+        # benchmark run: a curated bullet promised "a corrected
+        # implementation" the playbook never actually contained. Accumulate
+        # the open bullet's lines here and finalize (join + append) it only
+        # once a new bullet, a new section, or end-of-input is reached.
+        current_bullet_lines: list[str] | None = None
+        in_code_fence = False
+
+        def finalize_bullet() -> None:
+            if current_bullet_lines is None or current_section is None:
+                return
+            bullet_content = "\n".join(current_bullet_lines).strip()
+            if not bullet_content:
+                return
+            delta_bullets.append(DeltaBullet(
+                section=current_section,
+                content=bullet_content,
+                tags=list(task_context.get("tags") or []),
+                team_id=task_context.get("team_id"),
+                project_ids=task_context.get("project_ids"),
+                applicable_domains=task_context.get("applicable_domains"),
+                tech_context=task_context.get("tech_context"),
+            ))
+
         for line in lines:
             line_stripped = line.strip()
 
             # Check for Reasoning section
             if "### Reasoning" in line or "## Reasoning" in line:
+                finalize_bullet()
+                current_bullet_lines = None
                 parsing_reasoning = True
                 parsing_bullets = False
                 continue
 
             # Check for Delta Bullets section
             if "### Delta Bullets" in line or "## Delta Bullets" in line:
+                finalize_bullet()
+                current_bullet_lines = None
                 parsing_reasoning = False
                 parsing_bullets = True
                 continue
@@ -286,6 +341,9 @@ Format your response as:
             if parsing_bullets:
                 # Check for section header
                 if line_stripped.startswith("#### Section:") or line_stripped.startswith("**Section:"):
+                    finalize_bullet()
+                    current_bullet_lines = None
+                    in_code_fence = False
                     # Extract section name
                     section_text = line_stripped.split(":", 1)[1].strip()
                     # Remove markdown artifacts
@@ -293,19 +351,38 @@ Format your response as:
                     current_section = section_text
                     continue
 
+                # Fenced code block delimiter -- toggle state and keep the
+                # fence marker itself as part of the open bullet so its
+                # content still renders as a valid code block.
+                if line_stripped.startswith("```"):
+                    in_code_fence = not in_code_fence
+                    if current_bullet_lines is not None:
+                        current_bullet_lines.append(line.rstrip())
+                    continue
+
+                # Inside a fence, every line belongs to the bullet that
+                # opened it -- checked before the "-"/"*" bullet-start test
+                # below so a code line that happens to start with those
+                # characters (a unary-minus expression, a markdown list
+                # inside a docstring) isn't mistaken for a new top-level
+                # bullet.
+                if in_code_fence:
+                    if current_bullet_lines is not None:
+                        current_bullet_lines.append(line.rstrip())
+                    continue
+
                 # Check for bullet
                 if line_stripped.startswith("-") or line_stripped.startswith("*"):
-                    if current_section:
-                        # Extract bullet content
-                        bullet_content = line_stripped[1:].strip()
+                    finalize_bullet()
+                    current_bullet_lines = [line_stripped[1:].strip()]
+                    continue
 
-                        # Create delta bullet
-                        delta_bullet = DeltaBullet(
-                            section=current_section,
-                            content=bullet_content,
-                            tags=[],
-                        )
-                        delta_bullets.append(delta_bullet)
+                # Any other line outside a fence (blank lines, stray prose
+                # between bullets) is ignored, same as before this fix --
+                # only fenced code blocks that follow a bullet are now
+                # preserved instead of silently dropped.
+
+        finalize_bullet()
 
         # Combine reasoning
         reasoning = "\n".join(reasoning_lines).strip()

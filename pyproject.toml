@@ -121,6 +121,14 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
+
+    # Code quality -- also declared under [project.optional-dependencies].dev
+    # for CI's pip-based install; duplicated here so `uv sync` (the local
+    # dev workflow) installs them too instead of only pulling in pytest.
+    "ruff>=0.1.0",
+    "black>=24.0.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
 ]
 
 [tool.uv.workspace]

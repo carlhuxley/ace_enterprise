@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from src.agents.podman_orchestrator import PulseResult, canonical_hash
+from src.agents.podman_orchestrator import PulseResult
 from src.agents.podman_runner import PodmanRunner
 
 _TS_PROJECT = "/opt/ts-project"

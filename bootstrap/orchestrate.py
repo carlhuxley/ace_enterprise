@@ -121,8 +121,8 @@ _SYNTHESIS_PRIORITY = [
     "file_lock",
     "settings",
     "config",
-    "schemas",        # storage/schemas
-    "models",         # storage/models
+    "storage_schemas",  # storage/schemas
+    "storage_models",   # storage/models
     # Tier 2
     "database",
     "repository",
@@ -176,6 +176,24 @@ MODEL_EXTRACT = "anthropic/claude-haiku-4-5"    # Stage 1: Gherkin extraction
 MODEL_PASS1   = "anthropic/claude-haiku-4-5"    # Pass 1: cheap synthesis
 MODEL_PASS2   = "anthropic/claude-sonnet-4-5"   # Pass 2: escalate on repeated failure
 
+
+def _make_llm_client(model: str, client: str):
+    """Construct the LLM client for one synthesis role (extract/pass1/pass2/...).
+
+    client="claude-cli" ignores `model` entirely and returns a fresh
+    ClaudeCliClient -- it has no per-call model selection (always whatever
+    the authenticated Claude Code session defaults to), so callers that
+    construct two of these for cost-tier escalation (Pass1 vs Pass2) get
+    two independent instances that behave identically rather than a
+    literal cheap/premium distinction. That's an accepted tradeoff of
+    --client claude-cli, not a bug -- see _parse_args()'s --client help.
+    """
+    if client == "claude-cli":
+        from src.utils.claude_cli_client import ClaudeCliClient
+        return ClaudeCliClient()
+    from src.utils.llm_client import LLMClient
+    return LLMClient(provider="openrouter", model=model)
+
 # ---------------------------------------------------------------------------
 
 
@@ -224,19 +242,30 @@ def _parse_args():
         "--force", action="store_true",
         help="Re-synthesise modules that already have output files in the OSS dir"
     )
+    parser.add_argument(
+        "--client", choices=["openrouter", "claude-cli"], default="openrouter",
+        help="LLM backend for extraction and synthesis. 'openrouter' (default) requires "
+             "OPENROUTER_API_KEY with remaining credit. 'claude-cli' routes every call "
+             "through the local authenticated Claude Code session instead -- no API key "
+             "or credits needed, but it has no per-call model selection, so the Pass1/"
+             "Pass2 cost-tier escalation collapses to a single model either way."
+    )
     args = parser.parse_args()
     if args.file:
         p = Path(args.file)
         if not p.exists():
             print(f"Error: {p} not found", file=sys.stderr)
             sys.exit(1)
-        return [p], args.lang, args.force
-    return get_target_modules(PRIVATE_SRC_ROOT, args.lang), args.lang, args.force
+        return [p], args.lang, args.force, args.client
+    return get_target_modules(PRIVATE_SRC_ROOT, args.lang), args.lang, args.force, args.client
 
 
 def main() -> None:
-    source_files, lang, force = _parse_args()
-    _check_openrouter_credits()
+    source_files, lang, force, client = _parse_args()
+    if client == "openrouter":
+        _check_openrouter_credits()
+    else:
+        print(f"[INFO] --client={client} — skipping OpenRouter credit check, no API key needed")
     OSS_DIR.mkdir(parents=True, exist_ok=True)
     log = BootstrapAuditLog(AUDIT_LOG_PATH)
 
@@ -263,6 +292,8 @@ def main() -> None:
         features_dir=FEATURES_DIR,
         log=log,
         model=MODEL_EXTRACT,
+        llm_client=_make_llm_client(MODEL_EXTRACT, client),
+        src_root=PRIVATE_SRC_ROOT,
     )
     print(f"  {len(feature_files)} feature files written to {FEATURES_DIR}/")
 
@@ -316,6 +347,13 @@ def main() -> None:
         print("  Fix these before running synthesis to avoid STYLE_BLOCK failures.\n")
 
     # ------------------------------------------------------------------
+    # Set up this run's branch BEFORE any synthesis writes a single file --
+    # see _start_run_branch's docstring for why this can't happen at
+    # Stage 5 (commit time) like it used to.
+    # ------------------------------------------------------------------
+    _start_run_branch(OSS_DIR, log)
+
+    # ------------------------------------------------------------------
     # Stage 2 + 3: Synthesize & Verify (Gherkin TDD path)
     # ------------------------------------------------------------------
     print(f"\n=== Stage 2+3: Synthesize & Verify ({len(feature_files)} features) ===")
@@ -324,9 +362,9 @@ def main() -> None:
     print(f"  Priority queue ({len(priority_pending)}): {', '.join(priority_pending)}")
     try:
         if lang == "typescript":
-            passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force)
+            passed, failed = _synthesis_loop_ts(feature_files, OSS_DIR, log, force=force, client=client)
         else:
-            passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force)
+            passed, failed = _synthesis_loop(feature_files, OSS_DIR, log, force=force, client=client)
     except BootstrapAbortError as exc:
         _abort_run(log, exc)
     print(f"  passed={passed}  blocked={failed}")
@@ -337,7 +375,7 @@ def main() -> None:
     if contract_specs:
         print(f"\n=== Stage 2.5: Contract Interface Synthesis ({len(contract_specs)} specs) ===")
         try:
-            c_passed, c_failed = _contract_synth_path(contract_specs, OSS_DIR, log, force=force)
+            c_passed, c_failed = _contract_synth_path(contract_specs, OSS_DIR, log, force=force, client=client)
         except BootstrapAbortError as exc:
             _abort_run(log, exc)
         passed += c_passed
@@ -379,32 +417,165 @@ def main() -> None:
     print(f"Audit log copied → {dest}")
 
     # ------------------------------------------------------------------
-    # Stage 5: Commit public repo
+    # Stage 5: Commit public repo (own branch off main -- never main itself)
     # ------------------------------------------------------------------
     print("\n=== Stage 5: Commit public repo ===")
-    _commit_public_repo(OSS_DIR, passed, log)
+    try:
+        _commit_public_repo(OSS_DIR, passed, log)
+    except RegressionAbortError as exc:
+        log.record("RUN_ABORT_TERMINAL", reason=str(exc))
+        print(f"\n{'=' * 70}\nBOOTSTRAP RUN ABORTED — REGRESSION DETECTED\n{exc}\n{'=' * 70}")
+        sys.exit(1)
+    except MainBranchCommitRefusedError as exc:
+        log.record("RUN_ABORT_TERMINAL", reason=str(exc))
+        print(f"\n{'=' * 70}\nBOOTSTRAP RUN ABORTED — MAIN CHECKED OUT\n{exc}\n{'=' * 70}")
+        sys.exit(1)
 
     print(f"\nDone. Public repo: {OSS_DIR.resolve()}")
-    print("Next: cd ../ace-enterprise-oss && git remote add origin <url> && git push -u origin main")
+    print("Review and merge the run's branch into main yourself when satisfied "
+          "(see the 'Committed to branch' message above for the exact commands) "
+          "-- nothing pushes to origin/main automatically.")
+
+
+class RegressionAbortError(RuntimeError):
+    """Raised when a run would delete/empty files that main already has
+    committed -- see _commit_public_repo's regression guard."""
+
+
+class MainBranchCommitRefusedError(RuntimeError):
+    """Raised when _commit_public_repo finds main checked out instead of a
+    bootstrap/<timestamp> run branch -- see its docstring for why this is
+    a hard refusal rather than a fall-through to committing on main."""
+
+
+def _git_oss(oss_dir: Path, *args: str) -> "subprocess.CompletedProcess":
+    import subprocess
+    return subprocess.run(["git", *args], cwd=oss_dir, capture_output=True, text=True, check=True)
+
+
+def _start_run_branch(oss_dir: Path, log: BootstrapAuditLog) -> str:
+    """Create and check out this run's branch off main's current tip --
+    called BEFORE Stage 2 writes a single file into oss_dir, not at Stage 5
+    (commit time) like a first version of this fix did.
+
+    Discovered live why the ordering matters: branch creation used to
+    happen in _commit_public_repo, at the very end of a run. But nothing
+    resets the working tree to main at the *start* of a run -- whatever
+    branch the previous run's Stage 5 left checked out (by design; merging
+    to main is a deliberate human step) is still checked out when the next
+    run's Stage 2 starts writing files on top of it. By the time that next
+    run reached its own Stage 5 and tried `git checkout main`, git
+    correctly refused ("local changes would be overwritten") rather than
+    silently discard 17 modules' worth of real, uncommitted progress --
+    but that's a crash with real work stranded, not what "every run gets
+    its own clean branch" was supposed to guarantee.
+
+    Now: whatever's on disk when a run starts (any leftover uncommitted
+    changes from an interrupted previous run) gets committed to whatever
+    branch is currently checked out FIRST -- preserving it, never
+    discarding -- then main is checked out cleanly and a fresh
+    bootstrap/<UTC timestamp>-<uuid> branch is cut from its tip for this
+    run to write into from a known-clean baseline.
+    """
+    import subprocess
+    import uuid
+    from datetime import datetime, timezone
+
+    is_new = not (oss_dir / ".git").exists()
+    if is_new:
+        _git_oss(oss_dir, "init", "-b", "main")
+        _git_oss(oss_dir, "config", "user.name", "ace-bootstrap")
+        _git_oss(oss_dir, "config", "user.email", "bootstrap@ace-enterprise")
+        _git_oss(oss_dir, "commit", "--allow-empty", "-m", "Initial empty commit")
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=oss_dir, capture_output=True, text=True
+    )
+    if status.stdout.strip():
+        current = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=oss_dir, capture_output=True, text=True
+        ).stdout.strip()
+        print(f"  [WARN] Uncommitted changes found on '{current}' from a previous run -- "
+              f"committing them there before starting this run's branch, to avoid losing them.")
+        _git_oss(oss_dir, "add", "-A")
+        _git_oss(oss_dir, "commit", "-m", f"Recovered uncommitted changes from previous run on {current}")
+        log.record("PREVIOUS_RUN_RECOVERED", oss_dir=str(oss_dir), branch=current)
+
+    # uuid suffix guards against two runs landing in the same second (the
+    # timestamp alone collided immediately in testing -- consecutive calls
+    # with no real work between them).
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    branch = f"bootstrap/{run_id}-{uuid.uuid4().hex[:6]}"
+    _git_oss(oss_dir, "checkout", "main")
+    _git_oss(oss_dir, "checkout", "-b", branch)
+    log.record("RUN_BRANCH_STARTED", oss_dir=str(oss_dir), branch=branch)
+    print(f"  Run branch: {branch}")
+    return branch
 
 
 def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog) -> None:
-    import subprocess
-    from datetime import datetime
+    """Commit this run's output to the branch _start_run_branch already
+    checked out -- never directly to main, which is what gets pushed to
+    the public GitHub repo (origin/main); nothing should land there
+    without a human reviewing the diff first.
 
-    def _git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["git", *args], cwd=oss_dir, capture_output=True, text=True, check=True
+    The regression guard is the second, independent safeguard: before
+    committing, every file main's tip already tracks is checked for
+    continued presence. Discovered live why this matters too -- a run can
+    silently overwrite-then-delete previously-good, already-committed
+    files when fresh synthesis fails clean-room/style verification against
+    a stale spec (orphaned .feature files from a naming-scheme change
+    queued themselves for re-synthesis and clobbered 34 modules' worth of
+    good output). A missing file aborts with RegressionAbortError and the
+    full list -- a hard failure surfaced at the top level, not a line in a
+    100+-module printout to notice or miss.
+
+    Merging this run's branch into main is a separate, deliberate step
+    left to a human (or a future --merge flag), never automatic.
+
+    Third, independent safeguard, added after live fallout from the first
+    two: a run committed straight onto main despite _start_run_branch
+    correctly creating and checking out a bootstrap/<timestamp> branch at
+    the start (confirmed via RUN_BRANCH_STARTED in the audit log) -- no
+    checkout call anywhere in this file's code path can explain the branch
+    being back on main by the time this function ran hours later, so the
+    most likely cause is something external touching the checked-out
+    branch in that window (this is a real directory on a real filesystem;
+    nothing stops another process or a human `cd`-ing in and running
+    `git checkout main` themselves while a run is still in progress). Root
+    cause aside, the fix that actually matters is structural: this
+    function now refuses outright to commit while main is checked out,
+    regardless of how it got that way. No content was lost that time (the
+    regression guard below still held), but "never lands on main
+    unreviewed" should not depend on nothing-external-ever-touching-the-
+    directory for hours.
+    """
+    import subprocess
+    from datetime import datetime, timezone
+
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=oss_dir, capture_output=True, text=True
+    ).stdout.strip()
+    if branch == "main":
+        raise MainBranchCommitRefusedError(
+            "Refusing to commit: main is checked out in the public repo, but "
+            "_commit_public_repo() must only ever commit to a bootstrap/<timestamp> "
+            "run branch. Something switched the checked-out branch back to main "
+            "after _start_run_branch ran -- nothing in orchestrate.py's own code "
+            "path does this, so check for another process or a manual `git "
+            f"checkout` in {oss_dir} during this run. Nothing was committed."
         )
 
-    is_new = not (oss_dir / ".git").exists()
+    # main tip's tracked files -- the baseline the regression guard checks
+    # the new manifest against. Empty for a brand-new repo (nothing to regress).
+    ls_tree = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "main"],
+        cwd=oss_dir, capture_output=True, text=True,
+    )
+    main_files = {line for line in ls_tree.stdout.splitlines() if line}
+    is_new = len(main_files) == 0
 
-    if is_new:
-        _git("init", "-b", "main")
-        _git("config", "user.name", "ace-bootstrap")
-        _git("config", "user.email", "bootstrap@ace-enterprise")
-
-    _git("add", ".")
+    _git_oss(oss_dir, "add", ".")
 
     # Check whether there's anything to commit
     status = subprocess.run(
@@ -412,6 +583,8 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
     )
     if not status.stdout.strip():
         print("  Nothing new to commit — public repo already up to date.")
+        _git_oss(oss_dir, "checkout", "main")
+        _git_oss(oss_dir, "branch", "-d", branch)
         return
 
     # Audit manifest — every file about to be committed, with sha256
@@ -421,19 +594,35 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
             manifest[str(f.relative_to(oss_dir))] = BootstrapAuditLog.sha256(f)
     log.record("REPO_CONTENTS", oss_dir=str(oss_dir), file_count=len(manifest), files=manifest)
 
-    from datetime import timezone
+    # Regression guard: every file main's tip already tracks must still be
+    # present. A missing one means this run overwrote-then-deleted it
+    # (failed re-verification against a stale spec, wrong routing, etc.) --
+    # abort rather than let that land in a branch that looks like a normal
+    # successful run.
+    missing = sorted(main_files - set(manifest))
+    if missing:
+        log.record("REGRESSION_ABORT", oss_dir=str(oss_dir), branch=branch, missing_files=missing)
+        raise RegressionAbortError(
+            f"{len(missing)} file(s) tracked on main are missing from this run's output "
+            f"(would be deleted if committed):\n  " + "\n  ".join(missing) +
+            f"\n\nLeft uncommitted on branch '{branch}' for inspection -- "
+            f"main is untouched. Fix the cause (or discard this branch) before retrying."
+        )
+
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if is_new:
         msg = f"Initial clean-room synthesized release ({module_count} modules, {ts})"
     else:
         msg = f"Synthesized update: {module_count} modules ({ts})"
 
-    _git("commit", "-m", msg)
+    _git_oss(oss_dir, "commit", "-m", msg)
     result = subprocess.run(
         ["git", "log", "--oneline", "-1"], cwd=oss_dir, capture_output=True, text=True
     )
-    print(f"  Committed: {result.stdout.strip()}")
-    log.record("GIT_COMMIT", oss_dir=str(oss_dir), message=msg, is_new_repo=is_new)
+    print(f"  Committed to branch '{branch}': {result.stdout.strip()}")
+    print(f"  main is untouched. Review with: cd {oss_dir} && git diff main {branch}")
+    print(f"  Merge when satisfied: git checkout main && git merge {branch}")
+    log.record("GIT_COMMIT", oss_dir=str(oss_dir), branch=branch, message=msg, is_new_repo=is_new)
 
 
 # Maps synthesised module stem → destination filename at the repo root.
@@ -467,6 +656,7 @@ def _synthesis_loop(
     log: BootstrapAuditLog,
     *,
     force: bool = False,
+    client: str = "openrouter",
 ) -> tuple[int, int]:
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.iterative_tdd_runner import IterativeTDDRunner
@@ -477,9 +667,8 @@ def _synthesis_loop(
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
     from src.storage.schemas import BulletCreate
-    from src.utils.llm_client import LLMClient
 
-    llm = LLMClient(provider="openrouter", model=MODEL_PASS1)
+    llm = _make_llm_client(MODEL_PASS1, client)
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-1.0")
 
@@ -567,7 +756,7 @@ def _synthesis_loop(
                         feature=str(feature_file),
                         file=str(synth_file),
                         sha256=BootstrapAuditLog.sha256(synth_file),
-                        model=MODEL_PASS1,
+                        model=llm.model,
                         input_tokens=token_in,
                         output_tokens=token_out,
                         payload=cr.as_log_payload(
@@ -831,6 +1020,7 @@ def _contract_synth_path(
     log: BootstrapAuditLog,
     *,
     force: bool = False,
+    client: str = "openrouter",
 ) -> tuple[int, int]:
     """Synthesise TypeScript from .contract.yml specs without a TDD container.
 
@@ -841,9 +1031,8 @@ def _contract_synth_path(
     or CONTRACT_SYNTH_FAIL instead of CLEAN_ROOM_PASS.
     """
     import yaml as _yaml
-    from src.utils.llm_client import LLMClient
 
-    llm = LLMClient(provider="openrouter", model=MODEL_PASS1)
+    llm = _make_llm_client(MODEL_PASS1, client)
     passed = failed = 0
 
     for contract_file in contract_files:
@@ -916,7 +1105,7 @@ def _contract_synth_path(
                         feature=str(contract_file),
                         file=str(synth_file),
                         sha256=BootstrapAuditLog.sha256(synth_file),
-                        model=MODEL_PASS1,
+                        model=llm.model,
                         input_tokens=token_in,
                         output_tokens=token_out,
                         reason="clean_room",
@@ -941,7 +1130,7 @@ def _contract_synth_path(
                         feature=str(contract_file),
                         file=str(synth_file),
                         sha256=BootstrapAuditLog.sha256(synth_file),
-                        model=MODEL_PASS1,
+                        model=llm.model,
                         payload=sr.as_log_payload(module=synth_file.stem),
                     )
                     print(f"    [STYLE_BLOCK] {filename}")
@@ -957,7 +1146,7 @@ def _contract_synth_path(
                     feature=str(contract_file),
                     file=str(synth_file),
                     sha256=BootstrapAuditLog.sha256(synth_file),
-                    model=MODEL_PASS1,
+                    model=llm.model,
                     input_tokens=token_in,
                     output_tokens=token_out,
                     payload=cr.as_log_payload(
@@ -990,6 +1179,7 @@ def _synthesis_loop_ts(
     log: BootstrapAuditLog,
     *,
     force: bool = False,
+    client: str = "openrouter",
 ) -> tuple[int, int]:
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.iterative_tdd_runner import IterativeTDDRunner
@@ -999,14 +1189,13 @@ def _synthesis_loop_ts(
     from src.agents.typescript_worker_agent import TypeScriptWorkerAgent
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
-    from src.utils.llm_client import LLMClient
     from bootstrap.synthesis_router import SynthesisRouter
 
     print("  Building TypeScript harness image...")
     build_ts_image()
     print("  Image ready.")
 
-    llm_fallback = LLMClient(provider="openrouter", model=MODEL_PASS2)
+    llm_fallback = _make_llm_client(MODEL_PASS2, client)
     playbook_manager = PlaybookManager()
     experiment_logger = ExperimentLogger(playbook_version="bootstrap-ts-1.0")
 
@@ -1063,7 +1252,7 @@ def _synthesis_loop_ts(
                 playbook_id = _SHARED_PLAYBOOK_ID
 
                 primary_model, escalate_after = router.recommend(stem)
-                llm_primary = LLMClient(provider="openrouter", model=primary_model)
+                llm_primary = _make_llm_client(primary_model, client)
                 worker = TypeScriptWorkerAgent(
                     llm_primary, playbook_manager=playbook_manager,
                     fallback_client=llm_fallback,
@@ -1114,7 +1303,7 @@ def _synthesis_loop_ts(
                             feature=str(feature_file),
                             file=str(synth_file),
                             sha256=BootstrapAuditLog.sha256(synth_file),
-                            model=MODEL_PASS1,
+                            model=llm_primary.model,
                             input_tokens=token_in,
                             output_tokens=token_out,
                             payload=cr.as_log_payload(
@@ -1138,7 +1327,7 @@ def _synthesis_loop_ts(
                             feature=str(feature_file),
                             file=str(synth_file),
                             sha256=BootstrapAuditLog.sha256(synth_file),
-                            model=MODEL_PASS1,
+                            model=llm_primary.model,
                             payload=sr.as_log_payload(module=synth_file.stem),
                         )
                         print(f"    [STYLE_BLOCK] {synth_file.name}")
@@ -1154,7 +1343,7 @@ def _synthesis_loop_ts(
                         feature=str(feature_file),
                         file=str(synth_file),
                         sha256=BootstrapAuditLog.sha256(synth_file),
-                        model=MODEL_PASS1,
+                        model=llm_primary.model,
                         input_tokens=token_in,
                         output_tokens=token_out,
                         payload=cr.as_log_payload(

@@ -15,6 +15,7 @@ from src.playbook.content_safety import (
     Verdict,
     screen_bullet_content,
 )
+from src.playbook.deduplication import BulletDeduplicator
 from src.storage.schemas import (
     Bullet,
     BulletCreate,
@@ -209,11 +210,23 @@ class PlaybookManager:
             created_by_model=bullet_data.created_by_model,
             model_provider=bullet_data.model_provider,
             license_type=bullet_data.license_type,
-            # Contextual retrieval fields
+            # Contextual retrieval fields -- previously only
+            # confidence_score/applicable_domains/project_ids/team_id were
+            # forwarded here; valid_from/valid_until/tech_context were
+            # silently dropped even when a caller set them on BulletCreate,
+            # so score_temporal()'s validity window and score_tech_stack()
+            # could never actually see them post-persistence.
             confidence_score=bullet_data.confidence_score,
             applicable_domains=bullet_data.applicable_domains,
             project_ids=bullet_data.project_ids,
             team_id=bullet_data.team_id,
+            valid_from=bullet_data.valid_from,
+            valid_until=bullet_data.valid_until,
+            tech_context=bullet_data.tech_context,
+            # Provenance
+            created_by_type=bullet_data.created_by_type,
+            created_by_id=bullet_data.created_by_id,
+            source_conversation_id=bullet_data.source_conversation_id,
         )
 
         # Add to playbook
@@ -294,6 +307,10 @@ class PlaybookManager:
                 section=delta.section,
                 tags=tags,
                 confidence_score=0.3,
+                team_id=delta.team_id,
+                project_ids=delta.project_ids,
+                applicable_domains=delta.applicable_domains,
+                tech_context=delta.tech_context,
             )
             try:
                 bullet = self.add_bullet(playbook_id, bullet_create, auto_save=False)
@@ -582,23 +599,45 @@ class PlaybookManager:
 
     def _is_redundant(self, playbook: Playbook, delta: DeltaBullet) -> bool:
         """
-        Check if delta bullet is redundant with existing bullets.
-
-        For now, uses simple string matching. Will be enhanced with
-        semantic similarity once embeddings are integrated.
+        Check if delta bullet is redundant with existing bullets in the
+        same section: exact match first (cheap), then semantic similarity
+        via embeddings (PRD Section 4.2 -- matches the ACE paper's own
+        Curator merge step, which explicitly dedupes "by comparing bullets
+        via semantic embeddings"). This used to be exact-match only, with
+        semantic comparison left as an unimplemented TODO -- found via
+        forensic analysis of real curated output: batches of 3-6 bullets
+        from one failure often restate the same point in different words
+        (e.g. "Use os.path.abspath..." / "Check for path traversal..." /
+        "Review file handling functions..."), none byte-identical, so none
+        of them ever tripped the old check.
         """
         section_bullets = playbook.sections.get(delta.section, [])
+        if not section_bullets:
+            return False
 
-        # Simple exact match check
+        delta_normalized = delta.content.strip().lower()
         for bullet in section_bullets:
-            if bullet.content.strip().lower() == delta.content.strip().lower():
+            if bullet.content.strip().lower() == delta_normalized:
                 return True
 
-        # TODO: Implement semantic similarity check using embeddings
-        # if bullet.embedding and delta_embedding:
-        #     similarity = cosine_similarity(bullet.embedding, delta_embedding)
-        #     if similarity > self.dedup_threshold:
-        #         return True
+        try:
+            delta_embedding = get_embedding_service().embed_text(delta.content)
+        except Exception as e:
+            logger.warning(f"Could not compute embedding for redundancy check: {e}")
+            return False
+        if delta_embedding is None:
+            return False
+
+        for bullet in section_bullets:
+            if bullet.embedding is None:
+                continue
+            similarity = BulletDeduplicator._cosine_similarity(bullet.embedding, delta_embedding)
+            if similarity >= self.dedup_threshold:
+                logger.debug(
+                    f"Semantic duplicate detected (similarity={similarity:.3f}): "
+                    f"'{delta.content[:50]}...' ~= '{bullet.content[:50]}...'"
+                )
+                return True
 
         return False
 
@@ -716,6 +755,13 @@ class PlaybookManager:
                     "applicable_domains": getattr(b, 'applicable_domains', None),
                     "project_ids": getattr(b, 'project_ids', None),
                     "team_id": getattr(b, 'team_id', None),
+                    "tech_context": getattr(b, 'tech_context', None),
+                    "valid_from": b.valid_from.isoformat() if getattr(b, 'valid_from', None) else None,
+                    "valid_until": b.valid_until.isoformat() if getattr(b, 'valid_until', None) else None,
+                    # Provenance
+                    "created_by_type": getattr(b, 'created_by_type', 'ai'),
+                    "created_by_id": getattr(b, 'created_by_id', None),
+                    "source_conversation_id": getattr(b, 'source_conversation_id', None),
                 }
                 for b in bullets
             ]
@@ -763,11 +809,21 @@ class PlaybookManager:
                         created_at=datetime.fromisoformat(b_data["created_at"]),
                         last_used=datetime.fromisoformat(b_data["last_used"]) if b_data["last_used"] else None,
                         embedding=b_data.get("embedding"),
+                        created_by_model=b_data.get("created_by_model"),
+                        model_provider=b_data.get("model_provider"),
+                        license_type=b_data.get("license_type"),
                         # Contextual retrieval fields
                         confidence_score=b_data.get("confidence_score", 0.5),
                         applicable_domains=b_data.get("applicable_domains"),
                         project_ids=b_data.get("project_ids"),
                         team_id=b_data.get("team_id"),
+                        tech_context=b_data.get("tech_context"),
+                        valid_from=datetime.fromisoformat(b_data["valid_from"]) if b_data.get("valid_from") else None,
+                        valid_until=datetime.fromisoformat(b_data["valid_until"]) if b_data.get("valid_until") else None,
+                        # Provenance
+                        created_by_type=b_data.get("created_by_type", "ai"),
+                        created_by_id=b_data.get("created_by_id"),
+                        source_conversation_id=b_data.get("source_conversation_id"),
                     )
                     bullets.append(bullet)
 

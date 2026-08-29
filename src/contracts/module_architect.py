@@ -634,7 +634,7 @@ def extract_context_from_file(file_path: str) -> CodebaseContext:
     """
     import ast
 
-    with open(file_path, 'r') as f:
+    with open(file_path) as f:
         source = f.read()
 
     tree = ast.parse(source)
@@ -746,49 +746,160 @@ def extract_context_from_directory(dir_path: str, pattern: str = "*.py") -> Code
     )
 
 
-def validate_module(contract: ModuleContract, code: str) -> tuple[bool, list[str]]:
+_MODULE_RESULT_MARKER = "===MODULE_VALIDATION_RESULT==="
+
+
+def validate_module(
+    contract: ModuleContract, code: str, orchestrator=None
+) -> tuple[bool, list[str]]:
     """Validate module implementation against integration tests.
+
+    code is LLM-generated implementer output -- untrusted by this
+    pipeline's own design (see module docstring: Architect -> Broker ->
+    Implementer -> Validator). Runs inside the same rootless Podman sandbox
+    the TDD engine's language pods use (--network none, --cap-drop=all),
+    never in-process.
+
+    Args:
+        orchestrator: Injected PodmanOrchestrator (e.g. shared across many
+            validations in tests). When None, a fresh sandboxed container
+            is created and torn down per call.
 
     Returns: (all_passed, list of failure messages)
     """
-    failures = []
+    import ast
 
     try:
-        # Execute the module code
-        exec_globals = {}
-        exec(code, exec_globals)
-
-        # Check all functions exist
-        for func in contract.functions:
-            if func.name not in exec_globals:
-                failures.append(f"Function '{func.name}' not found")
-                return False, failures
-
-        # Run integration tests
-        for test in contract.integration_tests:
-            try:
-                # Fresh exec context with module functions
-                test_globals = exec_globals.copy()
-
-                # Run setup
-                if test.setup:
-                    exec(test.setup, test_globals)
-
-                # Run steps
-                for step in test.steps:
-                    exec(step, test_globals)
-
-                # Check assertion
-                result = eval(test.assertion, test_globals)
-                if not result:
-                    failures.append(f"{test.name}: assertion failed - {test.assertion}")
-
-            except Exception as e:
-                failures.append(f"{test.name}: {e}")
-
+        ast.parse(code)
     except SyntaxError as e:
-        failures.append(f"Syntax error: {e}")
-    except Exception as e:
-        failures.append(f"Execution error: {e}")
+        return False, [f"Syntax error: {e}"]
 
+    from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+    from src.agents.podman_runner import PodmanRunner
+
+    script = _build_module_validation_script(contract, code)
+
+    owns_orchestrator = orchestrator is None
+    if owns_orchestrator:
+        orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30))
+
+    try:
+        result = orchestrator.pulse(script)
+    except SecurityBreachError as exc:
+        return False, [f"SecurityBreach: {exc}"]
+    except Exception as e:
+        return False, [f"Execution error: {e}"]
+    finally:
+        if owns_orchestrator:
+            orchestrator.stop()
+
+    if result.error and result.error.startswith("Security gate:"):
+        return False, [result.error]
+
+    payload = _parse_module_marker(result.output)
+    if payload is None:
+        return False, [
+            f"Execution error: no result from sandbox.\n"
+            f"{(result.output or '')[:500]}\n{(result.error or '')[:500]}"
+        ]
+
+    failures = payload.get("failures", [])
     return len(failures) == 0, failures
+
+
+def _parse_module_marker(output: str | None) -> dict | None:
+    """Extract the JSON payload the sandbox reported.
+
+    The driver always fails its one test (raises AssertionError) so pytest
+    reports the message regardless of output-capture settings -- print()
+    output is silently swallowed by pytest for a passing test. That means
+    the marker text appears multiple times in pytest's own rendered output
+    (echoed source line, the traceback's "E ..." line, a possibly-truncated
+    short-summary line) and never at the very start of a line. Scan every
+    line for the marker anywhere in it and return the first one whose tail
+    parses as JSON -- the malformed/truncated occurrences fail to parse and
+    are skipped.
+    """
+    for line in (output or "").splitlines():
+        idx = line.find(_MODULE_RESULT_MARKER)
+        if idx == -1:
+            continue
+        try:
+            return json.loads(line[idx + len(_MODULE_RESULT_MARKER):])
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _build_module_validation_script(contract: ModuleContract, code: str) -> str:
+    """Build a pytest file that runs exec/eval validation *inside the
+    sandbox* and reports structured results via a marked stdout line -- the
+    only channel available back to the host (the workspace mount is
+    read-only from the container's side).
+
+    code is embedded as a repr()'d string literal, executed into its own
+    isolated dict rather than the test module's namespace. Trade-off:
+    bandit's static scan (podman_runner.py's send_pulse) sees a string
+    constant here, not executable source. Acceptable because bandit is
+    defense-in-depth, not the containment boundary -- that's
+    --network none / --cap-drop=all, unaffected by how the code is
+    embedded in the file. Same pattern as contract_driven.py's
+    _build_validation_script.
+    """
+    function_names = [f.name for f in contract.functions]
+    tests = [
+        {"name": t.name, "setup": t.setup, "steps": t.steps, "assertion": t.assertion}
+        for t in contract.integration_tests
+    ]
+
+    return f'''
+import json
+
+_MARKER = {_MODULE_RESULT_MARKER!r}
+_FUNCTION_NAMES = {function_names!r}
+_TESTS = {tests!r}
+_MODULE_CODE = {code!r}
+
+
+def test_module_validation():
+    failures = []
+    exec_globals = {{}}
+    try:
+        exec(_MODULE_CODE, exec_globals)
+    except Exception as e:
+        failures.append(f"Execution error: {{e}}")
+        raise AssertionError(_MARKER + json.dumps({{"failures": failures}}))
+
+    for name in _FUNCTION_NAMES:
+        if name not in exec_globals:
+            failures.append(f"Function '{{name}}' not found")
+            raise AssertionError(_MARKER + json.dumps({{"failures": failures}}))
+
+    for test in _TESTS:
+        try:
+            # Fresh exec context per test: re-exec the module into its own
+            # new dict rather than exec_globals.copy(). A shallow copy is
+            # NOT isolation here -- functions keep __globals__ bound to the
+            # dict they were originally exec'd into, so a `global`-mutating
+            # function called via the copy still writes to (and is read
+            # back from) the ORIGINAL exec_globals, not the copy the
+            # assertion below actually inspects. That silently broke every
+            # assertion over global-mutated state (the primary pattern for
+            # the "stateful systems" this class exists for) before this fix.
+            test_globals = {{}}
+            exec(_MODULE_CODE, test_globals)
+            if test["setup"]:
+                exec(test["setup"], test_globals)
+            for step in test["steps"]:
+                exec(step, test_globals)
+            result = eval(test["assertion"], test_globals)
+            if not result:
+                failures.append(f"{{test['name']}}: assertion failed - {{test['assertion']}}")
+        except Exception as e:
+            failures.append(f"{{test['name']}}: {{e}}")
+
+    # Always raise -- pytest only reliably surfaces the message (vs. print()
+    # output, which is captured/swallowed for a passing test) via a failure.
+    # The real pass/fail verdict is _parse_module_marker()'s job on the host.
+    raise AssertionError(_MARKER + json.dumps({{"failures": failures}}))
+'''

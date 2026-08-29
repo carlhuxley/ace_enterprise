@@ -151,56 +151,15 @@ INFO -
 ### 4. Test the Setup
 
 ```bash
-# Test PostgreSQL + pgvector integration
-python demo_pgvector_test.py
-```
-
-Expected output:
-```
-================================================================================
-PGVECTOR SETUP TEST
-================================================================================
-
-1. Testing database connection...
-   ✓ Connected to PostgreSQL
-
-2. Testing pgvector extension...
-   ✓ pgvector enabled (version: 0.5.1)
-
-3. Creating test playbook...
-   ✓ Playbook created: test_pgvector
-
-4. Testing embedding generation...
-   ✓ Generated 384-dimensional embedding
-
-5. Adding test bullets with embeddings...
-   ✓ Added 3 bullets with embeddings
-
-6. Testing pgvector similarity search...
-   ✓ Found 3 similar bullets
-
-   Query: "How does OAuth authentication work?"
-   Results:
-     [0.876] OAuth uses authorization code flow for third-party ac...
-     [0.654] JWT tokens provide stateless authentication...
-     [0.543] RBAC controls user permissions based on roles...
-
-7. Repository statistics...
-   Total playbooks: 1
-   Total bullets: 3
-   Bullets with embeddings: 3
-   Embedding coverage: 100.0%
-
-================================================================================
-✅ PGVECTOR SETUP TEST PASSED
-================================================================================
+# Exercises the connection, pgvector extension, and similarity search path
+python demos/demo_semantic_pattern_search.py
 ```
 
 ### 5. Extract and Store Patterns
 
 ```bash
 # Extract Gherkin from code and store in PostgreSQL
-python demo_gherkin_extraction_pgvector.py
+python demos/demo_gherkin_extraction_pgvector.py
 ```
 
 This will:
@@ -214,7 +173,7 @@ This will:
 
 ```bash
 # Try advanced semantic search features
-python demo_semantic_pattern_search.py
+python demos/demo_semantic_pattern_search.py
 ```
 
 This demonstrates:

@@ -408,7 +408,7 @@ class ExperimentLogger:
         Returns:
             List of lesson dictionaries with category, root_cause, and lesson
         """
-        from sqlalchemy import desc, text
+        from sqlalchemy import text
 
         try:
             lessons = []

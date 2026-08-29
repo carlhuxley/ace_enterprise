@@ -3,9 +3,6 @@ Feature: Semantic Code Complexity Analysis
   I want to analyze code complexity using AST-based metrics
   So that I can identify overly complex functions that need refactoring
 
-  # Implementation: src/broker/semantic_analyzer.py
-  # Tests: tests/test_semantic_analyzer.py
-
   Background:
     Given the SemanticCodeAnalyzer is initialized
 

@@ -52,7 +52,7 @@ feature file.
 ### 1. Extract from Python
 
 ```bash
-python3 demo_gherkin_extraction.py
+python3 demos/demo_gherkin_extraction.py
 ```
 
 Given Python source and its tests, the agent extracts a Gherkin feature file
@@ -85,7 +85,7 @@ Feature: OAuth Authentication
 ### 2. Generate the Go implementation
 
 ```bash
-python3 demo_cross_language_migration.py
+python3 demos/demo_cross_language_migration.py
 ```
 
 Produces a scaffolded Go package (`steps/oauth_steps.go`, `steps/oauth_test.go`,

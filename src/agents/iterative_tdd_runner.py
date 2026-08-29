@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.agents.incremental_planner import COMPLETE, IncrementalPlanner, TestIncrement
-from src.agents.language_pod import PodSpec
+from src.agents.language_pod import PhaseResult, PodSpec
+from src.agents.redundancy_checker import ProposedTest, existing_tests_from_file
 from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner
 
 logger = logging.getLogger(__name__)
@@ -55,16 +56,56 @@ class IterativeTDDRunner:
         playbook_id: str = "default",
         reflector=None,
         curator=None,
+        audit_client=None,
+        redundancy_checker=None,
+        max_red_attempts: int = 2,
+        team_id: str | None = None,
+        model_id: str | None = None,
+        task_type: str | None = None,
     ) -> None:
         self._pod = pod
         self._planner = planner
         self._max_iterations = max_iterations
+        self._redundancy_checker = redundancy_checker
         self._runner_kwargs = dict(
             max_green_attempts=max_green_attempts,
             experiment_logger=experiment_logger,
             playbook_id=playbook_id,
             reflector=reflector,
             curator=curator,
+            audit_client=audit_client,
+            max_red_attempts=max_red_attempts,
+            team_id=team_id,
+            model_id=model_id,
+            task_type=task_type,
+        )
+
+    def _redundancy_skip(self, increment: TestIncrement, test_file: Path) -> CycleResult | None:
+        """Pre-check `increment` against tests already in test_file.
+
+        Returns a skipped CycleResult (no RED/GREEN/REFACTOR run, nothing
+        pulsed into the sandbox) if it's redundant, else None.
+        """
+        if self._redundancy_checker is None:
+            return None
+        existing = existing_tests_from_file(test_file)
+        proposed = ProposedTest(name=increment.test_name, description=increment.description)
+        verdict = self._redundancy_checker.check(existing, proposed)
+        if not verdict.is_redundant:
+            return None
+        logger.info(
+            "IterativeTDDRunner: skipping redundant test %r (confidence %.0f%%) — %s",
+            increment.test_name, verdict.confidence * 100, verdict.reason,
+        )
+        skip_result = PhaseResult(passed=True, output=f"Pre-check: {verdict.reason}")
+        return CycleResult(
+            success=True,
+            feature_requirement=increment.description,
+            red_result=skip_result,
+            green_result=skip_result,
+            refactor_result=None,
+            green_attempts=0,
+            token_usage=[],
         )
 
     def run_from_feature(self, feature_path: "Path | str") -> IterativeResult:
@@ -74,6 +115,7 @@ class IterativeTDDRunner:
         write into the same consistently-named test / impl files.
         """
         from pathlib import Path as _Path
+
         from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
         feature_path = _Path(feature_path)
         spec = GherkinFeatureBridge.parse(feature_path)
@@ -146,6 +188,11 @@ class IterativeTDDRunner:
                 pinned_test_file = increment.test_file
                 pinned_impl_file = increment.implementation_file
 
+            skip_result = self._redundancy_skip(increment, increment.test_file)
+            if skip_result is not None:
+                results.append(skip_result)
+                continue
+
             spec = PodSpec(
                 feature_requirement=increment.description,
                 test_file=increment.test_file,
@@ -202,6 +249,12 @@ class IterativeTDDRunner:
 
             if increment is None:
                 logger.warning("IterativeTDDRunner: parse error on cycle %d, skipping", cycle_number)
+                cycle_number += 1
+                continue
+
+            skip_result = self._redundancy_skip(increment, increment.test_file)
+            if skip_result is not None:
+                results.append(skip_result)
                 cycle_number += 1
                 continue
 

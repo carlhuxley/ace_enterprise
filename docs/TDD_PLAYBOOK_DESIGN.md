@@ -284,7 +284,7 @@ While the TDD principles are universal, each language has its own ecosystem:
 
 ## Next Steps
 
-1. ✅ Prove single test can pass (demo_tdd_single_test.py)
+1. ✅ Prove single test can pass
 2. ⏳ Build TDD agent that:
    - Reads failing tests
    - Applies TDD playbook knowledge

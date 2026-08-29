@@ -1,42 +1,128 @@
-"""Build an AutonomousTDDAgent wired to a target project."""
+"""Build a sandboxed IterativeTDDRunner wired to a target project.
+
+Mirrors bootstrap/orchestrate.py's synthesis loop: RED/GREEN/REFACTOR execute
+inside a rootless Podman container via PythonLanguagePod. Generated code is
+committed to config.src_dir / config.test_dir only after it passes inside the
+sandbox (pod.commit_to_disk() is gated on the in-container pulse result) --
+`ace tdd` never writes or runs LLM-generated code directly on the host.
+"""
 
 from __future__ import annotations
 
-from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
-from src.agents.test_review_agent import TestReviewAgent
+from dataclasses import dataclass
+from pathlib import Path
+
+from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+from src.agents.iterative_tdd_runner import IterativeResult, IterativeTDDRunner
+from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.cli.config import ProjectConfig
 from src.config.settings import settings
-from src.ensemble.learner import EnsembleLearner
 from src.utils.llm_client import LLMClient
 
 
-def build_agent(config: ProjectConfig) -> AutonomousTDDAgent:
-    """Construct a fully-wired AutonomousTDDAgent for the given project config.
+@dataclass
+class TDDRunHandle:
+    """Owns the sandbox container lifecycle for one `ace tdd` invocation."""
+
+    runner: IterativeTDDRunner
+    orchestrator: PodmanOrchestrator
+    test_dir: Path
+    src_dir: Path
+
+    def build_from_feature(self, feature_path: Path, requirement: str | None = None) -> IterativeResult:
+        """Run the Gherkin-driven TDD loop for one .feature file.
+
+        Mirrors IterativeTDDRunner.run_from_feature(), except an explicit
+        `requirement` (e.g. from --requirement) overrides the one derived
+        from the feature file instead of being silently ignored.
+        """
+        feature_path = Path(feature_path)
+        spec = GherkinFeatureBridge.parse(feature_path)
+        stem = feature_path.stem
+        return self.runner.run(
+            requirement=requirement or spec.as_requirement(),
+            gherkin_context=feature_path.read_text(encoding="utf-8"),
+            gherkin_scenarios=spec.scenarios,
+            test_file=self.test_dir / f"test_{stem}.py",
+            impl_file=self.src_dir / f"{stem}.py",
+        )
+
+    def file_paths_for(self, feature_path: Path) -> tuple[Path, Path]:
+        stem = Path(feature_path).stem
+        return self.test_dir / f"test_{stem}.py", self.src_dir / f"{stem}.py"
+
+    def stop(self) -> None:
+        self.orchestrator.stop()
+
+
+def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle:
+    """Construct a fully-wired, sandboxed TDDRunHandle for the given project config.
 
     Models are taken from ACE's own settings (.env). The playbook_id comes from
-    config, scoping learned patterns to this project. Two-tier global/local
-    retrieval will be layered in when the playbook scope module is built.
+    config, scoping learned patterns to this project. skip_learn=True omits the
+    Reflector/Curator LEARN phase (equivalent of the old --no-learn flag).
+
+    Also wires the audit trail, redundancy pre-check, and AST context map --
+    capabilities AutonomousTDDAgent had natively that IterativeTDDRunner needs
+    handed in explicitly (see tdd_cycle_runner.py's audit_client and
+    iterative_tdd_runner.py's redundancy_checker params).
     """
+    from src.agents.incremental_planner import IncrementalPlanner
+    from src.agents.podman_runner import PodmanRunner
+    from src.agents.python_language_pod import PythonLanguagePod
+    from src.agents.redundancy_checker import RedundancyPreChecker
+    from src.agents.worker_agent import WorkerAgent
+    from src.audit.local_client import LocalAuditClient
+    from src.core.curator.module import Curator
+    from src.core.reflector.module import Reflector
+    from src.playbook.manager import PlaybookManager
+    from src.utils.context_map import ContextMapBuilder
+
     provider = settings.default_llm_provider
     model = _default_model(provider)
-
     llm_client = LLMClient(provider=provider, model=model)
 
-    ensemble = EnsembleLearner(
-        models=[(provider, model)],
-        playbook_id=config.playbook_id,
-    )
-    ensemble.playbook_manager.get_or_create_playbook(config.playbook_id)
+    playbook_manager = PlaybookManager()
+    playbook_manager.get_or_create_playbook(config.playbook_id)
 
-    reviewer = TestReviewAgent(llm_client=llm_client)
+    # Compact AST signatures of the project's existing source, so GREEN-phase
+    # prompts reference relevant functions without pasting whole files.
+    context_map = ContextMapBuilder().build(sorted(config.src_dir.rglob("*.py")))
 
-    return AutonomousTDDAgent(
-        ensemble_learner=ensemble,
-        test_reviewer=reviewer,
-        project_root=config.project_root,
+    worker = WorkerAgent(llm_client, playbook_manager=playbook_manager, context_map=context_map)
+    planner = IncrementalPlanner(
+        llm_client=llm_client,
         test_dir=config.test_dir,
         src_dir=config.src_dir,
+        playbook_manager=playbook_manager,
+        playbook_id=config.playbook_id,
+    )
+    orchestrator = PodmanOrchestrator(runner=PodmanRunner())
+    pod = PythonLanguagePod(worker, config.project_root, orchestrator)
+
+    reflector = curator = None
+    if not skip_learn:
+        reflector = Reflector(llm_client=llm_client)
+        curator = Curator(playbook_manager=playbook_manager, llm_client=llm_client)
+
+    runner = IterativeTDDRunner(
+        pod=pod,
+        planner=planner,
         max_iterations=config.max_iterations,
+        playbook_id=config.playbook_id,
+        reflector=reflector,
+        curator=curator,
+        audit_client=LocalAuditClient(),
+        redundancy_checker=RedundancyPreChecker(),
+        team_id=config.team_id,
+        model_id=f"{llm_client.provider}/{llm_client.model}",
+        task_type="python",
+    )
+    return TDDRunHandle(
+        runner=runner,
+        orchestrator=orchestrator,
+        test_dir=config.test_dir,
+        src_dir=config.src_dir,
     )
 
 

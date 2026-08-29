@@ -42,11 +42,11 @@ typescript_output:
             - hints: string[]
             - fixtures: FixtureSpec | undefined
           methods:
-            - toInterfaceContract(): InterfaceContract
+            - "toInterfaceContract(): InterfaceContract"
       functions:
-        - loadContracts(yamlContent: string): ContractSpec[]
-        - loadContractsFromFile(filePath: string): ContractSpec[]
-        - saveContracts(contracts: ContractSpec[], filePath: string): void
+        - "loadContracts(yamlContent: string): ContractSpec[]"
+        - "loadContractsFromFile(filePath: string): ContractSpec[]"
+        - "saveContracts(contracts: ContractSpec[], filePath: string): void"
 
 constraints:
   - All identifiers are camelCase (functionName, testCases, estimatedComplexity)

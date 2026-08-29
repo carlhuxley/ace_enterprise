@@ -3,9 +3,6 @@ Feature: Semantic Analysis Integration with BlindEvaluator
   I want semantic analysis integrated with the BlindEvaluator scoring
   So that code quality scores reflect complexity, security, and design patterns
 
-  # Implementation: src/broker/semantic_analyzer.py, src/broker/blind_evaluation.py
-  # Tests: tests/test_semantic_analyzer.py
-
   Background:
     Given the SemanticCodeAnalyzer is initialized
     And the BlindEvaluator is available with semantic scoring enabled

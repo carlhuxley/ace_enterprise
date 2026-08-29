@@ -12,9 +12,11 @@ from bootstrap.audit_log import BootstrapAuditLog
 from bootstrap.orchestrate import (
     BootstrapAbortError,
     _contract_synth_path,
+    _make_llm_client,
     _resume_decision,
 )
-from src.utils.llm_client import LLMQuotaExhaustedError
+from src.utils.claude_cli_client import ClaudeCliClient
+from src.utils.llm_client import LLMClient, LLMQuotaExhaustedError
 
 
 @pytest.fixture
@@ -164,3 +166,29 @@ def test_non_quota_error_does_not_abort_and_continues_to_next_module(tmp_path, l
 
     # Both modules attempted — no abort for an ordinary (non-quota) failure.
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# _make_llm_client -- --client openrouter/claude-cli backend selection
+# ---------------------------------------------------------------------------
+
+def test_make_llm_client_openrouter_uses_named_model():
+    client = _make_llm_client("anthropic/claude-haiku-4-5", "openrouter")
+    assert isinstance(client, LLMClient)
+    assert client.model == "anthropic/claude-haiku-4-5"
+
+
+def test_make_llm_client_claude_cli_ignores_model_name():
+    """ClaudeCliClient has no per-call model selection -- the model string
+    is accepted (so callers don't need a branch) but has no effect."""
+    client = _make_llm_client("anthropic/claude-sonnet-4-5", "claude-cli")
+    assert isinstance(client, ClaudeCliClient)
+
+
+def test_make_llm_client_returns_independent_instances():
+    """Pass1/Pass2 escalation constructs two clients -- under claude-cli
+    they must be separate instances (even though behaviorally identical),
+    not the same object, so per-instance token interception stays isolated."""
+    primary = _make_llm_client("anthropic/claude-haiku-4-5", "claude-cli")
+    fallback = _make_llm_client("anthropic/claude-sonnet-4-5", "claude-cli")
+    assert primary is not fallback

@@ -13,7 +13,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from src.agents.podman_orchestrator import ContainerRunner, PulseResult, canonical_hash
+from src.agents.podman_orchestrator import PulseResult, canonical_hash
 
 _REMOTE_WS = "/workspace"
 

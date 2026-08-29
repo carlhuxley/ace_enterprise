@@ -6,7 +6,9 @@ This script processes all existing playbooks and generates embeddings
 for bullets that don't have them yet.
 """
 import sys
-sys.path.insert(0, "/home/ch_dev/ace_enterprise")
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import logging
 

@@ -16,9 +16,9 @@ insider) can regenerate a fresh, internally-consistent chain from scratch and
 `verify_full_chain()` will still return `True`.
 
 This directly contradicts the project's own stated principle
-(`202602121757-audit-trail-independence-principle.md`): *"Build your audit
-trail outside the agent's access. If the system you're monitoring controls
-the monitoring, you have no monitoring."* `services/ace-audit/` already
+([ADR 001](001-audit-trail-independence.md)): build the audit trail outside
+the monitored system's access — a system that controls its own monitoring
+provides no real guarantee. `services/ace-audit/` already
 deploys the audit store as a separate service with its own database, which
 protects against the *main application* compromising the audit trail — but
 it does nothing against direct compromise of the audit DB's own credential,

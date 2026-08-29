@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+
 @dataclass
 class TokenUsage:
     """Token consumption for one complete TDD cycle."""
@@ -16,6 +17,12 @@ class TokenUsage:
     cycle_number: int
     input_tokens: int
     output_tokens: int
+    # Model attribution, captured from the LLM client's generate() response
+    # (see LanguagePod._intercept_tokens implementations). None for clients/
+    # cycles that made no LLM call, or that predate this field.
+    actual_model: str | None = None
+    requested_model: str | None = None
+    provider: str | None = None
 
 
 @dataclass

@@ -1,51 +1,50 @@
-Feature: ACE Enterprise API
-  As an API client
-  I want to interact with the ACE Enterprise application
-  So that I can check system status and access API information
+Feature: ACE Enterprise API application endpoints
+  As an external client of the ACE Enterprise API
+  I want to query system status and API information
+  So that I can monitor the service and discover basic metadata
 
-  Scenario: Check application health status
-    Given the ACE Enterprise application is running
+  Scenario: Health check reports service status
     When I send a GET request to "/health"
     Then the response status code is 200
-    And the response contains a JSON object with field "status" equal to "healthy"
-    And the response contains a JSON object with field "version"
-    And the response contains a JSON object with field "environment"
-    And the response contains a JSON object with field "llmProvider"
+    And the response body contains a "status" field equal to "healthy"
+    And the response body contains a "version" field
+    And the response body contains an "environment" field
+    And the response body contains a "llm_provider" field
 
-  Scenario: Access root endpoint for API information
-    Given the ACE Enterprise application is running
+  Scenario: Root endpoint returns API metadata
     When I send a GET request to "/"
     Then the response status code is 200
-    And the response contains a JSON object with field "name"
-    And the response contains a JSON object with field "version"
-    And the response contains a JSON object with field "description"
-    And the response contains a JSON object with field "docs"
+    And the response body contains a "name" field
+    And the response body contains a "version" field
+    And the response body contains a "description" field
+    And the response body contains a "docs" field
 
-  Scenario: Access API documentation in development environment
-    Given the application is configured with "isDevelopment" set to true
-    And the ACE Enterprise application is running
+  Scenario: Root endpoint reports docs location in development environment
+    Given the application is running with development mode enabled
+    When I send a GET request to "/"
+    Then the response body's "docs" field is equal to "/docs"
+
+  Scenario: Root endpoint reports docs disabled in production environment
+    Given the application is running with development mode disabled
+    When I send a GET request to "/"
+    Then the response body's "docs" field is equal to "Documentation disabled in production"
+
+  Scenario: Interactive API docs are available in development environment
+    Given the application is running with development mode enabled
     When I send a GET request to "/docs"
     Then the response status code is 200
 
-  Scenario: Access API documentation in production environment
-    Given the application is configured with "isDevelopment" set to false
-    And the ACE Enterprise application is running
+  Scenario: Interactive API docs are unavailable in production environment
+    Given the application is running with development mode disabled
     When I send a GET request to "/docs"
     Then the response status code is 404
 
-  Scenario: Access Prometheus metrics when enabled
-    Given the application is configured with "enablePrometheusMetrics" set to true
-    And the ACE Enterprise application is running
+  Scenario: Prometheus metrics endpoint is exposed when enabled
+    Given Prometheus metrics are enabled in the application configuration
     When I send a GET request to "/metrics"
     Then the response status code is 200
 
-  Scenario: Prometheus metrics endpoint not available when disabled
-    Given the application is configured with "enablePrometheusMetrics" set to false
-    And the ACE Enterprise application is running
-    When I send a GET request to "/metrics"
-    Then the response status code is 404
-
-  Scenario: CORS headers are present in responses
-    Given the ACE Enterprise application is running
-    When I send a GET request to "/health" with origin header "http://example.com"
-    Then the response includes CORS headers
+  Scenario: Cross-origin requests are permitted from configured origins
+    Given the application is configured to allow cross-origin requests from "https://dashboard.example.com"
+    When I send an OPTIONS request to "/health" with an "Origin" header of "https://dashboard.example.com"
+    Then the response includes an "Access-Control-Allow-Origin" header equal to "https://dashboard.example.com"

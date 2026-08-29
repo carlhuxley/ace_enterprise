@@ -12,9 +12,6 @@ Bead: ace_enterprise-nf7
 from __future__ import annotations
 
 import ast
-import subprocess
-import sys
-import tempfile
 
 from src.benchmark.rubrics.base import EvaluationRubric, ScoringDimension
 
@@ -22,6 +19,17 @@ _DANGEROUS_PATTERNS = ("eval(", "exec(", "os.system(", "subprocess.call(", "__im
 
 
 class CodeGenerationRubric(EvaluationRubric):
+    def __init__(self, orchestrator=None) -> None:
+        """
+        Args:
+            orchestrator: Injected PodmanOrchestrator to run the tests
+                dimension in (e.g. shared across tests). When None, a fresh
+                sandboxed container is created and torn down per score()
+                call -- `output` is unidentified submission content and
+                must never execute on the host.
+        """
+        self._orchestrator = orchestrator
+
     @property
     def name(self) -> str:
         return "code_generation"
@@ -84,20 +92,34 @@ class CodeGenerationRubric(EvaluationRubric):
             # No tests provided — award partial credit for valid code
             return 50.0 if self._score_syntax(code) == 100.0 else 0.0
 
+        from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+        from src.agents.podman_runner import PodmanRunner
+
         full_code = f"{code}\n\n{test_content}"
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write(full_code)
-            tmp = f.name
+
+        orchestrator = self._orchestrator
+        owns_orchestrator = orchestrator is None
+        if owns_orchestrator:
+            orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30))
+
         try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pytest", tmp, "-q", "--tb=no"],
-                capture_output=True, text=True, timeout=30,
-            )
-            return 100.0 if result.returncode == 0 else 0.0
+            result = orchestrator.pulse(full_code)
+            return 100.0 if result.passed else 0.0
+        except SecurityBreachError:
+            return 0.0
         except Exception:
             return 0.0
+        finally:
+            if owns_orchestrator:
+                orchestrator.stop()
 
     def _score_security(self, code: str) -> float:
+        # A scoring signal only, not a containment mechanism -- trivially
+        # bypassable (e.g. subprocess.Popen, a stray space in "exec (") and
+        # scored independently of _score_tests, which already ran the code
+        # by this point. Actual containment is the Podman sandbox in
+        # _score_tests (--network none, --cap-drop=all), same principle as
+        # podman_runner.py's own bandit scan.
         for pattern in _DANGEROUS_PATTERNS:
             if pattern in code:
                 return 0.0

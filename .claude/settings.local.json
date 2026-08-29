@@ -24,7 +24,8 @@
       "Bash(node -e ' *)",
       "Bash(podman rm *)",
       "Bash(podman run *)",
-      "Bash(podman exec *)"
+      "Bash(podman exec *)",
+      "Bash(grep -rnE \"sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}\" --include=\"*.py\" --include=\"*.md\" --include=\"*.json\" --include=\"*.env*\" .3)"
     ]
   },
   "enableAllProjectMcpServers": true,

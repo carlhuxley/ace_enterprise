@@ -3,9 +3,6 @@ Feature: Semantic Code Security Analysis
   I want to detect security vulnerabilities in code using AST analysis
   So that I can prevent eval, exec, SQL injection, and hardcoded secrets
 
-  # Implementation: src/broker/semantic_analyzer.py
-  # Tests: tests/test_semantic_analyzer.py
-
   Background:
     Given the SemanticCodeAnalyzer is initialized
 

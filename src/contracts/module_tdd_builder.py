@@ -2,7 +2,7 @@
 
 This combines:
 1. ModuleArchitect's contract (what to build)
-2. AutonomousTDDAgent's methodology (how to build)
+2. Kent Beck-style TDD methodology (how to build) -- RED/GREEN/REFACTOR/LEARN
 
 Flow:
 1. Take ModuleContract from architect
@@ -16,13 +16,11 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
 from src.contracts.module_architect import (
     FunctionSpec,
-    IntegrationTest,
     ModuleContract,
     validate_module,
 )

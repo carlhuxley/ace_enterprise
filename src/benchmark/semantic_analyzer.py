@@ -7,7 +7,7 @@ class SemanticCodeAnalyzer:
 
     def analyze(self, code):
         issues = []
-        
+
         # SQL analysis
         sql_result = self.sql_analyzer.detect(code)
         if sql_result.get("details") and "sql_concatenation" in sql_result["details"]:
@@ -18,7 +18,7 @@ class SemanticCodeAnalyzer:
                 "column": sql_result["column"],
                 "context": sql_result["context"]
             })
-            
+
         # Eval analysis
         eval_result = self.eval_analyzer.detect(code)
         if eval_result.get("details") and "eval_usage" in eval_result["details"]:
@@ -29,7 +29,7 @@ class SemanticCodeAnalyzer:
                 "column": eval_result["column"],
                 "context": eval_result["context"]
             })
-            
+
         # Exec analysis
         exec_result = self.exec_analyzer.detect(code)
         if exec_result.get("details") and "exec_usage" in exec_result["details"]:
@@ -40,7 +40,7 @@ class SemanticCodeAnalyzer:
                 "column": exec_result["column"],
                 "context": exec_result["context"]
             })
-            
+
         # Secret analysis
         secret_result = self.secret_analyzer.detect(code)
         if secret_result.get("details") and "hardcoded_secret" in secret_result["details"]:
@@ -51,7 +51,7 @@ class SemanticCodeAnalyzer:
                 "column": secret_result["column"],
                 "context": secret_result["context"]
             })
-            
+
         return issues
 
 
@@ -64,13 +64,13 @@ class SQLAnalyzer:
                 quote_start = line.find("'") if "'" in line else line.find('"')
                 if quote_start == -1:
                     continue
-                    
+
                 # Get the SQL query context
                 query_part = line[quote_start:]
                 before_plus = query_part.split('+')[0]
                 after_plus = query_part.split('+')[-1]
                 context = f"{before_plus} + {after_plus}".strip()
-                
+
                 return {
                     "severity": "critical",
                     "details": {
@@ -91,7 +91,7 @@ class EvalAnalyzer:
                 context_start = line.index('eval(') + 5
                 context_end = line.rfind(')')
                 context = line[context_start:context_end].strip('"\'') if context_end > context_start else ""
-                
+
                 return {
                     "severity": "critical",
                     "details": {
@@ -112,7 +112,7 @@ class ExecAnalyzer:
                 context_start = line.index('exec(') + 5
                 context_end = line.rfind(')')
                 context = line[context_start:context_end].strip('"\'') if context_end > context_start else ""
-                
+
                 return {
                     "severity": "critical",
                     "details": {
@@ -136,7 +136,7 @@ class SecretAnalyzer:
                 ('="', '"'),    # double quotes no space
                 ('=\'', '\'')   # single quotes no space
             ]
-            
+
             for op_pattern, quote_char in patterns:
                 if op_pattern in line:
                     parts = line.split(op_pattern, 1)

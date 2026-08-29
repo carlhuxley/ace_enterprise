@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 
-from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
+from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,9 @@ class GoLanguagePod:
         self._playbook_manager = playbook_manager
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
+        self._actual_model: str | None = None
+        self._requested_model: str | None = None
+        self._provider: str | None = None
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -190,6 +193,9 @@ class GoLanguagePod:
             cycle_number=cycle_number,
             input_tokens=self._cycle_tokens,
             output_tokens=0,
+            actual_model=self._actual_model,
+            requested_model=self._requested_model,
+            provider=self._provider,
         ))
         self._cycle_tokens = 0
 
@@ -199,6 +205,11 @@ class GoLanguagePod:
         def _tracking_generate(*args, **kwargs):
             result = original(*args, **kwargs)
             self._cycle_tokens += result.get("tokens_used", 0)
+            # Last call's attribution wins -- model rarely changes mid-cycle,
+            # and this is simpler than tracking it per-phase.
+            self._actual_model = result.get("actual_model", self._actual_model)
+            self._requested_model = result.get("requested_model", self._requested_model)
+            self._provider = result.get("provider", self._provider)
             return result
 
         self._llm_client.generate = _tracking_generate
@@ -208,6 +219,18 @@ def _is_security_failure(result: PhaseResult) -> bool:
     return result.error is not None and result.error.startswith("Security gate:")
 
 
+_GO_CODE_START = re.compile(r"^(package\s|import\s|func\s|type\s|var\s|const\s)", re.MULTILINE)
+
+
 def _extract_code(content: str) -> str:
     match = re.search(r"```(?:go)?\n(.*?)```", content, re.DOTALL)
-    return match.group(1).strip() if match else content.strip()
+    if match:
+        return match.group(1).strip()
+    # No fence at all -- the LLM occasionally skips it and replies with a
+    # conversational preamble ("Let me implement...") directly followed by
+    # source. Drop everything before the first line that's actually Go
+    # rather than writing the preamble straight into the .go file.
+    code_match = _GO_CODE_START.search(content)
+    if code_match:
+        return content[code_match.start():].strip()
+    return content.strip()

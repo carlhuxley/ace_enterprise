@@ -113,12 +113,16 @@ class InstitutionalKnowledgeService:
             logger.warning(f"No bullets found for query: {query}")
             return KnowledgeResponse(query=query, context=context)
 
-        # Run CGR³ retrieval
+        # Run CGR³ retrieval. min_confidence is forwarded again here --
+        # ContextGraphRetriever.retrieve() re-applies its own confidence
+        # filter via base_retriever.retrieve(), independent of the
+        # pre-filtering _get_bullets() already did above.
         return self.retriever.retrieve(
             query=query,
             bullets=bullets,
             context=context,
             top_k=top_k,
+            min_confidence=min_confidence,
         )
 
     def get_guidance_for_tdd(
@@ -289,6 +293,13 @@ class InstitutionalKnowledgeService:
                 lines.append(f"- {rb.bullet.content}")
                 lines.append(f"  *Note: {gaps}*")
             lines.append("")
+
+        if not lines:
+            # has_results was True (ask_first is non-empty) but
+            # include_ask_first=False means neither branch above added
+            # anything -- without this, the result was "" instead of the
+            # same placeholder the "truly no results" case above returns.
+            return "No relevant patterns found."
 
         return "\n".join(lines)
 

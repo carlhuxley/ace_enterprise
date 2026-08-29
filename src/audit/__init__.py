@@ -10,10 +10,11 @@ This module provides:
 Key principle: Agents can emit audit events but cannot read, modify, or delete them.
 The audit service runs as a separate deployment with separate credentials.
 
-Reference: 202602121757-audit-trail-independence-principle.md
+Reference: docs/adr/001-audit-trail-independence.md
 """
 
 from src.audit.client import AuditClient, NoOpAuditClient, get_audit_client
+from src.audit.dashboard import AgentIdentity, AgentPerformance, AuditDashboard
 from src.audit.schemas import (
     AuditEvent,
     AuditEventCreate,
@@ -22,7 +23,6 @@ from src.audit.schemas import (
     AuditResult,
 )
 from src.audit.store import AuditStore
-from src.audit.dashboard import AgentIdentity, AgentPerformance, AuditDashboard
 
 __all__ = [
     # Schemas

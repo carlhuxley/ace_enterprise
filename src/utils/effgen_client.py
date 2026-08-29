@@ -1,7 +1,7 @@
 """
 effGen LLM Client - Adapter to use effGen local models with LLMClient interface.
 
-This allows the AutonomousTDDAgent and other components to use local effGen
+This allows WorkerAgent and other components to use local effGen
 models (like Qwen 2.5 1.5B) instead of external APIs.
 
 Bead: ace_enterprise-41e
@@ -239,7 +239,7 @@ success = result.success if hasattr(result, 'success') else True
 print("CONTENT_START")
 print(output)
 print("CONTENT_END")
-print(f"SUCCESS:{success}")
+print(f"SUCCESS:{{success}}")
 '''
 
         try:

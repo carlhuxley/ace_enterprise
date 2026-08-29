@@ -1,5 +1,15 @@
 """Tests for BlindEvaluator - scores outputs without knowing source."""
+import shutil
+
 import pytest
+
+# Submissions with test_content execute inside a real Podman sandbox now
+# (blind_evaluation.py's _run_tests / CodeGenerationRubric._score_tests) --
+# these tests genuinely run code, so they need podman in PATH.
+skip_no_podman = pytest.mark.skipif(
+    not shutil.which("podman"),
+    reason="podman not in PATH",
+)
 
 
 class TestSubmission:
@@ -75,6 +85,7 @@ class TestBlindEvaluator:
         assert isinstance(result.quality_score, int)
         assert 0 <= result.quality_score <= 100
 
+    @skip_no_podman
     def test_evaluate_with_test_file(self):
         """Should run tests and report pass/fail."""
         from src.benchmark.blind_evaluation import BlindEvaluator, Submission
@@ -158,6 +169,7 @@ class TestCodeQualityEvaluation:
 class TestTestExecution:
     """Tests for test execution."""
 
+    @skip_no_podman
     def test_passing_tests_sets_tests_passed_true(self):
         """Passing tests should set tests_passed=True."""
         from src.benchmark.blind_evaluation import BlindEvaluator, Submission
@@ -175,6 +187,7 @@ class TestTestExecution:
 
         assert result.tests_passed is True
 
+    @skip_no_podman
     def test_failing_tests_sets_tests_passed_false(self):
         """Failing tests should set tests_passed=False."""
         from src.benchmark.blind_evaluation import BlindEvaluator, Submission
@@ -208,3 +221,47 @@ class TestTestExecution:
         result = evaluator.evaluate(submission)
 
         assert result.tests_passed is None
+
+
+class TestSandboxedExecution:
+    """Regression coverage: submission code/tests must run inside a Podman
+    sandbox, never directly on the host -- see blind_evaluation.py's
+    _run_tests and rubrics/code.py's _score_tests.
+    """
+
+    @skip_no_podman
+    def test_fallback_path_runs_tests_in_sandbox(self):
+        """output_type with no registered rubric hits BlindEvaluator._run_tests
+        directly (not CodeGenerationRubric) -- exercise that path too."""
+        from src.benchmark.blind_evaluation import BlindEvaluator, Submission
+
+        evaluator = BlindEvaluator()
+        submission = Submission(
+            task_id="task-001",
+            submission_id="sub-001",
+            output_type="unregistered_type",
+            output_content="def add(a, b): return a + b",
+            test_content="def test_add(): assert add(1, 2) == 3",
+        )
+
+        result = evaluator.evaluate(submission)
+
+        assert result.rubric_name is None  # confirms the fallback path ran
+        assert result.tests_passed is True
+
+    def test_run_tests_does_not_use_host_subprocess(self):
+        """No subprocess/tempfile import at module level -- host execution
+        was removed, not just made conditional."""
+        import ast
+
+        from src.benchmark import blind_evaluation
+
+        source = ast.parse(open(blind_evaluation.__file__).read())
+        top_level_imports = {
+            alias.name
+            for node in ast.walk(source)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        assert "subprocess" not in top_level_imports
+        assert "tempfile" not in top_level_imports

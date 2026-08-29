@@ -7,7 +7,7 @@ import logging
 import os
 
 from src.agents.import_filter import ForbiddenImportError, ImportFilter
-from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
+from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,9 @@ class PythonLanguagePod:
         self._token_log: list[TokenUsage] = []
         self._prompt_tokens: int = 0
         self._completion_tokens: int = 0
+        self._actual_model: str | None = None
+        self._requested_model: str | None = None
+        self._provider: str | None = None
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -150,6 +153,11 @@ class PythonLanguagePod:
             result = original(*args, **kwargs)
             self._prompt_tokens += result.get("prompt_tokens") or result.get("tokens_used", 0)
             self._completion_tokens += result.get("completion_tokens", 0)
+            # Last call's attribution wins -- model rarely changes mid-cycle,
+            # and this is simpler than tracking it per-phase.
+            self._actual_model = result.get("actual_model", self._actual_model)
+            self._requested_model = result.get("requested_model", self._requested_model)
+            self._provider = result.get("provider", self._provider)
             return result
 
         self._worker.llm_client.generate = _tracking_generate
@@ -159,6 +167,9 @@ class PythonLanguagePod:
             cycle_number=cycle_number,
             input_tokens=self._prompt_tokens,
             output_tokens=self._completion_tokens,
+            actual_model=self._actual_model,
+            requested_model=self._requested_model,
+            provider=self._provider,
         ))
         self._prompt_tokens = 0
         self._completion_tokens = 0

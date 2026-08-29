@@ -8,6 +8,7 @@ Key insight: It's cheaper to detect redundancy before generating
 test code than to discover it when RED phase unexpectedly passes.
 """
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -196,3 +197,30 @@ class RedundancyPreChecker:
                     return True
 
         return False
+
+
+def existing_tests_from_file(test_file: Path) -> list[ExistingTest]:
+    """AST-scan a test file for existing test_* functions, for RedundancyPreChecker.
+
+    Static analysis only (same discipline as ImportFilter) -- never executes
+    the file's content, so this is safe to run on unverified generated code
+    before it's ever pulsed into the sandbox.
+    """
+    import ast
+
+    if not test_file.exists():
+        return []
+    source = test_file.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    lines = source.splitlines()
+    existing: list[ExistingTest] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+            code = "\n".join(lines[node.lineno - 1:node.end_lineno])
+            assertions = [line.strip() for line in code.split("\n") if "assert" in line.lower()]
+            existing.append(ExistingTest(name=node.name, assertions=assertions, file_path=str(test_file)))
+    return existing

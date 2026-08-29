@@ -7,12 +7,12 @@ continuous improvement and reduce intervention rate.
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from src.storage.experiment_logger import ExperimentLogger
 from src.playbook.manager import PlaybookManager
+from src.storage.experiment_logger import ExperimentLogger
 from src.storage.schemas import BulletCreate
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class FailureContext:
     provider: str = "unknown"
 
 
-@dataclass 
+@dataclass
 class InterventionRecord:
     """Record of intervention after TDD failure."""
     source: InterventionSource
@@ -57,7 +57,7 @@ class TDDFailureRecorder:
     4. Track intervention source and steps
     5. Calculate intervention_rate metric
     """
-    
+
     def __init__(
         self,
         experiment_logger: ExperimentLogger | None = None,
@@ -70,7 +70,7 @@ class TDDFailureRecorder:
         self.playbook_id = playbook_id
         self.beads_path = beads_path
         self.failed_cycles = 0
-    
+
     def record_failure(
         self,
         context: FailureContext,
@@ -87,9 +87,9 @@ class TDDFailureRecorder:
             Experiment ID of the logged failure
         """
         self.failed_cycles += 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         experiment_id = f"tdd-fail-{now.strftime('%Y%m%d-%H%M%S%f')}"
-        
+
         # 1. Log to ExperimentLogger
         if self.experiment_logger:
             self.experiment_logger.log_experiment(
@@ -121,18 +121,18 @@ class TDDFailureRecorder:
                 },
             )
             logger.info(f"📊 Logged failure experiment: {experiment_id}")
-        
+
         # 2. Create beads issue
         issue_id = self._create_beads_issue(context, suggested_fix, experiment_id, now)
         logger.info(f"🐛 Created beads issue: {issue_id}")
-        
+
         # 3. Add playbook bullet
         if self.playbook_manager and self.playbook_id:
             self._add_playbook_bullet(context)
-            logger.info(f"📚 Added troubleshooting bullet to playbook")
-        
+            logger.info("📚 Added troubleshooting bullet to playbook")
+
         return experiment_id
-    
+
     def record_intervention(
         self,
         experiment_id: str,
@@ -156,12 +156,12 @@ class TDDFailureRecorder:
                     if issue.get('related_experiment') == experiment_id:
                         issue['intervention_source'] = intervention.source
                         issue['intervention_steps'] = intervention.steps_taken
-                        issue['updated_at'] = datetime.now(timezone.utc).isoformat()
+                        issue['updated_at'] = datetime.now(UTC).isoformat()
                     updated.append(json.dumps(issue))
             self.beads_path.write_text('\n'.join(updated))
-        
+
         logger.info(f"📝 Recorded intervention: {intervention.source}")
-    
+
     def calculate_intervention_rate(self) -> float:
         """
         Calculate intervention rate from experiment logs.
@@ -171,15 +171,15 @@ class TDDFailureRecorder:
         """
         if not self.experiment_logger:
             return 0.0
-        
+
         # Query experiments from database
         # For now, return 0 - full implementation needs DB query
         return 0.0
-    
+
     def reset_failed_cycles(self) -> None:
         """Reset the failed cycles counter."""
         self.failed_cycles = 0
-    
+
     def _create_beads_issue(
         self,
         context: FailureContext,
@@ -215,14 +215,14 @@ class TDDFailureRecorder:
             "labels": ["tdd", "auto-generated", context.error_type.lower()],
             "related_experiment": experiment_id,
         }
-        
+
         # Append to beads file
         self.beads_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.beads_path, 'a') as f:
             f.write('\n' + json.dumps(issue))
-        
+
         return issue_id
-    
+
     def _add_playbook_bullet(self, context: FailureContext) -> None:
         """Add troubleshooting bullet to playbook."""
         bullet = BulletCreate(
@@ -240,7 +240,7 @@ Prevention: Check for similar patterns before generating code.""",
             tags=["tdd", "auto-learned", context.error_type.lower()],
             created_by_model="TDDFailureRecorder",
         )
-        
+
         try:
             self.playbook_manager.add_bullet(self.playbook_id, bullet)
         except Exception as e:

@@ -349,10 +349,20 @@ def verify_ts_style(synthesized_path: Path) -> TsStyleResult:
     Rule 1  No snake_case identifiers (TypeScript uses camelCase everywhere).
     Rule 2  No Math.random() as a default — makes tests non-deterministic.
     Rule 3  No bitwise hash functions (djb2-style) — use crypto.createHash.
-    Rule 4  No hardcoded stub IDs like 'ctx-001' or 'pb-existing'.
+    Rule 4  No hardcoded stub IDs like 'ctx-001' or 'pb-existing' -- skipped
+            for *.test.ts files, where a literal example ID is a normal
+            test fixture value, not the implementation-shortcut Rule 4
+            exists to catch. Discovered live: the caller (orchestrate.py's
+            _synthesis_loop_ts) globs *.ts, which matches *.test.ts too, so
+            this rule was deleting passing tests whose fixtures happened to
+            use IDs like 'ctx-00001' -- the module then correctly never got
+            marked verified (no .spec.sha256), but its implementation file
+            was left behind on disk with no test, looking like TDD hadn't
+            run at all when it in fact had (RED failed, GREEN passed).
     """
     code = synthesized_path.read_text(encoding="utf-8")
     violations: list[str] = []
+    is_test_file = synthesized_path.name.endswith(".test.ts")
 
     # Rule 1: snake_case identifiers — scan with noise stripped to avoid string hits
     clean = _strip_ts_noise(code)
@@ -373,10 +383,12 @@ def verify_ts_style(synthesized_path: Path) -> TsStyleResult:
             "Bitwise hash (djb2-style) detected — use crypto.createHash('sha256') instead"
         )
 
-    # Rule 4: Hardcoded stub IDs — skeleton placeholder, not real logic
-    stubs = _HARDCODED_ID.findall(code)
-    if stubs:
-        sample = ", ".join(sorted(set(stubs))[:4])
-        violations.append(f"Hardcoded stub IDs: {sample} — generate IDs dynamically")
+    # Rule 4: Hardcoded stub IDs — skeleton placeholder, not real logic.
+    # Not applied to test files -- see docstring.
+    if not is_test_file:
+        stubs = _HARDCODED_ID.findall(code)
+        if stubs:
+            sample = ", ".join(sorted(set(stubs))[:4])
+            violations.append(f"Hardcoded stub IDs: {sample} — generate IDs dynamically")
 
     return TsStyleResult(passed=len(violations) == 0, violations=violations)

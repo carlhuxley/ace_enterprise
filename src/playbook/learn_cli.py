@@ -113,10 +113,10 @@ def learn_from_file(
     for parsed in parsed_bullets:
         # Merge tags from file and CLI
         bullet_tags = list(set(parsed.get('tags', []) + additional_tags))
-        
+
         # Use type from frontmatter if set, otherwise use CLI argument
         section = parsed.get('type', bullet_type)
-        
+
         # Build content with title
         content = f"**{parsed['title']}**\n\n{parsed['content']}"
 

@@ -6,8 +6,6 @@ submission_id is opaque - evaluator cannot link to agent.
 
 import ast
 import statistics
-import tempfile
-import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -69,6 +67,18 @@ class BlindEvaluator:
     - Code structure: 20 points
     - Tests passing: 50 points (or 30 if no tests)
     """
+
+    def __init__(self, orchestrator=None) -> None:
+        """
+        Args:
+            orchestrator: Injected PodmanOrchestrator to run submission code
+                in (e.g. a session-scoped one shared across many evaluations
+                in tests). When None (the default), _run_tests creates and
+                tears down its own sandboxed container per call -- submission
+                content is untrusted (that's the entire point of this class)
+                and must never execute on the host.
+        """
+        self._orchestrator = orchestrator
 
     def evaluate(self, submission: Submission) -> EvaluationResult:
         """Evaluate a submission and return quality score.
@@ -260,42 +270,37 @@ class BlindEvaluator:
         code: str,
         test_code: str
     ) -> tuple[bool, dict]:
-        """Run tests against code in isolated environment.
+        """Run tests against code inside a sandboxed Podman container.
+
+        code/test_code come from an unidentified submission -- this must
+        never execute directly on the host (--network none, --cap-drop=all,
+        same containment the TDD engine's language pods use).
 
         Returns:
             (tests_passed, details_dict)
         """
-        # Combine code and tests
+        from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+        from src.agents.podman_runner import PodmanRunner
+
         full_code = f"{code}\n\n{test_code}"
 
-        # Write to temp file and run with pytest
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".py",
-            delete=False
-        ) as f:
-            f.write(full_code)
-            temp_path = f.name
+        orchestrator = self._orchestrator
+        owns_orchestrator = orchestrator is None
+        if owns_orchestrator:
+            orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30))
 
         try:
-            import sys
-            result = subprocess.run(
-                [sys.executable, "-m", "pytest", temp_path, "-v", "--tb=short"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            passed = result.returncode == 0
-            details = {
-                "returncode": result.returncode,
-                "stdout": result.stdout[:500] if result.stdout else "",
-                "stderr": result.stderr[:500] if result.stderr else ""
-            }
-
-            return passed, details
-
-        except subprocess.TimeoutExpired:
-            return False, {"error": "timeout"}
+            result = orchestrator.pulse(full_code)
+        except SecurityBreachError as exc:
+            return False, {"error": f"SecurityBreach: {exc}"}
         except Exception as e:
             return False, {"error": str(e)}
+        finally:
+            if owns_orchestrator:
+                orchestrator.stop()
+
+        details = {
+            "stdout": (result.output or "")[:500],
+            "stderr": (result.error or "")[:500] if result.error else "",
+        }
+        return result.passed, details

@@ -1,7 +1,7 @@
 version: "3.8"
 
 # ACE Audit Service - Deployed separately from main ACE
-# This ensures audit trail independence per 202602121757-audit-trail-independence-principle.md
+# This ensures audit trail independence per docs/adr/001-audit-trail-independence.md
 
 services:
   # Audit database - SEPARATE from main ACE database

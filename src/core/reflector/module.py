@@ -4,6 +4,7 @@ Based on PRD Section 2.2.2: Reflector Module
 """
 import json
 import logging
+import re
 from typing import Any
 
 from src.config.settings import settings
@@ -117,6 +118,7 @@ class Reflector:
             root_cause=current_analysis.get("root_cause"),
             correct_approach=current_analysis.get("correct_approach"),
             key_insight=current_analysis.get("key_insight"),
+            code_invariant=current_analysis.get("code_invariant"),
             bullet_tags=bullet_tags,
             iterations=iterations,
             quality_score=current_analysis.get("quality_score", 0.0),
@@ -266,6 +268,14 @@ Result: {environment_feedback.result}
 ### Key Insight
 [What is the key learning or pattern that can be applied to future tasks?]
 
+### Code Invariant
+[The EXACT Python boolean expression, function call, or code pattern that
+must hold for correctness -- not a description of the concept. For example,
+write `math.copysign(1.0, x) < 0` to detect a negative sign, not "check the
+sign bit"; write `next(iter(done)).result()` not "extract the result from
+the set". If no single expression captures the fix, leave this section out
+entirely rather than writing prose into it.]
+
 Be specific, actionable, and focus on patterns that can be generalized to similar tasks.
 """
 
@@ -286,6 +296,7 @@ Be specific, actionable, and focus on patterns that can be generalized to simila
             "root_cause": None,
             "correct_approach": None,
             "key_insight": None,
+            "code_invariant": None,
         }
 
         # Parse markdown sections
@@ -298,6 +309,7 @@ Be specific, actionable, and focus on patterns that can be generalized to simila
             "root cause": "root_cause",
             "correct approach": "correct_approach",
             "key insight": "key_insight",
+            "code invariant": "code_invariant",
         }
 
         for line in lines:
@@ -332,6 +344,23 @@ Be specific, actionable, and focus on patterns that can be generalized to simila
         # Save last section
         if current_section and current_text:
             analysis[current_section] = "\n".join(current_text).strip()
+
+        # The prompt asks for this one in backticks (it's the one field
+        # that's a bare code expression, not prose), so the parsed text
+        # usually still has some wrapping -- strip it so the stored value
+        # is the bare expression, otherwise Curator wrapping it in its own
+        # backticks would double them up ("``x < 0``" instead of "`x <
+        # 0`"). Confirmed live against real SWE-bench tracebacks that
+        # models don't consistently use a single backtick pair: some use a
+        # double- or triple-backtick fence with a "python" language tag
+        # instead (e.g. "``python\nlen(x) >= 2\n``"), which a plain
+        # startswith("`")/endswith("`") check doesn't catch.
+        invariant = analysis.get("code_invariant")
+        if invariant:
+            match = re.match(r"^(`{1,3})(?:python\n)?(.*?)\1\s*$", invariant, re.DOTALL)
+            if match:
+                invariant = match.group(2).strip()
+            analysis["code_invariant"] = invariant
 
         return analysis
 

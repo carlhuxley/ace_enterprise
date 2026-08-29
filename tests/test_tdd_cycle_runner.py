@@ -47,8 +47,37 @@ class ControlledPod:
 class AbortingRedPod(ControlledPod):
     """RED returns a forbidden import error → should abort cycle."""
 
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.red_calls = 0
+
     def run_red(self, spec: PodSpec) -> PhaseResult:
+        self.red_calls += 1
         return PhaseResult(passed=False, output="", error="ForbiddenImport: os")
+
+
+class RedRetryPod(ControlledPod):
+    """RED fails before-pulse on the first attempt, succeeds for real on the second."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.red_calls = 0
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        self.red_calls += 1
+        if self.red_calls == 1:
+            return PhaseResult(passed=False, output="", error="SyntaxError: unexpected EOF")
+        return PhaseResult(passed=False, output="test fails: no impl", error=None)
+
+
+class RedFailsBeforePulsePod(ControlledPod):
+    """RED fails during generation/parsing, before ever reaching the
+    container -- output="" is what all three real pods (Python/TS/Go) return
+    for this case (e.g. a plain SyntaxError from the LLM's own code, not a
+    security/policy issue matched by _is_abort's prefix list)."""
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        return PhaseResult(passed=False, output="", error="invalid character '—' (U+2014)")
 
 
 class AbortingGreenPod(ControlledPod):
@@ -62,20 +91,33 @@ class AbortingGreenPod(ControlledPod):
 class TokenPod(ControlledPod):
     """Accumulates one TokenUsage record per phase call."""
 
-    def __init__(self):
+    def __init__(self, actual_model=None, requested_model=None, provider=None):
         super().__init__()
         self._usage: list[TokenUsage] = []
+        self._actual_model = actual_model
+        self._requested_model = requested_model
+        self._provider = provider
+
+    def _usage_kwargs(self, spec: PodSpec, input_tokens: int) -> dict:
+        return dict(
+            cycle_number=spec.cycle_number,
+            input_tokens=input_tokens,
+            output_tokens=0,
+            actual_model=self._actual_model,
+            requested_model=self._requested_model,
+            provider=self._provider,
+        )
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
-        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=50, output_tokens=0))
+        self._usage.append(TokenUsage(**self._usage_kwargs(spec, 50)))
         return super().run_red(spec)
 
     def run_green(self, spec: PodSpec) -> PhaseResult:
-        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=150, output_tokens=0))
+        self._usage.append(TokenUsage(**self._usage_kwargs(spec, 150)))
         return super().run_green(spec)
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
-        self._usage.append(TokenUsage(cycle_number=spec.cycle_number, input_tokens=80, output_tokens=0))
+        self._usage.append(TokenUsage(**self._usage_kwargs(spec, 80)))
         return super().run_refactor(spec)
 
     def token_usage(self) -> list[TokenUsage]:
@@ -120,6 +162,60 @@ def test_red_abort_skips_green_and_refactor(tmp_path):
     assert result.green_attempts == 0
     assert result.refactor_result is None
     assert "RED aborted" in (result.error or "")
+
+
+def test_red_failure_before_pulse_also_aborts_without_wasting_green_attempts(tmp_path):
+    """Regression: a RED failure with no error prefix _is_abort recognizes
+    (e.g. a raw SyntaxError) used to fall through to GREEN, which would then
+    burn every retry pulsing a test file that was never actually written."""
+    pod = RedFailsBeforePulsePod()
+    runner = TDDCycleRunner(pod)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.green_attempts == 0
+    assert len(pod.green_specs) == 0
+    assert result.refactor_result is None
+    assert "RED aborted" in (result.error or "")
+    assert "invalid character" in (result.error or "")
+
+
+def test_red_retries_before_pulse_failure_and_then_succeeds(tmp_path):
+    pod = RedRetryPod()
+    runner = TDDCycleRunner(pod, max_red_attempts=2)
+    result = runner.run(_spec(tmp_path))
+
+    assert pod.red_calls == 2
+    assert result.success is True  # ControlledPod's GREEN passes on first attempt
+
+
+def test_red_retry_exhausted_still_aborts(tmp_path):
+    pod = RedFailsBeforePulsePod()  # always fails before-pulse
+    runner = TDDCycleRunner(pod, max_red_attempts=2)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert len(pod.green_specs) == 0
+    assert "RED aborted" in (result.error or "")
+
+
+def test_red_never_retries_a_security_abort(tmp_path):
+    pod = AbortingRedPod()
+    runner = TDDCycleRunner(pod, max_red_attempts=3)
+    runner.run(_spec(tmp_path))
+    assert pod.red_calls == 1  # security/policy aborts skip the retry loop entirely
+
+
+def test_red_failure_with_real_output_still_proceeds_to_green(tmp_path):
+    """A normal RED failure (test ran for real in the container and failed
+    as expected, e.g. ImportError with no impl yet) has real pytest/vitest/go
+    output -- must NOT be mistaken for the no-pulse case above."""
+    pod = ControlledPod()  # run_red returns output="test fails: no impl"
+    runner = TDDCycleRunner(pod)
+    result = runner.run(_spec(tmp_path))
+
+    assert len(pod.green_specs) >= 1
+    assert result.success is True
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +327,46 @@ def test_experiment_logger_called_on_success(tmp_path):
     assert c["retry_count"] == 1
 
 
+def test_experiment_logger_receives_model_attribution(tmp_path):
+    """Model identity captured by the pod's TokenUsage entries must reach
+    log_tdd_cycle -- previously TDDCycleRunner._log() never passed
+    actual_model/requested_model/provider even though ExperimentLogger
+    always accepted them, so 93% of historical rows were unattributed."""
+    calls = []
+
+    class _Logger:
+        def log_tdd_cycle(self, **kwargs):
+            calls.append(kwargs)
+
+    pod = TokenPod(
+        actual_model="anthropic/claude-3.5-haiku",
+        requested_model="anthropic/claude-3.5-haiku",
+        provider="openrouter",
+    )
+    runner = TDDCycleRunner(pod, experiment_logger=_Logger())
+    runner.run(_spec(tmp_path))
+
+    assert len(calls) == 1
+    assert calls[0]["actual_model"] == "anthropic/claude-3.5-haiku"
+    assert calls[0]["requested_model"] == "anthropic/claude-3.5-haiku"
+    assert calls[0]["provider"] == "openrouter"
+
+
+def test_experiment_logger_model_attribution_absent_when_pod_reports_none(tmp_path):
+    calls = []
+
+    class _Logger:
+        def log_tdd_cycle(self, **kwargs):
+            calls.append(kwargs)
+
+    runner = TDDCycleRunner(ControlledPod(), experiment_logger=_Logger())
+    runner.run(_spec(tmp_path))
+
+    assert calls[0]["actual_model"] is None
+    assert calls[0]["requested_model"] is None
+    assert calls[0]["provider"] is None
+
+
 def test_experiment_logger_called_on_red_abort(tmp_path):
     calls = []
 
@@ -259,6 +395,7 @@ class _FakeDeltaBullet:
     def __init__(self, content, section="strategies_and_hard_rules"):
         self.content = content
         self.section = section
+        self.content_hash = f"fake-hash-{content[:8]}"
 
 
 class _FakeReflectorOutput:
@@ -287,7 +424,7 @@ class _SpyCurator:
         self._bullets = bullets or [_FakeDeltaBullet("always use pathlib")]
 
     def curate(self, reflector_output, playbook_id, task_context=None):
-        self.curate_calls.append((reflector_output, playbook_id))
+        self.curate_calls.append((reflector_output, playbook_id, task_context))
         return _FakeCuratorOutput(self._bullets)
 
     def apply_updates(self, playbook_id, curator_output):
@@ -310,6 +447,22 @@ def test_reflector_and_curator_called_on_success(tmp_path):
     assert len(curator.curate_calls) == 1
     assert curator.curate_calls[0][1] == "test-pb"
     assert len(curator.apply_calls) == 1
+
+
+def test_team_id_included_in_curator_task_context(tmp_path):
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_SpyReflector(), curator=curator, team_id="payments",
+    )
+    runner.run(_spec(tmp_path))
+    assert curator.curate_calls[0][2]["team_id"] == "payments"
+
+
+def test_team_id_defaults_to_none_in_task_context(tmp_path):
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(ControlledPod(), reflector=_SpyReflector(), curator=curator)
+    runner.run(_spec(tmp_path))
+    assert curator.curate_calls[0][2]["team_id"] is None
 
 
 def test_learned_bullets_in_cycle_result(tmp_path):
@@ -368,3 +521,232 @@ def test_no_reflector_leaves_learned_bullets_empty(tmp_path):
     runner = TDDCycleRunner(ControlledPod())   # neither reflector nor curator
     result = runner.run(_spec(tmp_path))
     assert result.learned_bullets == []
+
+
+# ---------------------------------------------------------------------------
+# Behavior 11: audit trail (ace_enterprise -- ported from AutonomousTDDAgent's
+# native audit emission, now optional via TDDCycleRunner(audit_client=...))
+# ---------------------------------------------------------------------------
+
+class _SpyAuditClient:
+    def __init__(self):
+        self.events = []
+
+    def emit_simple(self, *, event_type, actor_id, payload, playbook_id=None):
+        self.events.append(dict(
+            event_type=event_type, actor_id=actor_id, payload=payload, playbook_id=playbook_id,
+        ))
+        return True
+
+
+def test_no_audit_client_emits_nothing(tmp_path):
+    # Default: audit_client=None must not raise and must emit nothing.
+    runner = TDDCycleRunner(ControlledPod())
+    result = runner.run(_spec(tmp_path))
+    assert result.success is True
+
+
+def test_emits_test_generated_after_red(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    types = [e["event_type"] for e in audit.events]
+    assert AuditEventType.TEST_GENERATED in types
+
+def test_no_test_generated_event_on_red_abort(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(AbortingRedPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    types = [e["event_type"] for e in audit.events]
+    assert AuditEventType.TEST_GENERATED not in types
+    assert AuditEventType.CYCLE_COMPLETED in types
+
+
+def test_emits_implementation_generated_after_green_passes(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    types = [e["event_type"] for e in audit.events]
+    assert AuditEventType.IMPLEMENTATION_GENERATED in types
+
+
+def test_no_implementation_generated_event_when_green_never_passes(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(green_pass_on=999), max_green_attempts=1, audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    types = [e["event_type"] for e in audit.events]
+    assert AuditEventType.IMPLEMENTATION_GENERATED not in types
+
+
+def test_emits_cycle_completed_with_success_and_bullets_learned(tmp_path):
+    from src.storage.schemas import DeltaBullet
+
+    audit = _SpyAuditClient()
+    curator = _SpyCurator(bullets=[DeltaBullet(section="s", content="use pathlib")])
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_SpyReflector(), curator=curator, audit_client=audit,
+    )
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    completed = [e for e in audit.events if e["event_type"] == AuditEventType.CYCLE_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0]["payload"]["success"] is True
+    assert completed[0]["payload"]["bullets_learned"] == 1
+
+
+def test_emits_pattern_learned_per_bullet(tmp_path):
+    from src.storage.schemas import DeltaBullet
+
+    audit = _SpyAuditClient()
+    curator = _SpyCurator(bullets=[
+        DeltaBullet(section="s1", content="use pathlib"),
+        DeltaBullet(section="s2", content="avoid mutable defaults"),
+    ])
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_SpyReflector(), curator=curator, audit_client=audit,
+    )
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    learned = [e for e in audit.events if e["event_type"] == AuditEventType.PATTERN_LEARNED]
+    assert len(learned) == 2
+
+
+def test_audit_events_include_playbook_id(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), playbook_id="my-playbook", audit_client=audit)
+    runner.run(_spec(tmp_path))
+    assert all(e["playbook_id"] == "my-playbook" for e in audit.events)
+
+
+def test_audit_emit_failure_does_not_crash_cycle(tmp_path):
+    class _BrokenAuditClient:
+        def emit_simple(self, **kwargs):
+            raise RuntimeError("audit db down")
+
+    runner = TDDCycleRunner(ControlledPod(), audit_client=_BrokenAuditClient())
+    result = runner.run(_spec(tmp_path))
+    assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Behavior 12: broker telemetry contract -- actor_id/elapsed_seconds/task_type
+# must carry real data, since PerformanceAggregator (src/broker/) groups
+# metrics BY actor_id and reads these exact payload keys. Before this fix,
+# actor_id was a hardcoded constant regardless of model_id, so every model
+# routed through TDDCycleRunner collapsed into one indistinguishable bucket.
+# ---------------------------------------------------------------------------
+
+def test_default_actor_id_falls_back_to_constant_when_no_model_id(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+    assert all(e["actor_id"] == "tdd-agent-cycle-runner" for e in audit.events)
+
+
+def test_model_id_becomes_the_audit_actor_id(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(
+        ControlledPod(), audit_client=audit, model_id="openrouter/deepseek/deepseek-v4",
+    )
+    runner.run(_spec(tmp_path))
+    assert all(e["actor_id"] == "openrouter/deepseek/deepseek-v4" for e in audit.events)
+
+
+def test_two_models_produce_distinct_actor_ids(tmp_path):
+    """Regression: previously both would collapse to the same constant actor_id,
+    so PerformanceAggregator.get_all_agent_metrics() could never see more than
+    one 'agent' -- AdaptiveBroker had nothing to route between."""
+    audit = _SpyAuditClient()
+    TDDCycleRunner(ControlledPod(), audit_client=audit, model_id="model-a").run(_spec(tmp_path))
+    TDDCycleRunner(ControlledPod(), audit_client=audit, model_id="model-b").run(_spec(tmp_path))
+
+    actor_ids = {e["actor_id"] for e in audit.events}
+    assert actor_ids == {"model-a", "model-b"}
+
+
+def test_cycle_completed_payload_includes_elapsed_seconds_and_task_type(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit, task_type="python")
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    completed = [e for e in audit.events if e["event_type"] == AuditEventType.CYCLE_COMPLETED]
+    assert len(completed) == 1
+    payload = completed[0]["payload"]
+    assert payload["task_type"] == "python"
+    assert isinstance(payload["elapsed_seconds"], float)
+    assert payload["elapsed_seconds"] >= 0.0
+
+
+def test_cycle_completed_never_fabricates_cost_or_quality_score(tmp_path):
+    """No real pricing/quality-scoring instrument exists yet -- the payload
+    must omit these keys rather than invent numbers AdaptiveBroker would
+    silently route on."""
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    completed = [e for e in audit.events if e["event_type"] == AuditEventType.CYCLE_COMPLETED]
+    payload = completed[0]["payload"]
+    assert "cost" not in payload
+    assert "quality_score" not in payload
+    assert "complexity" not in payload
+
+
+def test_performance_aggregator_distinguishes_models_after_real_cycles(tmp_path):
+    """End-to-end regression: two different models' CYCLE_COMPLETED events,
+    emitted through the real TDDCycleRunner, land as two separate agents in
+    PerformanceAggregator -- the actual precondition AdaptiveBroker.route_task()
+    needs to have more than one candidate to choose between."""
+    from datetime import datetime, timezone
+
+    from src.audit.schemas import AuditEvent, AuditEventType as _ET
+    from src.broker.performance_aggregator import PerformanceAggregator
+
+    class _RecordingAuditClient:
+        def __init__(self):
+            self.events = []
+
+        def emit_simple(self, *, event_type, actor_id, payload, playbook_id=None):
+            self.events.append(AuditEvent(
+                event_id=f"e{len(self.events)}",
+                event_type=event_type,
+                actor_id=actor_id,
+                actor_type="agent",
+                timestamp=datetime.now(timezone.utc),
+                payload=payload,
+                prev_hash="0" * 64,
+                playbook_id=playbook_id,
+            ))
+
+    class _StoreDouble:
+        def __init__(self, client: _RecordingAuditClient):
+            self._client = client
+
+        def query(self, query):
+            events = [e for e in self._client.events if e.event_type in query.event_types]
+            if query.actor_id:
+                events = [e for e in events if e.actor_id == query.actor_id]
+            return type("Result", (), {"events": events})()
+
+    audit = _RecordingAuditClient()
+    TDDCycleRunner(ControlledPod(), audit_client=audit, model_id="model-a").run(_spec(tmp_path))
+    TDDCycleRunner(ControlledPod(), audit_client=audit, model_id="model-b").run(_spec(tmp_path))
+
+    aggregator = PerformanceAggregator(_StoreDouble(audit))
+    all_metrics = aggregator.get_all_agent_metrics()
+
+    assert set(all_metrics.keys()) == {"model-a", "model-b"}
+    assert all_metrics["model-a"].total_tasks == 1
+    assert all_metrics["model-b"].total_tasks == 1

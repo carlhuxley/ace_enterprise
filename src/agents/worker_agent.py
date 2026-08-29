@@ -160,6 +160,11 @@ class WorkerAgent:
             return ""
 
 
+_PYTHON_CODE_START = re.compile(
+    r"^(import\s|from\s\S+\simport\s|def\s|class\s|async def\s|@\w)", re.MULTILINE
+)
+
+
 def _extract_code(content: str) -> str:
     match = re.search(r"```python\n(.*?)```", content, re.DOTALL)
     if match:
@@ -171,5 +176,11 @@ def _extract_code(content: str) -> str:
     match = re.search(r"```(?:\w+)?\n(.*?)$", content, re.DOTALL)
     if match:
         return match.group(1).strip()
+    # No fence at all -- the LLM occasionally skips it and replies with a
+    # conversational preamble directly followed by source. Drop everything
+    # before the first line that's actually Python.
+    code_match = _PYTHON_CODE_START.search(content)
+    if code_match:
+        return content[code_match.start():].strip()
     return content.strip()
 

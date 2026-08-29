@@ -1,12 +1,11 @@
 # src/cost_quality_analyzer.py
 import hashlib
-import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 class CostQualityAnalyzer:
     """Analyzes cost-quality tradeoffs for ML model performance data."""
-    
+
     def __init__(self, performance_data: dict):
         """Initialize with model performance data.
         
@@ -29,7 +28,7 @@ class CostQualityAnalyzer:
         self.total_cost_usd = performance_data.get("total_cost_usd")
         self.total_quality_points = performance_data.get("total_quality_points")
         self.task_count = performance_data.get("task_count")
-    
+
     def calculate_cost_efficiency_metrics(self) -> dict:
         """Calculate cost efficiency metrics from the stored performance data.
         
@@ -52,11 +51,11 @@ class CostQualityAnalyzer:
             raw_cost_per_quality_point = self.cost_per_prediction / self.accuracy
             quality_per_dollar = float(self.accuracy / self.cost_per_prediction)
             raw_avg_quality_score = self.accuracy
-        
+
         # Apply required rounding
         cost_per_quality_point = round(raw_cost_per_quality_point, 6)
         avg_quality_score = round(raw_avg_quality_score, 2)
-        
+
         # Determine efficiency grade based on quality_per_dollar thresholds
         if quality_per_dollar >= 5000:
             efficiency_grade = "A"
@@ -64,17 +63,17 @@ class CostQualityAnalyzer:
             efficiency_grade = "B"
         else:
             efficiency_grade = "C"
-        
+
         # Generate metadata with ISO timestamp and deterministic input hash
         input_hash = hashlib.sha256(
             str(sorted(self.performance_data.items())).encode()
         ).hexdigest()
-        
+
         metadata = {
-            "calculated_at": datetime.now(timezone.utc).isoformat(),
+            "calculated_at": datetime.now(UTC).isoformat(),
             "input_hash": input_hash
         }
-        
+
         return {
             "cost_per_quality_point": cost_per_quality_point,
             "quality_per_dollar": quality_per_dollar,
@@ -82,7 +81,7 @@ class CostQualityAnalyzer:
             "efficiency_grade": efficiency_grade,
             "metadata": metadata
         }
-    
+
     @staticmethod
     def rank_models_by_quality_per_dollar(models_data: list) -> list:
         """Rank multiple models by their quality per dollar metric.
@@ -101,7 +100,7 @@ class CostQualityAnalyzer:
             key=lambda m: m["accuracy"] / m["cost_per_prediction"],
             reverse=True
         )
-    
+
     @staticmethod
     def compute_pareto_frontier(models_data: list) -> list:
         """Compute the Pareto frontier of models based on cost and quality.
@@ -119,7 +118,7 @@ class CostQualityAnalyzer:
             List of model dictionaries that are on the Pareto frontier.
         """
         frontier = []
-        
+
         for model in models_data:
             is_dominated = False
             for other_model in models_data:
@@ -131,12 +130,12 @@ class CostQualityAnalyzer:
                     other_model["accuracy"] > model["accuracy"]):
                     is_dominated = True
                     break
-            
+
             if not is_dominated:
                 frontier.append(model)
-        
+
         return frontier
-    
+
     @staticmethod
     def calculate_quality_delta_percentage(higher_quality_model: dict, lower_quality_model: dict) -> float:
         """Calculate the percentage improvement in quality between two models.
@@ -153,11 +152,11 @@ class CostQualityAnalyzer:
         """
         higher_accuracy = higher_quality_model["accuracy"]
         lower_accuracy = lower_quality_model["accuracy"]
-        
+
         delta_percentage = ((higher_accuracy - lower_accuracy) / lower_accuracy) * 100
-        
+
         return delta_percentage
-    
+
     @staticmethod
     def query_best_model_for_complexity(models_data: list, complexity_level: str) -> dict:
         """Find the optimal model for a given complexity level by balancing success_rate and value_score.

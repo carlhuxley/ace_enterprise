@@ -16,6 +16,31 @@ from src.audit.schemas import AuditEventType
 logger = logging.getLogger("ace-mcp.tools")
 
 
+def _slugify(text: str, max_words: int = 6) -> str:
+    """Derive a filename-safe module name from free-form requirement text."""
+    import re
+    words = re.findall(r"[A-Za-z0-9]+", text.lower())[:max_words]
+    return "_".join(words) or "feature"
+
+
+def _pod_file_paths(language: str, name: str, src_dir: Path, test_dir: Path) -> tuple[Path, Path]:
+    """Return (test_file, implementation_file) in each language's own convention."""
+    if language == "python":
+        return test_dir / f"test_{name}.py", src_dir / f"{name}.py"
+    if language == "typescript":
+        return test_dir / f"{name}.test.ts", src_dir / f"{name}.ts"
+    if language == "go":
+        return test_dir / f"{name}_test.go", src_dir / f"{name}.go"
+    raise ValueError(f"Unsupported language: {language!r}")
+
+
+def _resolve_model_id(llm_client) -> str:
+    """Real model/agent identity for audit actor_id -- see tdd_cycle_runner.py."""
+    provider = getattr(llm_client, "provider", None)
+    model = getattr(llm_client, "model", "unknown")
+    return f"{provider}/{model}" if provider else model
+
+
 class ACETools:
     """
     Tool definitions and handlers for ACE MCP server.
@@ -276,17 +301,33 @@ class ACETools:
             tools.append({
                 "name": "build_feature",
                 "description": (
-                    "Build a feature using Test-Driven Development. "
-                    "Provide a Gherkin feature description and ACE will: "
-                    "1) Write failing tests, 2) Write implementation, "
-                    "3) Refactor, 4) Learn patterns."
+                    "Build a feature from a Gherkin spec using Test-Driven Development, "
+                    "in Python, TypeScript, or Go. RED/GREEN/REFACTOR all execute inside "
+                    "a rootless, network-isolated Podman container (clean-room sandbox) "
+                    "with per-language static security scanning (Bandit / eslint-plugin-security "
+                    "/ gosec) -- generated code is never run, and never written to your project, "
+                    "until it has passed inside the sandbox."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "feature": {
                             "type": "string",
-                            "description": "Gherkin feature description",
+                            "description": "Gherkin feature description (inline text). Ignored if feature_file is given.",
+                        },
+                        "feature_file": {
+                            "type": "string",
+                            "description": "Path to a .feature file to build from. Takes precedence over 'feature'.",
+                        },
+                        "language": {
+                            "type": "string",
+                            "enum": ["python", "typescript", "go"],
+                            "default": "python",
+                            "description": "Target language. Each runs in its own sandboxed container image.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Module/feature name used for generated file names (e.g. 'user_auth' -> user_auth.py / test_user_auth.py). Derived from the feature text if omitted.",
                         },
                         "project_path": {
                             "type": "string",
@@ -300,12 +341,20 @@ class ACETools:
                             "type": "string",
                             "description": "Test directory (default: tests/)",
                         },
+                        "max_cycles": {
+                            "type": "integer",
+                            "description": "Maximum GREEN retry cycles (default: 5)",
+                        },
+                        "team_id": {
+                            "type": "string",
+                            "description": "Team producing this pattern -- stamped onto any Playbook bullets learned from this build, so CGR3's team-locality ranking has real data to score against.",
+                        },
                         "model": {
                             "type": "string",
-                            "description": "LLM model to use (must be open-source). Examples: qwen/qwen3-coder:free, meta-llama/llama-3.3-70b-instruct:free",
+                            "description": "LLM model to use (must be open-source). Examples: qwen/qwen3-coder:free, meta-llama/llama-3.3-70b-instruct:free. Omit to use the local Claude Code session (no API key needed).",
                         },
                     },
-                    "required": ["feature", "project_path"],
+                    "required": ["project_path"],
                 },
             })
 
@@ -696,128 +745,131 @@ class ACETools:
             "total_bullets": playbook.metadata.total_bullets,
         }
 
+    _LANGUAGES = ("python", "typescript", "go")
+
     def _handle_build_feature(self, args: dict) -> dict:
-        """Handle build_feature tool call (TDD)."""
+        """Handle build_feature tool call: sandboxed TDD in Python/TypeScript/Go.
+
+        RED/GREEN/REFACTOR run inside PodmanOrchestrator-backed language pods
+        (rootless, --network none, --cap-drop=all) via PolyglotTDDRunner —
+        generated code is committed to the project only after it passes inside
+        the container. No generated code is ever executed, or written to disk,
+        directly on the host.
+        """
         if not self.enable_tdd:
             return {"error": "TDD tools not enabled"}
 
         try:
+            import time
             from pathlib import Path
 
-            from src.agents.autonomous_tdd_agent import AutonomousTDDAgent
-            from src.agents.test_review_agent import TestReviewAgent
-            from src.config.settings import settings
-            from src.ensemble.learner import EnsembleLearner
+            from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+            from src.agents.polyglot_pod_builder import build_pod_kwargs
+            from src.agents.polyglot_tdd_runner import PodFactory, PolyglotTDDRunner
+            from src.agents.redundancy_checker import RedundancyPreChecker
 
-            # Parse paths
+            language = args.get("language", "python")
+            if language not in self._LANGUAGES:
+                return {
+                    "success": False,
+                    "error": f"Unsupported language: {language!r} (expected one of {self._LANGUAGES})",
+                }
+
             project_path = Path(args["project_path"]).resolve()
             src_dir = project_path / args.get("src_dir", "src")
             test_dir = project_path / args.get("test_dir", "tests")
-
-            # Ensure directories exist
             src_dir.mkdir(parents=True, exist_ok=True)
             test_dir.mkdir(parents=True, exist_ok=True)
 
-            # Get model configuration - use provided model or fall back to settings
-            if args.get("model"):
-                # Model specified - assume openrouter for model paths like "qwen/qwen3-coder:free"
-                model = args["model"]
-                if "/" in model:
-                    provider = "openrouter"
-                else:
-                    provider = settings.default_llm_provider
+            if args.get("feature_file"):
+                spec = GherkinFeatureBridge.parse(Path(args["feature_file"]))
+                requirement = spec.as_requirement()
+            elif args.get("feature"):
+                requirement = args["feature"]
             else:
-                # Use default from settings
-                provider = settings.default_llm_provider
-                if provider == "openai":
-                    model = settings.openai_default_model
-                elif provider == "anthropic":
-                    model = settings.anthropic_default_model
-                elif provider == "openrouter":
-                    model = settings.openrouter_default_model
-                elif provider == "deepseek":
-                    model = settings.deepseek_default_model
-                elif provider == "togetherai":
-                    model = settings.togetherai_default_model
-                else:
-                    model = settings.ollama_default_model
+                return {"success": False, "error": "Provide either 'feature' or 'feature_file'"}
 
-            # Create ensemble learner with configured model
-            # Use a dummy playbook_id for file mode - learning will be skipped
+            name = args.get("name") or _slugify(requirement)
+            test_file, implementation_file = _pod_file_paths(language, name, src_dir, test_dir)
+
             playbook_id = self.playbook_id or "mcp_tdd_playbook"
-
-            # Check if we're in file mode (no database)
-            file_mode = self.playbook_file is not None and self.playbook_id is None
-
-            ensemble = EnsembleLearner(
-                models=[(provider, model)],
+            llm_client = self._resolve_llm_client(args)
+            pod_kwargs = {
+                language: build_pod_kwargs(language, project_path, llm_client, src_dir=src_dir)
+            }
+            # Same pipeline extensions as ace tdd's build_agent(): audit trail,
+            # AST redundancy pre-check. (ContextMap injection happens inside
+            # build_pod_kwargs, for the python worker only.)
+            runner = PolyglotTDDRunner(
+                PodFactory,
+                max_cycles=args.get("max_cycles", 5),
+                pod_kwargs=pod_kwargs,
+                audit_client=self._audit,
+                redundancy_checker=RedundancyPreChecker(),
                 playbook_id=playbook_id,
-                enable_deliberation=False,  # Single model, no deliberation needed
+                team_id=args.get("team_id"),
+                model_id=_resolve_model_id(llm_client),
             )
 
-            # In file mode, replace the playbook manager with a no-op to avoid DB errors
-            if file_mode:
-                ensemble.playbook_manager = None
-
-            # Create test reviewer
-            test_reviewer = TestReviewAgent(use_llm_analysis=False)
-
-            # Instantiate TDD agent
-            tdd_agent = AutonomousTDDAgent(
-                ensemble_learner=ensemble,
-                test_reviewer=test_reviewer,
-                project_root=project_path,
-                test_dir=test_dir,
-                src_dir=src_dir,
-                max_iterations=args.get("max_iterations", 10),
-                review_threshold=args.get("review_threshold", 0.7),
+            start = time.monotonic()
+            polyglot_result = runner.run(
+                feature_requirement=requirement,
+                test_file=test_file,
+                implementation_file=implementation_file,
+                languages=[language],
             )
+            elapsed = time.monotonic() - start
 
-            # Handle Gherkin directory if provided
-            gherkin_dir = None
-            if args.get("gherkin_dir"):
-                gherkin_dir = Path(args["gherkin_dir"])
+            run_result = polyglot_result.language_results[language]
+            all_passed = run_result.green.passed and run_result.refactor.passed
 
-            # Build the feature
-            result = tdd_agent.build_feature(
-                requirement=args["feature"],
-                gherkin_dir=gherkin_dir,
-                project_root=project_path,
-                source_dir=src_dir,
-                test_dir=test_dir,
-            )
+            # No separate audit event here -- PolyglotTDDRunner's
+            # TDDCycleRunner already emits one CYCLE_COMPLETED per cycle
+            # with the real model_id as actor_id and elapsed_seconds/
+            # task_type in the payload (see tdd_cycle_runner.py). A second,
+            # differently-shaped event under a fake "mcp-client" actor_id
+            # used to be emitted here too -- it double-counted every build
+            # in PerformanceAggregator.get_all_agent_metrics() (inflating
+            # total_tasks 2x) under keys ("total_time_seconds", "language")
+            # the aggregator never reads, so it silently contributed
+            # nothing but noise and a phantom "agent".
 
-            # Emit audit event
-            self._audit.emit_simple(
-                event_type=AuditEventType.CYCLE_COMPLETED,
-                actor_id="mcp-client",
-                actor_type="agent",
-                payload={
-                    "feature": args["feature"][:200],
-                    "cycles_executed": result.cycles_executed,
-                    "all_tests_passed": result.all_tests_passed,
-                    "bullets_learned": result.playbook_bullets_added,
-                    "total_time_seconds": result.total_time_seconds,
-                },
-                playbook_id=playbook_id,
-                project_id=str(project_path),
-            )
-
-            # Return serializable result
             return {
-                "success": True,
-                "requirement": result.requirement,
-                "test_files": [str(f) for f in result.test_files],
-                "implementation_files": [str(f) for f in result.implementation_files],
-                "cycles_executed": result.cycles_executed,
-                "all_tests_passed": result.all_tests_passed,
-                "playbook_bullets_added": result.playbook_bullets_added,
-                "total_time_seconds": result.total_time_seconds,
+                "success": all_passed,
+                "sandboxed": True,
+                "language": language,
+                "requirement": requirement,
+                "test_file": str(test_file),
+                "implementation_file": str(implementation_file),
+                "cycles_to_green": run_result.cycles_to_green,
+                "red_error": run_result.red.error,
+                "green_passed": run_result.green.passed,
+                "green_error": run_result.green.error,
+                "refactor_passed": run_result.refactor.passed,
+                "refactor_error": run_result.refactor.error,
+                "total_time_seconds": elapsed,
             }
 
         except Exception as e:
             logger.exception(f"build_feature failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _resolve_llm_client(self, args: dict):
+        """Build the LLM client for code generation.
+
+        Defaults to ClaudeCliClient — no API key needed, uses the local Claude
+        Code session that's already running this MCP server. An explicit
+        'model' arg opts into a provider-backed LLMClient instead (e.g. for
+        other MCP-capable coding harnesses without a local Claude CLI).
+        """
+        model = args.get("model")
+        if not model:
+            from src.utils.claude_cli_client import ClaudeCliClient
+            return ClaudeCliClient()
+
+        from src.utils.llm_client import LLMClient
+        provider = "openrouter" if "/" in model else "ollama"
+        return LLMClient(provider=provider, model=model)
 
     def _handle_list_providers(self, args: dict) -> dict:
         """Handle list_providers tool call."""

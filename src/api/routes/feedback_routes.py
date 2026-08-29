@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.broker.feedback import FeedbackCollector, HumanFeedback
 
-
 # ---------------------------------------------------------------------------
 # Request / response schemas
 # ---------------------------------------------------------------------------

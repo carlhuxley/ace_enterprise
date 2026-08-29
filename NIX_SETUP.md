@@ -34,7 +34,7 @@ start-postgres
 python migrations/run_migration.py
 
 # Test the setup
-python demo_pgvector_test.py
+python demos/demo_semantic_pattern_search.py
 ```
 
 **Note:** The first `nix-shell` entry will install Python packages automatically. Subsequent entries will be instant.
@@ -100,13 +100,13 @@ start-postgres
 python migrations/run_migration.py
 
 # 4. Test setup
-python demo_pgvector_test.py
+python demos/demo_semantic_pattern_search.py
 
 # 5. Extract patterns and store in PostgreSQL
-python demo_gherkin_extraction_pgvector.py
+python demos/demo_gherkin_extraction_pgvector.py
 
 # 6. Try semantic search
-python demo_semantic_pattern_search.py
+python demos/demo_semantic_pattern_search.py
 
 # 7. When done, stop PostgreSQL
 stop-postgres

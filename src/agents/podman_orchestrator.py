@@ -10,7 +10,7 @@ dict[str, str] mapping filename → content for multi-file workspaces.
 """
 import hashlib
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 

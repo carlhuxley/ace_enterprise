@@ -233,6 +233,17 @@ class DeltaBullet(BaseModel):
     content: str = Field(..., description="Bullet content")
     tags: list[str] = Field(default_factory=list)
 
+    # CGR³ context fields (optional -- see Bullet/BulletCreate). Curator
+    # never asks the LLM to invent these (provenance/scoping facts, not
+    # something to synthesize); Curator.curate()'s task_context can set them
+    # from the caller, who actually knows which team/project is running.
+    team_id: str | None = Field(None, description="Team that produced this pattern")
+    project_ids: list[str] | None = Field(None, description="Projects where this applies")
+    applicable_domains: list[str] | None = Field(None, description="Specific domains")
+    tech_context: dict[str, str] | None = Field(
+        None, description='Tech stack requirements, e.g., {"python": ">=3.10"}'
+    )
+
     @property
     def content_hash(self) -> str:
         """SHA-256 of normalised content — used for fast deduplication."""
@@ -254,6 +265,16 @@ class ReflectorOutput(BaseModel):
     root_cause: str | None = Field(None, description="Why it went wrong")
     correct_approach: str | None = Field(None, description="What should have been done")
     key_insight: str | None = Field(None, description="Key learning or pattern")
+    code_invariant: str | None = Field(
+        None,
+        description=(
+            "Exact Python boolean expression, function call, or code pattern "
+            "that must hold for correctness (e.g. `math.copysign(1.0, x) < 0`) "
+            "-- not a prose description. Optional: older/smaller models may "
+            "not produce this section, in which case it stays None and "
+            "everything downstream degrades gracefully to today's behavior."
+        ),
+    )
     bullet_tags: list[BulletFeedback] = Field(
         default_factory=list, description="Updated tags for bullets"
     )
