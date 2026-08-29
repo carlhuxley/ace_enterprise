@@ -97,7 +97,14 @@ examples/**/__pycache__/
 USER_CONTRIBUTIONS.md
 mlruns/
 
+# AI-agent instruction files - kept locally, not part of the public release
+CLAUDE.md
+AGENTS.md
+
 # Beads / Dolt files (added by bd init) - not part of this repo's public release
 .dolt/
 .beads-credential-key
 .beads/
+
+# Local Claude Code configuration - machine-specific, not part of the public release
+.claude/
