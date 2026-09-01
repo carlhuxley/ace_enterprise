@@ -14,6 +14,7 @@ Flow:
 
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -366,8 +367,8 @@ Fix the implementation:
             None if valid, error message if invalid
         """
         try:
-            # Check it parses
-            tree = compile(code, "<string>", "exec")
+            # Check it parses (raises SyntaxError if not)
+            compile(code, "<string>", "exec")
 
             # Check function name exists
             if f"def {func.name}" not in code:
@@ -449,3 +450,58 @@ def create_tdd_builder_from_config(
         audit_client=audit_client,
         model_id=model_id,
     )
+
+
+def _safe_test_name(name: str) -> str:
+    slug = re.sub(r"\W+", "_", name.strip().lower()).strip("_") or "case"
+    return slug if slug.startswith("test_") else f"test_{slug}"
+
+
+def _shared_state_names(shared_state: str) -> list[str]:
+    """Top-level names bound in `shared_state` (`_count = 0`, `inventory: dict = {}`).
+
+    `from <module> import *` skips underscore-prefixed names, so integration
+    tests that assert on private module state need them imported explicitly.
+    """
+    names: list[str] = []
+    for line in (shared_state or "").splitlines():
+        m = re.match(r"\s*([A-Za-z_]\w*)\s*[:=]", line)
+        if m and m.group(1) not in names:
+            names.append(m.group(1))
+    return names
+
+
+def render_integration_tests(contract: ModuleContract, module_name: str) -> str:
+    """Serialize a `ModuleContract`'s integration tests into a runnable pytest
+    file that imports from `<module_name>` and runs each test's
+    setup → steps → assertion.
+
+    Best-effort: the steps/assertion are the contract's own free-form strings,
+    executed as written. A test that poked module internals not covered by
+    `import *` + the shared-state names will fail honestly rather than be
+    silently skipped.
+    """
+    imports = f"from {module_name} import *  # noqa: F401,F403\n"
+    extra = _shared_state_names(contract.shared_state)
+    if extra:
+        imports += f"from {module_name} import {', '.join(extra)}  # noqa: F401\n"
+    header = (
+        f'"""Integration tests for `{module_name}`, generated from its '
+        f'ModuleContract."""\n{imports}\n\n'
+    )
+
+    if not contract.integration_tests:
+        return header + "def test_module_importable():\n    assert True\n"
+
+    blocks: list[str] = []
+    for t in contract.integration_tests:
+        body = [f"def {_safe_test_name(t.name)}():"]
+        for line in (t.setup or "").splitlines():
+            if line.strip():
+                body.append(f"    {line.strip()}")
+        for step in t.steps:
+            if step.strip():
+                body.append(f"    {step.strip()}")
+        body.append(f"    assert {t.assertion.strip() or 'True'}")
+        blocks.append("\n".join(body))
+    return header + "\n\n\n".join(blocks) + "\n"
