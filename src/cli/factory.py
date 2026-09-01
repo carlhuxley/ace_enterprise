@@ -87,10 +87,9 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
     routing = _route_llm(config, audit_client)
     if routing is not None:
         provider, model = _split_model_ref(routing.selected_model)
+        llm_client = LLMClient(provider=provider, model=model)
     else:
-        provider = settings.default_llm_provider
-        model = _default_model(provider)
-    llm_client = LLMClient(provider=provider, model=model)
+        llm_client = default_llm_client()
 
     playbook_manager = PlaybookManager()
     playbook_manager.get_or_create_playbook(config.playbook_id)
@@ -177,6 +176,13 @@ def _route_llm(config: ProjectConfig, audit_client) -> ModelRoutingDecision | No
     except Exception:  # noqa: BLE001 -- audit is best-effort, never blocks a build
         pass
     return decision
+
+
+def default_llm_client() -> LLMClient:
+    """The LLM client ACE uses when nothing more specific is chosen: provider
+    from settings.default_llm_provider, model from that provider's default."""
+    provider = settings.default_llm_provider
+    return LLMClient(provider=provider, model=_default_model(provider))
 
 
 def _default_model(provider: str) -> str:

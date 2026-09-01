@@ -38,6 +38,9 @@ class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum change
     BLIND_EVALUATION = "blind_evaluation"         # Candidate scored without attribution
     ENSEMBLE_SELECTION = "ensemble_selection"     # Winning candidate revealed post-scoring
 
+    # Multi-module project build
+    PROJECT_BUILD_COMPLETED = "project_build_completed"  # `ace project` finished a plan
+
     # Agent events
     AGENT_STARTED = "agent_started"               # Agent session began
     AGENT_COMPLETED = "agent_completed"           # Agent session ended

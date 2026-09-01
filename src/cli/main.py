@@ -63,6 +63,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable debug logging",
     )
 
+    # ace project
+    proj = sub.add_parser(
+        "project",
+        help="Decompose a spec into modules and build them in dependency order",
+    )
+    proj.add_argument("spec", type=Path, help="Path to the project spec file (free text)")
+    proj.add_argument(
+        "--project", type=Path, default=Path("."),
+        help="Target project directory (default: current directory)",
+    )
+    proj.add_argument(
+        "--plan-only", action="store_true",
+        help="Print the module plan and exit without building",
+    )
+    proj.add_argument(
+        "--yes", "-y", action="store_true",
+        help="Skip the 'build these modules?' confirmation prompt",
+    )
+    proj.add_argument(
+        "--resume", action="store_true",
+        help="Skip modules whose files already exist",
+    )
+    proj.add_argument(
+        "--keep-going", action="store_true",
+        help="Don't stop the build at the first module failure",
+    )
+    proj.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+
     return parser
 
 
@@ -194,6 +222,84 @@ def _build_feature(
     return result.success, result.iterations
 
 
+_PROJECT_STATUS_GLYPH = {
+    "built": "✓",
+    "skipped": "•",
+    "failed": "✗",
+    "blocked": "–",
+}
+
+
+def cmd_project(args: argparse.Namespace) -> int:
+    from src.audit.local_client import LocalAuditClient
+    from src.cli.config import ProjectConfig
+    from src.cli.factory import default_llm_client
+    from src.cli.project_builder import ProjectBuilder
+    from src.contracts.project_architect import ProjectArchitect
+
+    spec_path = args.spec if args.spec.is_absolute() else Path.cwd() / args.spec
+    spec_path = spec_path.resolve()
+    if not spec_path.is_file():
+        print(f"error: spec file not found: {spec_path}", file=sys.stderr)
+        return 1
+
+    project_root = args.project.resolve()
+    if not project_root.is_dir():
+        print(f"error: project directory not found: {project_root}", file=sys.stderr)
+        return 1
+    config = ProjectConfig.load(project_root)
+
+    llm = default_llm_client()
+    model_id = f"{llm.provider}/{llm.model}" if getattr(llm, "provider", None) else llm.model
+    audit = LocalAuditClient()
+
+    architect = ProjectArchitect(llm, audit_client=audit, model_id=model_id)
+    plan_result = architect.plan(spec_path.read_text(encoding="utf-8"))
+    if not plan_result.success or plan_result.plan is None:
+        print(f"error: could not plan the project — {plan_result.error}", file=sys.stderr)
+        return 1
+    plan = plan_result.plan
+
+    print(f"Project:    {project_root}")
+    print(f"Spec:       {spec_path}")
+    print()
+    print(plan.render())
+    print()
+
+    if args.plan_only:
+        return 0
+    if not args.yes and not _confirm(f"Build these {len(plan.modules)} module(s)?"):
+        print("aborted.")
+        return 1
+
+    builder = ProjectBuilder(llm, audit_client=audit, model_id=model_id)
+    result = builder.build(
+        plan, project_root, config.src_dir, config.test_dir,
+        resume=args.resume, stop_on_failure=not args.keep_going,
+    )
+
+    print("\nModules:")
+    for o in result.outcomes:
+        line = f"  {_PROJECT_STATUS_GLYPH.get(o.status.value, '?')} {o.name}  ({o.cycles} cycle(s))"
+        if o.error:
+            line += f" — {o.error}"
+        print(line)
+
+    if result.assembly_passed is not None:
+        print(f"\nAssembly suite: {'passed' if result.assembly_passed else 'FAILED'}")
+        for failure in result.assembly_failures:
+            print(f"  {failure}")
+
+    return 0 if result.success else 1
+
+
+def _confirm(question: str) -> bool:
+    try:
+        return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -203,7 +309,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    handlers = {"tdd": cmd_tdd}
+    handlers = {"tdd": cmd_tdd, "project": cmd_project}
     sys.exit(handlers[args.command](args))
 
 
