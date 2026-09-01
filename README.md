@@ -326,6 +326,7 @@ ace_enterprise/
 - [ ] EnsembleLearner cross-model voting (ConsensusBuilder's convergence analysis is live via `build_feature_ensemble`; the LLM-vote path is not)
 
 ### Planned
+- [ ] Project Architect ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)) — decompose one spec into a multi-module project (module DAG with dependency edges), then build each module in topological order via `ModuleTDDBuilder`; exposed as `ace project` / an MCP `build_project` tool. Today `ace tdd` and `build_feature` are single-module only; `ModuleArchitect`'s `depends_on`/`provides` fields and `ModuleTDDBuilder` exist but have no live entry point.
 - [ ] `build_feature_ensemble` for TypeScript / Go (needs per-language rubrics; `CodeGenerationRubric` is Python-only)
 - [ ] cost and quality_score telemetry (no pricing table or quality-scoring instrument exists yet — required before AdaptiveBroker's budget/balanced/Pareto routing modes have real data to act on)
 - [ ] A2A Protocol Adapter (expose ACE's capability broker as an HTTP A2A server)
