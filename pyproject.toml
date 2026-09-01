@@ -67,6 +67,10 @@ include = ["src*", "mcp_server*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path so tests that exercise the top-level `benchmarks/` and
+# `bootstrap/` trees (not part of the installed package) import in CI, not just
+# under a local `PYTHONPATH=.`.
+pythonpath = ["."]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
