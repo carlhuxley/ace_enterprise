@@ -89,9 +89,13 @@ def cmd_tdd(args: argparse.Namespace) -> int:
             )
             return 1
         if len(candidates) > 1:
-            print("Found multiple feature files — building all in sequence:")
-            for f in candidates:
-                print(f"  {f.relative_to(project_root)}")
+            # Multi-module builds (one run over several features) are tracked
+            # in GitHub issue #8 — for now `ace tdd` builds a single feature.
+            print(
+                f"Found {len(candidates)} feature files; building only "
+                f"{candidates[0].relative_to(project_root)}. "
+                "Pass --feature to pick a different one."
+            )
         feature_path = candidates[0]
     else:
         # Resolve relative paths against the project root, not CWD
