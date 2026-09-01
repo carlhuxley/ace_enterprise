@@ -14,15 +14,16 @@ from src.cli.main import cmd_tdd
 
 
 def _args(**overrides):
-    defaults = dict(
-        project=Path("."),
-        feature=None,
-        requirement=None,
-        playbook_id=None,
-        max_iterations=None,
-        no_learn=False,
-        verbose=False,
-    )
+    defaults = {
+        "project": Path("."),
+        "feature": None,
+        "requirement": None,
+        "playbook_id": None,
+        "max_iterations": None,
+        "no_learn": False,
+        "keep_going": False,
+        "verbose": False,
+    }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
@@ -109,3 +110,125 @@ class TestSuccessPath:
             rc = cmd_tdd(_args(project=project, feature=Path("features/login.feature")))
         assert rc == 0
         build_agent.assert_called_once()
+
+
+class TestMultiFeature:
+    @pytest.fixture
+    def multi_project(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        feats = tmp_path / "features"
+        feats.mkdir()
+        (feats / "db.feature").write_text("Feature: DB\n\n  Scenario: s\n    Given x\n")
+        (feats / "auth.feature").write_text(
+            "@depends_on(db)\nFeature: Auth\n\n  Scenario: s\n    Given x\n"
+        )
+        (feats / "api.feature").write_text(
+            "@depends_on(auth, db)\nFeature: API\n\n  Scenario: s\n    Given x\n"
+        )
+        return tmp_path
+
+    def _paths_for(self, feature_path):
+        stem = Path(feature_path).stem
+        return (Path(f"tests/test_{stem}.py"), Path(f"src/{stem}.py"))
+
+    def test_builds_every_feature_in_dependency_order(self, multi_project):
+        handle = _stub_handle()
+        handle.file_paths_for.side_effect = self._paths_for
+        built = []
+        handle.build_from_feature.side_effect = lambda fp, requirement=None: (
+            built.append(Path(fp).stem) or MagicMock(success=True, iterations=1)
+        )
+        with patch("src.cli.factory.build_agent", return_value=handle):
+            rc = cmd_tdd(_args(project=multi_project))
+        assert rc == 0
+        assert built == ["db", "auth", "api"]
+
+    def test_lexical_order_when_no_depends_on_tags(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        feats = tmp_path / "features"
+        feats.mkdir()
+        for name in ("charlie", "alpha", "bravo"):
+            (feats / f"{name}.feature").write_text(
+                f"Feature: {name}\n\n  Scenario: s\n    Given x\n"
+            )
+        handle = _stub_handle()
+        handle.file_paths_for.side_effect = self._paths_for
+        built = []
+        handle.build_from_feature.side_effect = lambda fp, requirement=None: (
+            built.append(Path(fp).stem) or MagicMock(success=True, iterations=1)
+        )
+        with patch("src.cli.factory.build_agent", return_value=handle):
+            cmd_tdd(_args(project=tmp_path))
+        assert built == ["alpha", "bravo", "charlie"]
+
+    def test_stops_at_first_failure_by_default(self, multi_project):
+        handle = _stub_handle()
+        handle.file_paths_for.side_effect = self._paths_for
+        built = []
+
+        def build(fp, requirement=None):
+            stem = Path(fp).stem
+            built.append(stem)
+            return MagicMock(success=(stem != "db"), iterations=1)
+
+        handle.build_from_feature.side_effect = build
+        with patch("src.cli.factory.build_agent", return_value=handle):
+            rc = cmd_tdd(_args(project=multi_project))
+        assert rc == 1
+        assert built == ["db"]  # auth/api never attempted
+
+    def test_keep_going_builds_the_rest(self, multi_project):
+        handle = _stub_handle()
+        handle.file_paths_for.side_effect = self._paths_for
+        built = []
+
+        def build(fp, requirement=None):
+            stem = Path(fp).stem
+            built.append(stem)
+            return MagicMock(success=(stem != "db"), iterations=1)
+
+        handle.build_from_feature.side_effect = build
+        with patch("src.cli.factory.build_agent", return_value=handle):
+            rc = cmd_tdd(_args(project=multi_project, keep_going=True))
+        assert rc == 1
+        assert built == ["db", "auth", "api"]
+
+    def test_per_feature_playbook_scoping(self, multi_project):
+        seen_playbook_ids = []
+        handle = _stub_handle()
+        handle.file_paths_for.side_effect = self._paths_for
+
+        def fake_build_agent(config, skip_learn=False):
+            seen_playbook_ids.append(config.playbook_id)
+            return handle
+
+        with patch("src.cli.factory.build_agent", side_effect=fake_build_agent):
+            cmd_tdd(_args(project=multi_project))
+        assert seen_playbook_ids == [
+            f"{multi_project.name}_db",
+            f"{multi_project.name}_auth",
+            f"{multi_project.name}_api",
+        ]
+
+    def test_cycle_is_reported(self, tmp_path, capsys):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        feats = tmp_path / "features"
+        feats.mkdir()
+        (feats / "a.feature").write_text("@depends_on(b)\nFeature: A\n\n  Scenario: s\n    Given x\n")
+        (feats / "b.feature").write_text("@depends_on(a)\nFeature: B\n\n  Scenario: s\n    Given x\n")
+        rc = cmd_tdd(_args(project=tmp_path))
+        assert rc == 1
+        assert "cycle" in capsys.readouterr().err
+
+    def test_unknown_dependency_is_reported(self, tmp_path, capsys):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        feats = tmp_path / "features"
+        feats.mkdir()
+        (feats / "a.feature").write_text("@depends_on(ghost)\nFeature: A\n\n  Scenario: s\n    Given x\n")
+        rc = cmd_tdd(_args(project=tmp_path))
+        assert rc == 1
+        assert "unknown node" in capsys.readouterr().err

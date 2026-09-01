@@ -4,10 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.gherkin_feature_bridge import FeatureSpec, GherkinFeatureBridge, ScenarioSpec
+from src.agents.gherkin_feature_bridge import (
+    FeatureSpec,
+    GherkinFeatureBridge,
+    ScenarioSpec,
+    parse_depends_on,
+)
 from src.agents.language_pod import TokenUsage
 from src.analytics.token_efficiency import EfficiencyReport
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -159,6 +163,39 @@ class TestGherkinFeatureBridgeParse:
         # "As a user", "I want..." lines must not appear as scenario names
         names = [s.name for s in spec.scenarios]
         assert all("As a" not in n and "I want" not in n for n in names)
+
+
+# ---------------------------------------------------------------------------
+# @depends_on(...) tag parsing
+# ---------------------------------------------------------------------------
+
+class TestDependsOnTag:
+    def test_no_tag_means_no_dependencies(self, tmp_path):
+        p = _write_feature(tmp_path, SIMPLE_FEATURE)
+        assert GherkinFeatureBridge.parse(p).depends_on == []
+        assert parse_depends_on(p) == []
+
+    def test_single_tag_with_multiple_stems(self, tmp_path):
+        p = _write_feature(tmp_path, "@depends_on(auth, db)\nFeature: X\n\n  Scenario: s\n    Given a\n")
+        assert GherkinFeatureBridge.parse(p).depends_on == ["auth", "db"]
+
+    def test_repeated_tags_are_unioned_in_order(self, tmp_path):
+        p = _write_feature(
+            tmp_path,
+            "@wip @depends_on(db)\n@depends_on(auth, db)\nFeature: X\n\n  Scenario: s\n    Given a\n",
+        )
+        assert parse_depends_on(p) == ["db", "auth"]
+
+    def test_tag_below_feature_line_is_ignored(self, tmp_path):
+        p = _write_feature(
+            tmp_path,
+            "Feature: X\n@depends_on(late)\n\n  Scenario: s\n    Given a\n",
+        )
+        assert GherkinFeatureBridge.parse(p).depends_on == []
+
+    def test_case_insensitive(self, tmp_path):
+        p = _write_feature(tmp_path, "@Depends_On(Db)\nFeature: X\n\n  Scenario: s\n    Given a\n")
+        assert parse_depends_on(p) == ["Db"]
 
 
 # ---------------------------------------------------------------------------
