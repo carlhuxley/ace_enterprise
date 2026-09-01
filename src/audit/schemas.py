@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum changes str()/repr() semantics relied on elsewhere
     """Types of audit events that can be emitted."""
 
     # Knowledge events
@@ -32,6 +32,11 @@ class AuditEventType(str, Enum):
     # Contract-driven events
     CONTRACT_GENERATED = "contract_generated"     # Architect produced contract
     CONTRACT_DECOMPOSED = "contract_decomposed"   # Requirement split into contracts
+
+    # Broker / routing events
+    ROUTING_DECISION = "routing_decision"         # AdaptiveBroker picked a model
+    BLIND_EVALUATION = "blind_evaluation"         # Candidate scored without attribution
+    ENSEMBLE_SELECTION = "ensemble_selection"     # Winning candidate revealed post-scoring
 
     # Agent events
     AGENT_STARTED = "agent_started"               # Agent session began

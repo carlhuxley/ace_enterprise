@@ -15,6 +15,7 @@ from pathlib import Path
 from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
 from src.agents.iterative_tdd_runner import IterativeResult, IterativeTDDRunner
 from src.agents.podman_orchestrator import PodmanOrchestrator
+from src.broker.model_router import ModelRoutingDecision, route_model
 from src.cli.config import ProjectConfig
 from src.config.settings import settings
 from src.utils.llm_client import LLMClient
@@ -28,6 +29,9 @@ class TDDRunHandle:
     orchestrator: PodmanOrchestrator
     test_dir: Path
     src_dir: Path
+    # Set when config.candidate_models had 2+ entries and the AdaptiveBroker
+    # picked which one runs this build; None when a single fixed model is used.
+    routing: ModelRoutingDecision | None = None
 
     def build_from_feature(self, feature_path: Path, requirement: str | None = None) -> IterativeResult:
         """Run the Gherkin-driven TDD loop for one .feature file.
@@ -78,8 +82,14 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
     from src.playbook.manager import PlaybookManager
     from src.utils.context_map import ContextMapBuilder
 
-    provider = settings.default_llm_provider
-    model = _default_model(provider)
+    audit_client = LocalAuditClient()
+
+    routing = _route_llm(config, audit_client)
+    if routing is not None:
+        provider, model = _split_model_ref(routing.selected_model)
+    else:
+        provider = settings.default_llm_provider
+        model = _default_model(provider)
     llm_client = LLMClient(provider=provider, model=model)
 
     playbook_manager = PlaybookManager()
@@ -112,7 +122,7 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
         playbook_id=config.playbook_id,
         reflector=reflector,
         curator=curator,
-        audit_client=LocalAuditClient(),
+        audit_client=audit_client,
         redundancy_checker=RedundancyPreChecker(),
         team_id=config.team_id,
         model_id=f"{llm_client.provider}/{llm_client.model}",
@@ -123,7 +133,50 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
         orchestrator=orchestrator,
         test_dir=config.test_dir,
         src_dir=config.src_dir,
+        routing=routing,
     )
+
+
+def _split_model_ref(ref: str) -> tuple[str, str]:
+    """Split a "<provider>/<model>" routing ref. The model half may itself
+    contain slashes (e.g. "openrouter/qwen/qwen3-coder:free")."""
+    provider, sep, model = ref.partition("/")
+    if not sep:
+        raise ValueError(
+            f"candidate model {ref!r} must be '<provider>/<model>' "
+            "(e.g. 'openrouter/qwen/qwen3-coder')"
+        )
+    return provider, model
+
+
+def _route_llm(config: ProjectConfig, audit_client) -> ModelRoutingDecision | None:
+    """Route this run to one of config.candidate_models via the AdaptiveBroker.
+
+    Returns None (caller uses the ACE default model) unless 2+ candidates are
+    configured. Emits a ROUTING_DECISION audit event so the choice is visible
+    in the trail, consistent with the broker's "humans see everything" design.
+    """
+    if len(config.candidate_models) < 2:
+        return None
+
+    from src.audit.local_client import default_local_audit_url
+    from src.audit.schemas import AuditEventType
+
+    decision = route_model(
+        config.candidate_models,
+        task_type="python",
+        audit_database_url=default_local_audit_url(),
+    )
+    try:
+        audit_client.emit_simple(
+            event_type=AuditEventType.ROUTING_DECISION,
+            actor_id=decision.selected_model,
+            payload=decision.to_payload(),
+            playbook_id=config.playbook_id or None,
+        )
+    except Exception:  # noqa: BLE001 -- audit is best-effort, never blocks a build
+        pass
+    return decision
 
 
 def _default_model(provider: str) -> str:

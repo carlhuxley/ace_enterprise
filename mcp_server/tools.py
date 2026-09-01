@@ -353,8 +353,56 @@ class ACETools:
                             "type": "string",
                             "description": "LLM model to use (must be open-source). Examples: qwen/qwen3-coder:free, meta-llama/llama-3.3-70b-instruct:free. Omit to use the local Claude Code session (no API key needed).",
                         },
+                        "models": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Two or more '<provider>/<model>' candidates to route between via the AdaptiveBroker, which picks the best one for this language from audit history (falls back to the first with no history). Overrides 'model'. The chosen model and the broker verdict are returned under 'routing'.",
+                        },
                     },
                     "required": ["project_path"],
+                },
+            })
+            tools.append({
+                "name": "build_feature_ensemble",
+                "description": (
+                    "Build a Python feature with 2+ candidate models, score each "
+                    "implementation blind (the evaluator never sees which model wrote "
+                    "which), and commit the winner. Every candidate is generated in its "
+                    "own throwaway sandbox; nothing reaches your project until it wins. "
+                    "Returns per-candidate scores (attribution revealed post-scoring) and "
+                    "a consensus report on how far the models' solutions converged."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "feature": {
+                            "type": "string",
+                            "description": "Gherkin feature description (inline text). Ignored if feature_file is given.",
+                        },
+                        "feature_file": {
+                            "type": "string",
+                            "description": "Path to a .feature file to build from. Takes precedence over 'feature'.",
+                        },
+                        "models": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "description": "Two or more '<provider>/<model>' candidates (e.g. 'openrouter/qwen/qwen3-coder:free'). Each produces one candidate implementation.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Module/feature name for generated files (e.g. 'user_auth' -> user_auth.py / test_user_auth.py). Derived from the feature text if omitted.",
+                        },
+                        "project_path": {"type": "string", "description": "Path to the project root"},
+                        "src_dir": {"type": "string", "description": "Source directory (default: src/)"},
+                        "test_dir": {"type": "string", "description": "Test directory (default: tests/)"},
+                        "max_cycles": {"type": "integer", "description": "Maximum GREEN retry cycles per candidate (default: 5)"},
+                        "team_id": {
+                            "type": "string",
+                            "description": "Team producing this pattern -- stamped onto any Playbook bullets learned from this build.",
+                        },
+                    },
+                    "required": ["project_path", "models"],
                 },
             })
 
@@ -381,6 +429,7 @@ class ACETools:
             "feedback": self._handle_feedback,
             "get_playbook_info": self._handle_get_playbook_info,
             "build_feature": self._handle_build_feature,
+            "build_feature_ensemble": self._handle_build_feature_ensemble,
             "list_providers": self._handle_list_providers,
         }
 
@@ -793,7 +842,13 @@ class ACETools:
             test_file, implementation_file = _pod_file_paths(language, name, src_dir, test_dir)
 
             playbook_id = self.playbook_id or "mcp_tdd_playbook"
-            llm_client = self._resolve_llm_client(args)
+            routing = self._route_model(args, task_type=language, playbook_id=playbook_id)
+            if routing is not None:
+                from src.utils.llm_client import LLMClient
+                provider, _, model_name = routing.selected_model.partition("/")
+                llm_client = LLMClient(provider=provider, model=model_name)
+            else:
+                llm_client = self._resolve_llm_client(args)
             pod_kwargs = {
                 language: build_pod_kwargs(language, project_path, llm_client, src_dir=src_dir)
             }
@@ -848,11 +903,94 @@ class ACETools:
                 "refactor_passed": run_result.refactor.passed,
                 "refactor_error": run_result.refactor.error,
                 "total_time_seconds": elapsed,
+                "routing": routing.to_payload() if routing is not None else None,
             }
 
         except Exception as e:
             logger.exception(f"build_feature failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _handle_build_feature_ensemble(self, args: dict) -> dict:
+        """Multi-candidate blind build: N models -> N sandboxed candidates ->
+        blind scoring -> winner committed. See EnsembleBuildRunner."""
+        if not self.enable_tdd:
+            return {"error": "TDD tools not enabled"}
+
+        try:
+            from pathlib import Path
+
+            from src.agents.ensemble_build import EnsembleBuildRunner
+            from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+
+            models = args.get("models") or []
+            if not isinstance(models, list) or len({str(m) for m in models}) < 2:
+                return {"success": False, "error": "provide 2+ distinct 'models'"}
+
+            language = args.get("language", "python")
+
+            project_path = Path(args["project_path"]).resolve()
+            src_dir = project_path / args.get("src_dir", "src")
+            test_dir = project_path / args.get("test_dir", "tests")
+
+            if args.get("feature_file"):
+                requirement = GherkinFeatureBridge.parse(Path(args["feature_file"])).as_requirement()
+            elif args.get("feature"):
+                requirement = args["feature"]
+            else:
+                return {"success": False, "error": "Provide either 'feature' or 'feature_file'"}
+
+            name = args.get("name") or _slugify(requirement)
+            playbook_id = self.playbook_id or "mcp_tdd_playbook"
+
+            runner = EnsembleBuildRunner(
+                project_path=project_path,
+                language=language,
+                src_dir=src_dir,
+                test_dir=test_dir,
+                playbook_id=playbook_id,
+                audit_client=self._audit,
+                team_id=args.get("team_id"),
+                max_cycles=args.get("max_cycles", 5),
+            )
+            result = runner.run(requirement, [str(m) for m in models], name)
+
+            payload = result.to_dict()
+            payload["success"] = result.committed
+            payload["sandboxed"] = True
+            return payload
+
+        except Exception as e:
+            logger.exception(f"build_feature_ensemble failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _route_model(self, args: dict, task_type: str, playbook_id: str):
+        """Route this build among args['models'] via the AdaptiveBroker.
+
+        Returns None (caller uses args['model'] / the local Claude session)
+        unless 2+ '<provider>/<model>' candidates are given. Emits a
+        ROUTING_DECISION audit event so the choice shows up in the trail.
+        """
+        candidates = args.get("models") or []
+        if not isinstance(candidates, list) or len(candidates) < 2:
+            return None
+
+        from src.broker.model_router import route_model
+
+        decision = route_model(
+            [str(c) for c in candidates],
+            task_type=task_type,
+            audit_database_url=self._audit.database_url,
+        )
+        try:
+            self._audit.emit_simple(
+                event_type=AuditEventType.ROUTING_DECISION,
+                actor_id=decision.selected_model,
+                payload=decision.to_payload(),
+                playbook_id=playbook_id,
+            )
+        except Exception:  # noqa: BLE001 -- audit is best-effort
+            logger.debug("routing-decision audit emit failed", exc_info=True)
+        return decision
 
     def _resolve_llm_client(self, args: dict):
         """Build the LLM client for code generation.

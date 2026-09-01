@@ -107,7 +107,12 @@ ACE brokers a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to bui
 
 **Why double-blind?** No bias toward big-name models. A cheap open-source model's output is accepted if it scores well; an expensive model's output is rejected if it scores poorly. Pure meritocracy.
 
-**Status:** Both stages pictured above are standalone/preview subsystems today, not live end-to-end. The routing engine (`AdaptiveBroker`, `BrokerAdvisor`, `CapabilityRegistry`, `PerformanceAggregator` in `src/broker/`) and blind evaluation (`BlindEvaluator`, `ConsensusBuilder`, `EnsembleLearner` in `src/benchmark/` and `src/ensemble/`) are each implemented and unit-tested, but no live entry point (`ace tdd`, the MCP `build_feature` tool, or `bootstrap/`) currently calls into either to route or score a real submission. The TDD engine's audit trail now carries real per-model telemetry (`actor_id`, `elapsed_seconds`, `task_type`) so the broker has data to route on once it's wired up; see [Roadmap](#roadmap).
+**Status:** Both stages are now wired into live entry points, opt-in:
+
+- **Routing** — `AdaptiveBroker` picks the model for a build. `ace tdd` reads a `candidate_models:` list from `.ace/config.yaml`; the MCP `build_feature` tool takes a `models` array. With 2+ candidates the broker ranks them on `CYCLE_COMPLETED` audit history for that language and routes the run (falling back to the first candidate with no history). The chosen model and verdict come back to the caller and land on the audit chain as a `ROUTING_DECISION` event. `PerformanceAggregator` drives it; `BrokerAdvisor` and `CapabilityRegistry` remain standalone.
+- **Blind evaluation** — the MCP `build_feature_ensemble` tool builds a Python feature with 2+ candidate models, each in its own throwaway sandbox, then scores every implementation through `BlindEvaluator` under an opaque `submission_id` (the evaluator never sees which model wrote which), commits the winner, and reports a `ConsensusBuilder` convergence summary. Emits `BLIND_EVALUATION` (no attribution) and `ENSEMBLE_SELECTION` (winner revealed) audit events. `EnsembleLearner`'s cross-model voting is not yet on this path.
+
+Still preview: cost / `quality_score` telemetry (no pricing table or automated quality instrument exists), so the broker's BUDGET/BALANCED/PARETO modes have no real data — only BEST_QUALITY and Bayesian success-rate routing are meaningful today. See [Roadmap](#roadmap).
 
 ---
 
@@ -121,7 +126,7 @@ ACE brokers a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to bui
 - **CostQualityAnalyzer** (`src/analytics/`) — Pareto frontier analysis; suggests best model for a given complexity level
 - **DistillationRouter** (`src/playbook/`) — Routes to cheaper models when quality delta is within tolerance
 
-`AdaptiveBroker`, `BayesianEstimate`, and `CapabilityRegistry` are implemented and unit-tested in `src/broker/`; not yet wired into a live routing decision point (see the Status note under [The Broker](#the-broker)).
+`AdaptiveBroker` + `BayesianEstimate` route live builds when 2+ candidate models are configured (`ace tdd` via `.ace/config.yaml`'s `candidate_models:`, MCP `build_feature` via `models`); see the Status note under [The Broker](#the-broker). `CapabilityRegistry` and `BrokerAdvisor` are implemented and unit-tested but not yet on a live path.
 
 ### Blind Evaluation
 
@@ -129,7 +134,7 @@ ACE brokers a pool of AI agents (Claude, Llama, Qwen, Mistral) and humans to bui
 - **ConsensusBuilder** — Aggregates votes across multiple evaluators
 - **EnsembleLearner** — Distils consensus patterns into Playbook bullets
 
-Implemented and unit-tested in `src/benchmark/` and `src/ensemble/`; not yet wired into a live routing decision point (see the Status note under [The Broker](#the-broker)). Scoring a submission's tests always runs inside the same rootless Podman sandbox as the TDD engine (`--network none`, `--cap-drop=all`) — submission code is untrusted input by design and is never executed on the host.
+`BlindEvaluator` + `ConsensusBuilder` run live via the MCP `build_feature_ensemble` tool (multi-candidate Python builds); see the Status note under [The Broker](#the-broker). `EnsembleLearner`'s cross-model voting is not yet on that path. Scoring a submission's tests always runs inside the same rootless Podman sandbox as the TDD engine (`--network none`, `--cap-drop=all`) — submission code is untrusted input by design and is never executed on the host.
 
 ### Autonomous TDD Agent (ACE Pipeline)
 
@@ -210,7 +215,7 @@ Local development only — the server communicates over stdio, spawned as a subp
 }
 ```
 
-Tools: `get_guidance` (CGR³ verdict), `learn` (add bullet), `query` (semantic search), `feedback`, `build_feature`.
+Tools: `get_guidance` (CGR³ verdict), `learn` (add bullet), `query` (semantic search), `feedback`, `build_feature` (sandboxed TDD, optional broker routing via `models`), `build_feature_ensemble` (multi-candidate blind build).
 
 ### ClaudeCliClient — No API Key Required
 
@@ -310,18 +315,18 @@ ace_enterprise/
 - [x] ContractValidator / validate_module run implementer-submitted code inside the Podman sandbox instead of `exec()`/`eval()`-ing it in-process — same gap, closed for the contract-driven pipeline
 - [x] `scripts/stress_test_coding.py` (model-output validation for local dev benchmarking) sandboxed the same way — no LLM-generated code executes outside Podman anywhere in the repo, `scripts/` included
 - [x] Live adversarial e2e tests proving the sandbox holds against real attacks, not just claimed flags: network egress, host-environment exfiltration, and CAP_SYS_ADMIN/read-only-mount privilege escalation all fail from inside a real container (`tests/e2e/test_enterprise_e2e_showcase.py`)
+- [x] AdaptiveBroker wired into a live routing decision point — `ace tdd` (`.ace/config.yaml` `candidate_models:`) and MCP `build_feature` (`models`) route a build to one of 2+ candidates on audit history, emitting a `ROUTING_DECISION` event
+- [x] BlindEvaluator + ConsensusBuilder wired into a live multi-candidate flow — MCP `build_feature_ensemble` builds with N models, scores each implementation blind, commits the winner, emits `BLIND_EVALUATION` / `ENSEMBLE_SELECTION` events
 
 ### Preview (implemented + unit-tested, not yet wired into a live entry point)
-- [ ] AdaptiveBroker with Bayesian success-rate estimation
 - [ ] CapabilityRegistry — anonymous agent registration with proficiency ratings
+- [ ] BrokerAdvisor
 - [ ] CostQualityAnalyzer with Pareto frontier
 - [ ] DistillationRouter
-- [ ] BlindEvaluator with four domain rubrics
-- [ ] ConsensusBuilder / EnsembleLearner
+- [ ] EnsembleLearner cross-model voting (ConsensusBuilder's convergence analysis is live via `build_feature_ensemble`; the LLM-vote path is not)
 
 ### Planned
-- [ ] Wire AdaptiveBroker into `ace tdd` / MCP `build_feature` as a real routing decision point
-- [ ] Wire BlindEvaluator/ConsensusBuilder/EnsembleLearner into a real multi-agent evaluation flow
+- [ ] `build_feature_ensemble` for TypeScript / Go (needs per-language rubrics; `CodeGenerationRubric` is Python-only)
 - [ ] cost and quality_score telemetry (no pricing table or quality-scoring instrument exists yet — required before AdaptiveBroker's budget/balanced/Pareto routing modes have real data to act on)
 - [ ] A2A Protocol Adapter (expose ACE's capability broker as an HTTP A2A server)
 - [ ] effGen MCP adapter (connect open-source models as broker agents)

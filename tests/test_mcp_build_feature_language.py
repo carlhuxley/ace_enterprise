@@ -241,9 +241,8 @@ class TestPolyglotPodBuilderContextMap:
     """
 
     def test_python_worker_gets_context_map_from_src_dir(self, tmp_path):
-        from unittest.mock import MagicMock
-        from src.agents.polyglot_tdd_runner import PodFactory
         from src.agents.polyglot_pod_builder import build_pod_kwargs
+        from src.agents.polyglot_tdd_runner import PodFactory
 
         src_dir = tmp_path / "src"
         src_dir.mkdir()
@@ -255,13 +254,70 @@ class TestPolyglotPodBuilderContextMap:
         assert "add" in names
 
     def test_defaults_to_project_root_when_src_dir_omitted(self, tmp_path):
-        from unittest.mock import MagicMock
         from src.agents.polyglot_pod_builder import build_pod_kwargs
 
         (tmp_path / "calc.py").write_text("def add(a: int, b: int) -> int:\n    return a + b\n")
         kwargs = build_pod_kwargs("python", tmp_path, MagicMock())
         names = [sig.name for sig in kwargs["worker"]._context_map.all_signatures()]
         assert "add" in names
+
+
+class TestAdaptiveBrokerRouting:
+    """build_feature routes among args['models'] via the AdaptiveBroker."""
+
+    def test_no_models_arg_means_no_routing(self, tools, stub_runner_cls, stub_pod_kwargs, tmp_path):
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        result = tools._handle_build_feature({
+            "feature": "User logs in", "project_path": str(tmp_path),
+        })
+        assert result["routing"] is None
+
+    def test_single_model_in_list_does_not_route(self, tools, stub_runner_cls, stub_pod_kwargs, tmp_path):
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        result = tools._handle_build_feature({
+            "feature": "User logs in", "project_path": str(tmp_path),
+            "models": ["openrouter/qwen/q1"],
+        })
+        assert result["routing"] is None
+
+    def test_two_models_route_and_select_the_client(self, tools, stub_runner_cls, stub_pod_kwargs, tmp_path):
+        from src.broker.model_router import ModelRoutingDecision
+
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        decision = ModelRoutingDecision(
+            selected_model="ollama/qwen2.5-coder:7b",
+            candidates=["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"],
+            confidence=0.0, verdict="ASK_FIRST", is_fallback=True, task_type="python",
+        )
+        with patch("src.broker.model_router.route_model", return_value=decision):
+            result = tools._handle_build_feature({
+                "feature": "User logs in", "project_path": str(tmp_path),
+                "models": ["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"],
+            })
+        assert result["routing"]["selected_model"] == "ollama/qwen2.5-coder:7b"
+        _, kwargs = stub_runner_cls.call_args
+        assert kwargs["model_id"] == "ollama/qwen2.5-coder:7b"
+
+    def test_routing_decision_is_audited(self, tools, stub_runner_cls, stub_pod_kwargs, tmp_path):
+        from src.audit.schemas import AuditEventType
+        from src.broker.model_router import ModelRoutingDecision
+
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        decision = ModelRoutingDecision(
+            selected_model="openrouter/deepseek/deepseek-v3",
+            candidates=["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"],
+            confidence=0.0, verdict="ASK_FIRST", is_fallback=True, task_type="python",
+        )
+        with patch("src.broker.model_router.route_model", return_value=decision), \
+             patch.object(tools._audit, "emit_simple", wraps=tools._audit.emit_simple) as emit:
+            tools._handle_build_feature({
+                "feature": "User logs in", "project_path": str(tmp_path),
+                "models": ["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"],
+            })
+        assert any(
+            c.kwargs.get("event_type") == AuditEventType.ROUTING_DECISION
+            for c in emit.call_args_list
+        )
 
 
 class TestResolveLLMClient:

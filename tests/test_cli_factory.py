@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agents.iterative_tdd_runner import IterativeTDDRunner
-from src.agents.language_pod import PhaseResult
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod
@@ -75,6 +74,39 @@ class TestBuildAgentWiring:
     def test_team_id_defaults_to_none(self, config):
         handle = build_agent(config)
         assert handle.runner._runner_kwargs["team_id"] is None
+
+    def test_no_routing_without_candidate_models(self, config):
+        handle = build_agent(config)
+        assert handle.routing is None
+
+    def test_single_candidate_model_does_not_route(self, config):
+        config.candidate_models = ["openrouter/qwen/q1"]
+        handle = build_agent(config)
+        assert handle.routing is None
+
+    def test_candidate_models_route_and_select_the_model(self, config):
+        config.candidate_models = ["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"]
+        fake = MagicMock()
+        fake.selected_model = "ollama/qwen2.5-coder:7b"
+        fake.to_payload.return_value = {"selected_model": "ollama/qwen2.5-coder:7b"}
+        with patch("src.cli.factory.route_model", return_value=fake) as route:
+            handle = build_agent(config)
+        route.assert_called_once()
+        assert handle.routing is fake
+        # The selected "<provider>/<model>" ref is what the runner records as model_id.
+        assert handle.runner._runner_kwargs["model_id"] == "ollama/qwen2.5-coder:7b"
+
+    def test_routing_decision_is_audited(self, config):
+        config.candidate_models = ["openrouter/deepseek/deepseek-v3", "ollama/qwen2.5-coder:7b"]
+        fake = MagicMock()
+        fake.selected_model = "openrouter/deepseek/deepseek-v3"
+        fake.to_payload.return_value = {"selected_model": "openrouter/deepseek/deepseek-v3"}
+        with patch("src.cli.factory.route_model", return_value=fake), \
+             patch("src.audit.local_client.LocalAuditClient.emit_simple") as emit:
+            build_agent(config)
+        event_types = [c.kwargs.get("event_type") for c in emit.call_args_list]
+        from src.audit.schemas import AuditEventType
+        assert AuditEventType.ROUTING_DECISION in event_types
 
     def test_audit_client_wired(self, config):
         # Parity with AutonomousTDDAgent, which emitted audit events natively.
