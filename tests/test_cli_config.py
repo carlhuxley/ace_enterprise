@@ -1,8 +1,7 @@
+
 import pytest
-from pathlib import Path
 
 from src.cli.config import ProjectConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,6 +134,43 @@ def test_team_id_read_from_config_file(tmp_path):
     project = _project(tmp_path, config_yaml="team_id: payments\n")
     config = ProjectConfig.load(project)
     assert config.team_id == "payments"
+
+
+# ---------------------------------------------------------------------------
+# candidate_models (AdaptiveBroker routing)
+# ---------------------------------------------------------------------------
+
+def test_candidate_models_defaults_to_empty_list(tmp_path):
+    config = ProjectConfig.load(_project(tmp_path))
+    assert config.candidate_models == []
+
+
+def test_candidate_models_read_as_list(tmp_path):
+    project = _project(
+        tmp_path,
+        config_yaml=(
+            "candidate_models:\n"
+            "  - openrouter/qwen/qwen3-coder:free\n"
+            "  - ollama/qwen2.5-coder:7b\n"
+        ),
+    )
+    config = ProjectConfig.load(project)
+    assert config.candidate_models == [
+        "openrouter/qwen/qwen3-coder:free",
+        "ollama/qwen2.5-coder:7b",
+    ]
+
+
+def test_candidate_models_scalar_is_coerced_to_single_entry_list(tmp_path):
+    project = _project(tmp_path, config_yaml="candidate_models: ollama/qwen2.5-coder:7b\n")
+    config = ProjectConfig.load(project)
+    assert config.candidate_models == ["ollama/qwen2.5-coder:7b"]
+
+
+def test_candidate_models_rejects_non_string_scalar(tmp_path):
+    project = _project(tmp_path, config_yaml="candidate_models: 42\n")
+    with pytest.raises(ValueError, match="string or list"):
+        ProjectConfig.load(project)
 
 
 # ---------------------------------------------------------------------------

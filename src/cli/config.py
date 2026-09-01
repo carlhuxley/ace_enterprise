@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
@@ -25,6 +25,10 @@ class ProjectConfig:
     promote_threshold: float = 0.85
     max_iterations: int = 20
     team_id: str | None = None
+    # "<provider>/<model>" refs. With 2+, build_agent() routes the run to one
+    # of them via the AdaptiveBroker (audit-history-driven); with 0 or 1 the
+    # single configured model / ACE default is used unchanged.
+    candidate_models: list[str] = field(default_factory=list)
 
     def discover_features(self) -> list[Path]:
         """Return all .feature files in <project>/features/, falling back to project root."""
@@ -62,7 +66,19 @@ class ProjectConfig:
             promote_threshold=float(raw.get("promote_threshold", 0.85)),
             max_iterations=int(raw.get("max_iterations", 20)),
             team_id=raw.get("team_id"),
+            candidate_models=_str_list(raw.get("candidate_models")),
         )
+
+
+def _str_list(value: object) -> list[str]:
+    """Coerce a YAML scalar or sequence into a list of non-empty strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    raise ValueError(f"expected a string or list of strings, got {type(value).__name__}")
 
 
 def _detect_dir(root: Path, candidates: list[str], default: str) -> Path:

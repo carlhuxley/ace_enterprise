@@ -26,6 +26,18 @@ from src.audit.store import AuditStore
 logger = logging.getLogger(__name__)
 
 
+def default_local_audit_url() -> str:
+    """SQLite URL for the default local audit database (.local/audit.db).
+
+    Single source of truth for the path, shared by LocalAuditClient (writes)
+    and the broker's read-only PerformanceAggregator path.
+    """
+    project_root = Path(__file__).parent.parent.parent
+    db_path = project_root / ".local" / "audit.db"
+    db_path.parent.mkdir(exist_ok=True)
+    return f"sqlite:///{db_path}"
+
+
 class LocalAuditClient:
     """Audit client that writes directly to local SQLite database.
 
@@ -40,14 +52,21 @@ class LocalAuditClient:
             database_url: SQLite URL. Defaults to .local/audit.db
         """
         if database_url is None:
-            project_root = Path(__file__).parent.parent.parent
-            db_path = project_root / ".local" / "audit.db"
-            db_path.parent.mkdir(exist_ok=True)
-            database_url = f"sqlite:///{db_path}"
+            database_url = default_local_audit_url()
 
         self._store = AuditStore(database_url)
         self._store.create_tables()
         self._database_url = database_url
+
+    @property
+    def database_url(self) -> str:
+        """The audit database this client writes to.
+
+        Exposed (read-only) so the broker's PerformanceAggregator can open its
+        own read connection against the same store without the client leaking
+        its write-capable AuditStore.
+        """
+        return self._database_url
 
     def emit(
         self,

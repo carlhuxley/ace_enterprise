@@ -110,6 +110,9 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     print()
 
     handle = build_agent(config, skip_learn=args.no_learn)
+    if handle.routing is not None:
+        print(handle.routing.summary_line())
+        print()
     try:
         # requirement=None lets build_from_feature derive it from the Gherkin
         # file itself (title + scenarios); --requirement overrides that.

@@ -84,9 +84,21 @@ class AdaptiveBroker:
         self,
         task_type: str | None = None,
         complexity: int | None = None,
+        allowed_agents: list[str] | None = None,
     ) -> RoutingResult:
-        """Route task to best agent based on performance history and routing mode."""
+        """Route task to best agent based on performance history and routing mode.
+
+        allowed_agents restricts routing to that set of agent refs (e.g. the
+        models actually configured and reachable for this run). Agents in the
+        set with no audit history are simply not scored -- routing can only
+        rank agents it has data on -- so if none of the allowed agents have
+        history the result is a fallback.
+        """
         all_metrics = self._aggregator.get_all_agent_metrics()
+
+        if allowed_agents is not None:
+            allowed = set(allowed_agents)
+            all_metrics = {ref: m for ref, m in all_metrics.items() if ref in allowed}
 
         if not all_metrics:
             return self._fallback_result(task_type, complexity)

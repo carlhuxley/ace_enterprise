@@ -17,9 +17,7 @@ Tests:
 6. Integrates with PerformanceAggregator
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime
+from unittest.mock import MagicMock
 
 
 class TestAdaptiveBrokerRouting:
@@ -292,3 +290,54 @@ class TestRoutingResult:
         assert result.is_fallback is False
         assert result.task_type == "coding"
         assert result.complexity == 2
+
+
+class TestAllowedAgentsFilter:
+    """route_task(allowed_agents=...) restricts routing to a candidate set."""
+
+    def _aggregator(self):
+        from src.broker.performance_aggregator import AgentPerformanceMetrics
+
+        mock_aggregator = MagicMock()
+        mock_aggregator.get_all_agent_metrics.return_value = {
+            "agent-a": AgentPerformanceMetrics(
+                agent_ref="agent-a", total_tasks=40, successful_tasks=38
+            ),
+            "agent-b": AgentPerformanceMetrics(
+                agent_ref="agent-b", total_tasks=40, successful_tasks=20
+            ),
+            "agent-c": AgentPerformanceMetrics(
+                agent_ref="agent-c", total_tasks=40, successful_tasks=39
+            ),
+        }
+        mock_aggregator.get_all_model_profiles.return_value = {}
+        return mock_aggregator
+
+    def test_excludes_agents_outside_the_allowed_set(self):
+        from src.broker.adaptive_broker import AdaptiveBroker
+
+        broker = AdaptiveBroker(self._aggregator())
+        result = broker.route_task(
+            task_type="general", allowed_agents=["agent-a", "agent-b"]
+        )
+        # agent-c has the best record but isn't allowed.
+        assert result.selected_agent == "agent-a"
+        assert {ref for ref, _ in result.candidates} == {"agent-a", "agent-b"}
+
+    def test_falls_back_when_no_allowed_agent_has_history(self):
+        from src.broker.adaptive_broker import AdaptiveBroker
+
+        broker = AdaptiveBroker(self._aggregator())
+        broker.set_fallback_agent("agent-x")
+        result = broker.route_task(
+            task_type="general", allowed_agents=["agent-x", "agent-y"]
+        )
+        assert result.is_fallback is True
+        assert result.selected_agent == "agent-x"
+
+    def test_none_allowed_agents_keeps_all(self):
+        from src.broker.adaptive_broker import AdaptiveBroker
+
+        broker = AdaptiveBroker(self._aggregator())
+        result = broker.route_task(task_type="general", allowed_agents=None)
+        assert result.selected_agent == "agent-c"
