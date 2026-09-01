@@ -16,12 +16,26 @@ if [[ ! -f "$SCRIPT" ]]; then
   exit 0
 fi
 
-echo "pre-commit: regenerating docs/SYSTEM_ARCHITECTURE.md..."
-if "$PYTHON" "$SCRIPT"; then
-  git add "$REPO_ROOT/docs/SYSTEM_ARCHITECTURE.md"
-  echo "pre-commit: docs staged"
+# --- live docs: only regenerate when this commit changes an input ----------
+# generate_live_docs.py reads run_cycle.py + everything under src/**/*.py and
+# feeds it to an LLM. The LLM is non-deterministic even at temperature 0, so
+# running it on every commit rewrites docs/SYSTEM_ARCHITECTURE.md (often a
+# multi-hundred-line diff) even when no source changed. Gate on the actual
+# inputs: if nothing under src/ or run_cycle.py is staged, the doc's inputs
+# are unchanged and it's left alone.
+DOC_INPUTS=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E '^(src/.*\.py|run_cycle\.py)$' || true)
+
+if [[ -z "$DOC_INPUTS" ]]; then
+  echo "pre-commit: no src/ changes staged — skipping SYSTEM_ARCHITECTURE.md regen"
 else
-  echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+  echo "pre-commit: regenerating docs/SYSTEM_ARCHITECTURE.md..."
+  if "$PYTHON" "$SCRIPT"; then
+    git add "$REPO_ROOT/docs/SYSTEM_ARCHITECTURE.md"
+    echo "pre-commit: docs staged"
+  else
+    echo "pre-commit: WARNING — live docs generation failed, committing without update" >&2
+  fi
 fi
 
 # --- ruff: lint the .py files in this commit --------------------------------
