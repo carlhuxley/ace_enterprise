@@ -405,6 +405,32 @@ class ACETools:
                     "required": ["project_path", "models"],
                 },
             })
+            tools.append({
+                "name": "build_project",
+                "description": (
+                    "Decompose a project spec into a set of Python modules with build-order "
+                    "dependencies, then build each module in topological order (ModuleArchitect "
+                    "-> ModuleTDDBuilder), writing src/<module>.py + tests/test_<module>.py and "
+                    "running the whole suite as an assembly check. All generated code runs only "
+                    "inside the Podman sandbox. Call with plan_only=true first to review the "
+                    "module DAG before building."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "spec": {"type": "string", "description": "Project spec (inline free text). Ignored if spec_file is given."},
+                        "spec_file": {"type": "string", "description": "Path to a spec file. Takes precedence over 'spec'."},
+                        "project_path": {"type": "string", "description": "Path to the target project root"},
+                        "src_dir": {"type": "string", "description": "Source directory (default: src/)"},
+                        "test_dir": {"type": "string", "description": "Test directory (default: tests/)"},
+                        "model": {"type": "string", "description": "LLM model (must be open-source). Omit for the local Claude Code session."},
+                        "plan_only": {"type": "boolean", "description": "Return the module plan without building (default: false)"},
+                        "resume": {"type": "boolean", "description": "Skip modules whose files already exist (default: false)"},
+                        "keep_going": {"type": "boolean", "description": "Don't stop at the first module failure (default: false)"},
+                    },
+                    "required": ["project_path"],
+                },
+            })
 
         return tools
 
@@ -430,6 +456,7 @@ class ACETools:
             "get_playbook_info": self._handle_get_playbook_info,
             "build_feature": self._handle_build_feature,
             "build_feature_ensemble": self._handle_build_feature_ensemble,
+            "build_project": self._handle_build_project,
             "list_providers": self._handle_list_providers,
         }
 
@@ -961,6 +988,60 @@ class ACETools:
 
         except Exception as e:
             logger.exception(f"build_feature_ensemble failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _handle_build_project(self, args: dict) -> dict:
+        """Decompose a spec into modules and build them in dependency order.
+
+        See src/cli/project_builder.py. plan_only returns just the module DAG.
+        """
+        if not self.enable_tdd:
+            return {"error": "TDD tools not enabled"}
+
+        try:
+            from pathlib import Path
+
+            from src.cli.project_builder import ProjectBuilder
+            from src.contracts.project_architect import ProjectArchitect
+
+            project_path = Path(args["project_path"]).resolve()
+            src_dir = project_path / args.get("src_dir", "src")
+            test_dir = project_path / args.get("test_dir", "tests")
+
+            if args.get("spec_file"):
+                spec = Path(args["spec_file"]).read_text(encoding="utf-8")
+            elif args.get("spec"):
+                spec = args["spec"]
+            else:
+                return {"success": False, "error": "Provide either 'spec' or 'spec_file'"}
+
+            llm = self._resolve_llm_client({"model": args.get("model")})
+            model_id = _resolve_model_id(llm)
+
+            architect = ProjectArchitect(llm, audit_client=self._audit, model_id=model_id)
+            plan_result = architect.plan(spec)
+            if not plan_result.success or plan_result.plan is None:
+                return {"success": False, "error": f"planning failed: {plan_result.error}"}
+            plan = plan_result.plan
+
+            if args.get("plan_only"):
+                return {"success": True, "plan_only": True, "plan": plan.to_payload()}
+
+            builder = ProjectBuilder(llm, audit_client=self._audit, model_id=model_id)
+            result = builder.build(
+                plan, project_path, src_dir, test_dir,
+                resume=bool(args.get("resume", False)),
+                stop_on_failure=not bool(args.get("keep_going", False)),
+            )
+            return {
+                "success": result.success,
+                "sandboxed": True,
+                "plan": plan.to_payload(),
+                **result.to_payload(),
+            }
+
+        except Exception as e:
+            logger.exception(f"build_project failed: {e}")
             return {"success": False, "error": str(e)}
 
     def _route_model(self, args: dict, task_type: str, playbook_id: str):

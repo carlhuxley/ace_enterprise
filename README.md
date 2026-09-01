@@ -215,7 +215,7 @@ Local development only — the server communicates over stdio, spawned as a subp
 }
 ```
 
-Tools: `get_guidance` (CGR³ verdict), `learn` (add bullet), `query` (semantic search), `feedback`, `build_feature` (sandboxed TDD, optional broker routing via `models`), `build_feature_ensemble` (multi-candidate blind build).
+Tools: `get_guidance` (CGR³ verdict), `learn` (add bullet), `query` (semantic search), `feedback`, `build_feature` (sandboxed TDD, optional broker routing via `models`), `build_feature_ensemble` (multi-candidate blind build), `build_project` (decompose a spec into a module DAG and build it).
 
 ### ClaudeCliClient — No API Key Required
 
@@ -317,6 +317,7 @@ ace_enterprise/
 - [x] Live adversarial e2e tests proving the sandbox holds against real attacks, not just claimed flags: network egress, host-environment exfiltration, and CAP_SYS_ADMIN/read-only-mount privilege escalation all fail from inside a real container (`tests/e2e/test_enterprise_e2e_showcase.py`)
 - [x] AdaptiveBroker wired into a live routing decision point — `ace tdd` (`.ace/config.yaml` `candidate_models:`) and MCP `build_feature` (`models`) route a build to one of 2+ candidates on audit history, emitting a `ROUTING_DECISION` event
 - [x] BlindEvaluator + ConsensusBuilder wired into a live multi-candidate flow — MCP `build_feature_ensemble` builds with N models, scores each implementation blind, commits the winner, emits `BLIND_EVALUATION` / `ENSEMBLE_SELECTION` events
+- [x] Multi-module projects ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)) — `ace tdd` builds every `.feature` in a project in `@depends_on(...)` topological order; `ace project <spec>` / MCP `build_project` decompose a spec into a module DAG (`ProjectArchitect`), print it for approval, then build each module in dependency order via `ModuleArchitect` → `ModuleTDDBuilder`, writing `src/<m>.py` + `tests/test_<m>.py` and running the suite as a cross-module assembly check (`CONTRACT_DECOMPOSED` / `PROJECT_BUILD_COMPLETED` events)
 
 ### Preview (implemented + unit-tested, not yet wired into a live entry point)
 - [ ] CapabilityRegistry — anonymous agent registration with proficiency ratings
@@ -326,7 +327,7 @@ ace_enterprise/
 - [ ] EnsembleLearner cross-model voting (ConsensusBuilder's convergence analysis is live via `build_feature_ensemble`; the LLM-vote path is not)
 
 ### Planned
-- [ ] Project Architect ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)) — decompose one spec into a multi-module project (module DAG with dependency edges), then build each module in topological order via `ModuleTDDBuilder`; exposed as `ace project` / an MCP `build_project` tool. Today `ace tdd` and `build_feature` are single-module only; `ModuleArchitect`'s `depends_on`/`provides` fields and `ModuleTDDBuilder` exist but have no live entry point.
+- [ ] Project Architect follow-ups ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)): incremental re-planning (re-plan remaining modules after each build), cross-module integration `.feature`s, and container reuse across modules — the v1 flow is one-shot decomposition, per-module containers, assembly via the whole suite.
 - [ ] `build_feature_ensemble` for TypeScript / Go (needs per-language rubrics; `CodeGenerationRubric` is Python-only)
 - [ ] cost and quality_score telemetry (no pricing table or quality-scoring instrument exists yet — required before AdaptiveBroker's budget/balanced/Pareto routing modes have real data to act on)
 - [ ] A2A Protocol Adapter (expose ACE's capability broker as an HTTP A2A server)
