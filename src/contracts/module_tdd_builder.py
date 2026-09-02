@@ -103,6 +103,7 @@ class ModuleTDDBuilder:
         audit_client: LocalAuditClient | None = None,
         model_id: str = "unknown",
         max_attempts_per_function: int = 3,
+        max_repair_attempts: int = 2,
     ):
         """Initialize the module TDD builder.
 
@@ -111,11 +112,15 @@ class ModuleTDDBuilder:
             audit_client: Optional audit client for tracking
             model_id: Model identifier for audit
             max_attempts_per_function: Max TDD cycles per function
+            max_repair_attempts: Max whole-module repair passes after the
+                integration tests first run (functions are built in isolation,
+                so integration failures need a fix-it loop that sees them)
         """
         self._llm = llm_client
         self._audit = audit_client
         self._model_id = model_id
         self._max_attempts = max_attempts_per_function
+        self._max_repair_attempts = max_repair_attempts
 
     def build_module(
         self,
@@ -189,14 +194,34 @@ class ModuleTDDBuilder:
                     error=f"Failed to build function {func.name}: {result.error}",
                 )
 
-        # All functions built - run integration tests
+        # All functions built - run integration tests, then repair the whole
+        # module against any failures (each function was built without seeing
+        # the integration tests).
         logger.info("Running integration tests...")
         integration_results, integration_failures = self._run_integration_tests(
-            contract=contract,
-            module_code=module_code,
+            contract=contract, module_code=module_code,
         )
-
         all_integration_passed = all(integration_results.values()) if integration_results else False
+
+        repair = 0
+        while not all_integration_passed and repair < self._max_repair_attempts:
+            repair += 1
+            logger.info(
+                "Integration repair pass %d/%d (%d failing)",
+                repair, self._max_repair_attempts, len(integration_failures),
+            )
+            repaired = self._repair_module(contract, module_code, integration_failures)
+            if repaired is None or repaired.strip() == module_code.strip():
+                break
+            module_code = repaired
+            total_cycles += 1
+            integration_results, integration_failures = self._run_integration_tests(
+                contract=contract, module_code=module_code,
+            )
+            all_integration_passed = (
+                all(integration_results.values()) if integration_results else False
+            )
+
         elapsed = time.time() - start_time
 
         # Build error message if integration tests failed
@@ -378,6 +403,31 @@ Fix the implementation:
 
         except SyntaxError as e:
             return f"Syntax error: {e}"
+
+    def _repair_module(
+        self, contract: ModuleContract, module_code: str, failures: list[str]
+    ) -> str | None:
+        """Ask the LLM to fix the whole module so the integration tests pass.
+
+        Returns the repaired module source, or None on failure.
+        """
+        test_file = render_integration_tests(contract, contract.name)
+        prompt = (
+            "The module below fails some of its integration tests. Rewrite the "
+            "COMPLETE module so every test passes. Keep the public function "
+            "signatures. Standard library only.\n\n"
+            f"# {contract.name}.py\n```python\n{module_code}\n```\n\n"
+            f"# integration tests\n```python\n{test_file}\n```\n\n"
+            "# failures\n" + "\n".join(f"- {f}" for f in failures) + "\n\n"
+            "Output ONLY the corrected Python module."
+        )
+        try:
+            response = self._llm.generate(prompt)
+            code = extract_code(response["content"])
+            return code or None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("module repair pass failed: %s", exc)
+            return None
 
     def _run_integration_tests(
         self,
