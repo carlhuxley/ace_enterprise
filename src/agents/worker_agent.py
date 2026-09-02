@@ -10,10 +10,21 @@ from __future__ import annotations
 
 import re
 
+from src.agents.import_filter import DEFAULT_BLOCKED_BUILTINS, DEFAULT_BLOCKLIST
 from src.agents.language_pod import PodSpec
 
 _PLAYBOOK_SECTION = "strategies_and_hard_rules"
 _TEST_RULES_SECTION = "test_assertion_rules"
+
+# The sandbox's static import filter rejects these outright and does NOT retry,
+# so every prompt has to warn the model up front (see src/agents/import_filter.py).
+_SANDBOX_IMPORT_RULE = (
+    "SANDBOX: these imports are blocked and abort the run — "
+    f"{', '.join(sorted(DEFAULT_BLOCKLIST))}; "
+    f"and {', '.join(sorted(DEFAULT_BLOCKED_BUILTINS))}() are blocked as calls. "
+    "Use pathlib.Path for all filesystem work (mkdir(parents=True, exist_ok=True), "
+    "write_text, read_text, exists); use pytest's tmp_path fixture for temp dirs."
+)
 
 _DEFAULT_TEST_RULES = [
     (
@@ -78,7 +89,8 @@ class WorkerAgent:
             f"Add ONE new failing pytest test for: {spec.feature_requirement}",
             f"Test file: {spec.test_file.name}",
             "The new test must FAIL before any implementation exists (RED phase).",
-            "Do NOT duplicate or overlap with any existing test.",
+            "Do NOT duplicate or overlap with any existing test; give it a unique name.",
+            _SANDBOX_IMPORT_RULE,
         ]
         if spec.gherkin_context:
             parts.append(
@@ -110,6 +122,7 @@ class WorkerAgent:
             "Write minimal implementation to make the failing tests pass.",
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
+            _SANDBOX_IMPORT_RULE,
         ]
         if test_code:
             parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
@@ -127,6 +140,7 @@ class WorkerAgent:
             "Refactor the implementation while keeping tests green.",
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
+            _SANDBOX_IMPORT_RULE,
         ]
         if current_code:
             parts.append(f"\nCurrent code:\n{current_code}")
