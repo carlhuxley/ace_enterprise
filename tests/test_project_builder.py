@@ -153,6 +153,17 @@ def test_later_modules_get_prior_modules_as_context(dirs):
     assert contexts["the api module"] is not None            # db.py scanned into context
 
 
+def test_preexisting_src_files_are_not_used_as_context(dirs):
+    """A greenfield first module must not pick up unrelated files already in src/."""
+    root, src, tests = dirs
+    src.mkdir()
+    (src / "unrelated.py").write_text("def legacy_helper():\n    return 1\n")
+    plan = _plan(ModuleSpec("thing", "the thing module"))
+    arch = FakeArchitect()
+    _builder(dirs, architect=arch, builder=FakeBuilder()).build(plan, root, src, tests)
+    assert dict(arch.seen)["the thing module"] is None
+
+
 def test_assembly_failure_makes_the_result_unsuccessful(dirs):
     root, src, tests = dirs
     plan = _plan(ModuleSpec("db", "the db module"))

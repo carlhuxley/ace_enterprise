@@ -117,14 +117,23 @@ class ModuleArchitectResult:
     error: str | None = None
 
 
-MODULE_ARCHITECT_PROMPT = '''You are a software architect designing a Python module.
+MODULE_ARCHITECT_PROMPT = '''You are a software architect designing a self-contained Python module.
 
 Given a requirement, design a COMPLETE MODULE with:
-1. Shared state (module-level variables)
+1. Shared state (module-level variables), or "" if the module is stateless
 2. All functions that operate on that state
 3. Integration tests that exercise the functions together
 
-IMPORTANT: This is for a STATEFUL system. Functions share state and must be tested together.
+RULES:
+- The module is standalone. It has NO database, NO framework, NO ambient helpers.
+  Use only the Python standard library (json, pathlib, collections, ...).
+- integration_tests `setup` and `steps` may ONLY call functions that appear in
+  this module's `functions` list, plus the stdlib.
+- NEVER invent helpers like init_db(), clear_db(), execute_sql(), create_*().
+- Reset shared state in `setup` by clearing the module-level variable directly
+  (e.g. "_store.clear()"), not via a helper.
+- If the module persists to disk, tests take a directory argument and use
+  pathlib / a pytest tmp_path-style path passed in by the caller.
 
 Respond with valid JSON only:
 ```json
@@ -182,20 +191,29 @@ Generate a complete module contract with integration tests.
 '''
 
 
-# Context-aware prompt that understands existing codebase
-MODULE_ARCHITECT_CONTEXT_PROMPT = '''You are a software architect designing a Python module extension.
+# Context-aware prompt: the module builds on other modules already produced in
+# this same run (their signatures are in the context section). It is still a
+# standalone module tree -- no database, no framework, no ambient helpers.
+MODULE_ARCHITECT_CONTEXT_PROMPT = '''You are a software architect designing a Python module.
 
-## EXISTING CODEBASE CONTEXT
+## ALREADY-BUILT MODULES IN THIS PROJECT (import and call these, don't reimplement)
 
 {context_section}
 
 ## YOUR TASK
 
-Design NEW functions that extend this codebase. You must:
-1. REUSE existing functions where appropriate (call them, don't reimplement)
-2. Follow the SAME patterns and conventions
-3. Use the CORRECT database schema
-4. Return data in the SAME format as existing functions
+Design the requested module. You must:
+1. REUSE the already-built functions above where appropriate (import them)
+2. Follow the SAME conventions (return types, naming)
+3. Use ONLY the Python standard library otherwise -- there is NO database and
+   NO framework
+
+## HARD RULES FOR integration_tests
+
+- `setup` and `steps` may ONLY call: functions in this module's `functions`
+  list, the already-built functions listed above, and the stdlib.
+- NEVER invent helpers like init_db(), clear_db(), execute_sql(), create_*().
+- Reset shared state by clearing the module-level variable directly.
 
 ## REQUIREMENT
 
@@ -209,41 +227,45 @@ Respond with valid JSON only:
   "module": {{
     "id": "feature-001",
     "name": "feature_name",
-    "description": "What this feature does",
+    "description": "What this module does",
     "complexity": 3,
-    "shared_state": "",
+    "shared_state": "_index: dict[str, list[str]] = {{}}",
     "dependencies": {{
-      "depends_on": ["get_db", "get_application"],
-      "provides": ["search_applications"],
-      "tables_read": ["applications"],
-      "tables_write": []
+      "depends_on": ["tokenize"],
+      "provides": ["add_document", "search"]
     }},
     "functions": [
       {{
-        "name": "search_applications",
-        "signature": "(query: str) -> list[dict]",
-        "docstring": "Search applications by text query"
+        "name": "add_document",
+        "signature": "(doc_id: str, text: str) -> None",
+        "docstring": "Index a document's tokens under its id"
+      }},
+      {{
+        "name": "search",
+        "signature": "(query: str) -> list[str]",
+        "docstring": "Return doc ids whose tokens include every query token"
       }}
     ],
     "integration_tests": [
       {{
-        "name": "test_search_finds_match",
-        "setup": "init_db(); clear_db(); create_application('Acme Corp', 'Engineer')",
+        "name": "test_search_finds_indexed_document",
+        "setup": "_index.clear()",
         "steps": [
-          "results = search_applications('Acme')"
+          "add_document('d1', 'the quick brown fox')",
+          "results = search('quick fox')"
         ],
-        "assertion": "len(results) == 1 and results[0]['name'] == 'Acme Corp'"
+        "assertion": "results == ['d1']"
       }}
     ],
     "hints": [
-      "Use LIKE query for text search",
-      "Return list of dicts matching get_application format"
+      "tokenize() comes from an already-built module -- import it",
+      "Lowercase and split on whitespace if tokenize is unavailable"
     ]
   }}
 }}
 ```
 
-Generate a module contract that INTEGRATES with the existing codebase.
+Generate a self-contained module contract with integration tests.
 '''
 
 
