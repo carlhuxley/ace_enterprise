@@ -59,12 +59,20 @@ class TDDRunHandle:
         self.orchestrator.stop()
 
 
-def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle:
+def build_agent(
+    config: ProjectConfig,
+    skip_learn: bool = False,
+    model_ref: str | None = None,
+) -> TDDRunHandle:
     """Construct a fully-wired, sandboxed TDDRunHandle for the given project config.
 
-    Models are taken from ACE's own settings (.env). The playbook_id comes from
-    config, scoping learned patterns to this project. skip_learn=True omits the
-    Reflector/Curator LEARN phase (equivalent of the old --no-learn flag).
+    Model selection, highest precedence first:
+      1. model_ref  — an explicit "<provider>/<model>" (the `ace tdd --model` flag)
+      2. config.candidate_models (2+)  — AdaptiveBroker routing
+      3. ACE's settings default (.env)
+
+    The playbook_id comes from config, scoping learned patterns to this project.
+    skip_learn=True omits the Reflector/Curator LEARN phase (the old --no-learn).
 
     Also wires the audit trail, redundancy pre-check, and AST context map --
     capabilities AutonomousTDDAgent had natively that IterativeTDDRunner needs
@@ -84,12 +92,15 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
 
     audit_client = LocalAuditClient()
 
-    routing = _route_llm(config, audit_client)
-    if routing is not None:
-        provider, model = _split_model_ref(routing.selected_model)
-        llm_client = LLMClient(provider=provider, model=model)
+    routing = None
+    if model_ref:
+        llm_client = llm_client_from_ref(model_ref)
     else:
-        llm_client = default_llm_client()
+        routing = _route_llm(config, audit_client)
+        if routing is not None:
+            llm_client = llm_client_from_ref(routing.selected_model)
+        else:
+            llm_client = default_llm_client()
 
     playbook_manager = PlaybookManager()
     playbook_manager.get_or_create_playbook(config.playbook_id)
@@ -136,16 +147,33 @@ def build_agent(config: ProjectConfig, skip_learn: bool = False) -> TDDRunHandle
     )
 
 
+# Mirrors the Literal in src/config/settings.py::Settings.default_llm_provider.
+_VALID_PROVIDERS = frozenset(
+    {"ollama", "vllm", "deepseek", "togetherai", "openrouter", "openai", "anthropic"}
+)
+
+
 def _split_model_ref(ref: str) -> tuple[str, str]:
-    """Split a "<provider>/<model>" routing ref. The model half may itself
-    contain slashes (e.g. "openrouter/qwen/qwen3-coder:free")."""
+    """Split a "<provider>/<model>" ref. The model half may itself contain
+    slashes (e.g. "openrouter/qwen/qwen3-coder:free")."""
     provider, sep, model = ref.partition("/")
-    if not sep:
+    if not sep or not model:
         raise ValueError(
-            f"candidate model {ref!r} must be '<provider>/<model>' "
-            "(e.g. 'openrouter/qwen/qwen3-coder')"
+            f"model {ref!r} must be '<provider>/<model>' "
+            "(e.g. 'openrouter/qwen/qwen3-coder', 'ollama/qwen3-coder:30b')"
+        )
+    if provider not in _VALID_PROVIDERS:
+        raise ValueError(
+            f"unknown provider {provider!r} in {ref!r} — expected one of: "
+            + ", ".join(sorted(_VALID_PROVIDERS))
         )
     return provider, model
+
+
+def llm_client_from_ref(ref: str) -> LLMClient:
+    """Build an LLMClient from a "<provider>/<model>" ref."""
+    provider, model = _split_model_ref(ref)
+    return LLMClient(provider=provider, model=model)
 
 
 def _route_llm(config: ProjectConfig, audit_client) -> ModelRoutingDecision | None:

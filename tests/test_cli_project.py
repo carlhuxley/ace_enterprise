@@ -18,6 +18,7 @@ def _args(**overrides):
     defaults = {
         "spec": None,
         "project": Path("."),
+        "model": None,
         "plan_only": False,
         "yes": True,
         "resume": False,
@@ -150,7 +151,28 @@ class TestBuild:
         assert rc == 1
 
 
+class TestModelOverride:
+    def test_model_flag_builds_client_from_ref(self, project):
+        root, spec = project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, patch(
+            "src.cli.factory.llm_client_from_ref",
+            return_value=SimpleNamespace(provider="openrouter", model="qwen/qwen3-coder"),
+        ) as from_ref:
+            cmd_project(_args(spec=spec, project=root, model="openrouter/qwen/qwen3-coder"))
+        from_ref.assert_called_once_with("openrouter/qwen/qwen3-coder")
+
+    def test_bad_model_ref_rejected(self, project, capsys):
+        root, spec = project
+        rc = cmd_project(_args(spec=spec, project=root, model="justqwen"))
+        assert rc == 1
+        assert "<provider>/<model>" in capsys.readouterr().err
+
+
 def test_parser_wires_project_subcommand():
-    ns = _build_parser().parse_args(["project", "s.spec", "--plan-only", "-y", "--resume"])
+    ns = _build_parser().parse_args(
+        ["project", "s.spec", "--plan-only", "-y", "--resume", "--model", "ollama/q:7b"]
+    )
     assert ns.command == "project"
     assert ns.plan_only and ns.yes and ns.resume
+    assert ns.model == "ollama/q:7b"

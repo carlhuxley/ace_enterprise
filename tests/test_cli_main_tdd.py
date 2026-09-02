@@ -18,6 +18,7 @@ def _args(**overrides):
         "project": Path("."),
         "feature": None,
         "requirement": None,
+        "model": None,
         "playbook_id": None,
         "max_iterations": None,
         "no_learn": False,
@@ -112,6 +113,35 @@ class TestSuccessPath:
         build_agent.assert_called_once()
 
 
+class TestModelOverride:
+    def test_model_ref_forwarded_to_build_agent(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            rc = cmd_tdd(_args(project=project, model="openrouter/qwen/qwen3-coder"))
+        assert rc == 0
+        _, kwargs = build_agent.call_args
+        assert kwargs["model_ref"] == "openrouter/qwen/qwen3-coder"
+
+    def test_no_model_flag_passes_none(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            cmd_tdd(_args(project=project))
+        _, kwargs = build_agent.call_args
+        assert kwargs["model_ref"] is None
+
+    def test_bad_model_ref_is_rejected_before_building(self, project, capsys):
+        with patch("src.cli.factory.build_agent") as build_agent:
+            rc = cmd_tdd(_args(project=project, model="qwen/qwen3-coder"))  # missing provider
+        assert rc == 1
+        build_agent.assert_not_called()
+        assert "unknown provider" in capsys.readouterr().err
+
+    def test_model_ref_without_slash_is_rejected(self, project, capsys):
+        with patch("src.cli.factory.build_agent") as build_agent:
+            rc = cmd_tdd(_args(project=project, model="justqwen"))
+        assert rc == 1
+        build_agent.assert_not_called()
+        assert "<provider>/<model>" in capsys.readouterr().err
+
+
 class TestMultiFeature:
     @pytest.fixture
     def multi_project(self, tmp_path):
@@ -200,7 +230,7 @@ class TestMultiFeature:
         handle = _stub_handle()
         handle.file_paths_for.side_effect = self._paths_for
 
-        def fake_build_agent(config, skip_learn=False):
+        def fake_build_agent(config, skip_learn=False, model_ref=None):
             seen_playbook_ids.append(config.playbook_id)
             return handle
 

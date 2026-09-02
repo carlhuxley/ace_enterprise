@@ -37,6 +37,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Feature requirement text (extracted from feature file if omitted)",
     )
     tdd.add_argument(
+        "--model",
+        default=None,
+        metavar="PROVIDER/MODEL",
+        help=(
+            "Override the LLM for this run, e.g. 'openrouter/qwen/qwen3-coder' or "
+            "'ollama/qwen3-coder:30b'. Beats .ace/config.yaml candidate_models and "
+            "the .env default."
+        ),
+    )
+    tdd.add_argument(
         "--playbook-id",
         default=None,
         help="Playbook ID override (default: project directory name)",
@@ -74,6 +84,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Target project directory (default: current directory)",
     )
     proj.add_argument(
+        "--model", default=None, metavar="PROVIDER/MODEL",
+        help="Override the LLM, e.g. 'openrouter/qwen/qwen3-coder' (default: .env)",
+    )
+    proj.add_argument(
         "--plan-only", action="store_true",
         help="Print the module plan and exit without building",
     )
@@ -109,6 +123,9 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     if args.max_iterations:
         config.max_iterations = args.max_iterations
 
+    if args.model and not _valid_model_ref(args.model):
+        return 1
+
     features = _resolve_features(args, project_root, config)
     if features is None:
         return 1
@@ -117,6 +134,8 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     print(f"Playbook:   {config.playbook_id} ({config.playbook_scope})")
     print(f"Tests →     {config.test_dir.relative_to(project_root)}")
     print(f"Source →    {config.src_dir.relative_to(project_root)}")
+    if args.model:
+        print(f"Model:      {args.model} (--model override)")
     if len(features) > 1:
         print(f"Features:   {len(features)} — build order: "
               f"{', '.join(f.stem for f in features)}")
@@ -139,6 +158,7 @@ def cmd_tdd(args: argparse.Namespace) -> int:
             # A one-off --requirement override only makes sense for a single build.
             requirement=args.requirement if not multi else None,
             skip_learn=args.no_learn,
+            model_ref=args.model,
         )
         outcomes.append((feature_path.stem, ok, iterations))
 
@@ -200,12 +220,24 @@ def _order_features(features: list[Path]) -> list[Path] | None:
     return [by_stem[s] for s in order]
 
 
+def _valid_model_ref(ref: str) -> bool:
+    from src.cli.factory import _split_model_ref
+
+    try:
+        _split_model_ref(ref)
+        return True
+    except ValueError as exc:
+        print(f"error: --model {exc}", file=sys.stderr)
+        return False
+
+
 def _build_feature(
-    config, feature_path: Path, *, requirement: str | None, skip_learn: bool
+    config, feature_path: Path, *, requirement: str | None, skip_learn: bool,
+    model_ref: str | None = None,
 ) -> tuple[bool, int]:
     from src.cli.factory import build_agent
 
-    handle = build_agent(config, skip_learn=skip_learn)
+    handle = build_agent(config, skip_learn=skip_learn, model_ref=model_ref)
     if handle.routing is not None:
         print(handle.routing.summary_line())
     try:
@@ -233,9 +265,12 @@ _PROJECT_STATUS_GLYPH = {
 def cmd_project(args: argparse.Namespace) -> int:
     from src.audit.local_client import LocalAuditClient
     from src.cli.config import ProjectConfig
-    from src.cli.factory import default_llm_client
+    from src.cli.factory import default_llm_client, llm_client_from_ref
     from src.cli.project_builder import ProjectBuilder
     from src.contracts.project_architect import ProjectArchitect
+
+    if args.model and not _valid_model_ref(args.model):
+        return 1
 
     spec_path = args.spec if args.spec.is_absolute() else Path.cwd() / args.spec
     spec_path = spec_path.resolve()
@@ -249,7 +284,7 @@ def cmd_project(args: argparse.Namespace) -> int:
         return 1
     config = ProjectConfig.load(project_root)
 
-    llm = default_llm_client()
+    llm = llm_client_from_ref(args.model) if args.model else default_llm_client()
     model_id = f"{llm.provider}/{llm.model}" if getattr(llm, "provider", None) else llm.model
     audit = LocalAuditClient()
 
