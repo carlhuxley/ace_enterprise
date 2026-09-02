@@ -7,13 +7,18 @@ language pods use. module_architect.py had zero test coverage before this.
 """
 import ast
 import shutil
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.contracts.module_architect import (
+    CodebaseContext,
+    ExistingFunction,
     FunctionSpec,
     IntegrationTest,
+    ModuleArchitect,
     ModuleContract,
+    check_contract_consistency,
     validate_module,
 )
 
@@ -178,3 +183,109 @@ class TestArchitectPromptsAreSelfContained:
         for prompt in (MODULE_ARCHITECT_PROMPT, MODULE_ARCHITECT_CONTEXT_PROMPT):
             assert "standard library" in prompt or "stdlib" in prompt
             assert "NEVER invent helpers" in prompt
+
+
+def _consistent_contract(**overrides) -> ModuleContract:
+    defaults = {
+        "id": "g1", "name": "graph", "description": "directed graph",
+        "shared_state": "_edges: dict = {}",
+        "functions": [
+            FunctionSpec("add_edge", "(a: str, b: str) -> None", "edge a->b"),
+            FunctionSpec("dependents", "(n: str) -> list", "nodes with an edge into n"),
+        ],
+        "integration_tests": [
+            IntegrationTest(
+                name="direct_dependent",
+                setup="_edges.clear()",
+                steps=["add_edge('a', 'b')", "result = dependents('b')"],
+                assertion="result == ['a']",
+            ),
+        ],
+        "complexity": 2,
+    }
+    defaults.update(overrides)
+    return ModuleContract(**defaults)
+
+
+class TestCheckContractConsistency:
+    def test_clean_contract_has_no_problems(self):
+        assert check_contract_consistency(_consistent_contract()) == []
+
+    def test_flags_call_to_a_function_not_in_the_module(self):
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest("t", "add_node('x')", ["add_edge('x', 'y')"], "True"),
+            ]
+        )
+        problems = check_contract_consistency(c)
+        assert any("add_node()" in p for p in problems)
+
+    def test_accepts_a_function_from_an_already_built_dependency(self):
+        ctx = CodebaseContext(
+            existing_functions=[ExistingFunction("has_cycle", "()", "", "cycle_detector")]
+        )
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest("t", "_edges.clear()", ["c = has_cycle()", "add_edge('a', 'b')"], "c is False"),
+            ]
+        )
+        assert check_contract_consistency(c, ctx) == []
+
+    def test_accepts_names_bound_within_the_test(self):
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest(
+                    "t", "_edges.clear()",
+                    ["items = [('a', 'b'), ('b', 'c')]", "for x, y in items: add_edge(x, y)",
+                     "result = dependents('c')"],
+                    "result == ['b']",
+                ),
+            ]
+        )
+        assert check_contract_consistency(c) == []
+
+    def test_flags_unparseable_setup(self):
+        c = _consistent_contract(
+            integration_tests=[IntegrationTest("t", "add_edge('a',", ["add_edge('a','b')"], "True")]
+        )
+        assert any("do not parse" in p for p in check_contract_consistency(c))
+
+    def test_stdlib_and_builtins_are_allowed(self):
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest("t", "_edges.clear()",
+                                ["add_edge('a', 'b')", "n = len(dependents('b'))"], "n == 1"),
+            ]
+        )
+        assert check_contract_consistency(c) == []
+
+
+class TestGenerateModuleContractReAsks:
+    def _architect(self, *responses):
+        llm = MagicMock()
+        llm.generate.side_effect = [{"content": r} for r in responses]
+        return ModuleArchitect(llm_client=llm, model_id="test")
+
+    def _json(self, calls_helper: bool) -> str:
+        step = "add_node('x')" if calls_helper else "add_edge('a', 'b')"
+        return (
+            '{"module": {"id": "g", "name": "graph", "description": "d", "complexity": 2,'
+            '"shared_state": "_edges: dict = {}",'
+            '"functions": [{"name": "add_edge", "signature": "(a, b)", "docstring": "e"}],'
+            f'"integration_tests": [{{"name": "t", "setup": "_edges.clear()", "steps": ["{step}"], "assertion": "True"}}]}}}}'
+        )
+
+    def test_re_asks_once_then_accepts_a_fixed_contract(self):
+        arch = self._architect(self._json(calls_helper=True), self._json(calls_helper=False))
+        result = arch.generate_module_contract("build a graph")
+        assert result.success is True
+        assert arch._llm.generate.call_count == 2
+        assert "re-emit" in arch._llm.generate.call_args_list[1][0][0]
+
+    def test_fails_cleanly_when_the_re_ask_is_still_inconsistent(self):
+        arch = self._architect(self._json(calls_helper=True), self._json(calls_helper=True))
+        result = arch.generate_module_contract("build a graph")
+        assert result.success is False
+        assert result.contract is None
+        assert "inconsistent contract" in result.error
+        assert "add_node()" in result.error

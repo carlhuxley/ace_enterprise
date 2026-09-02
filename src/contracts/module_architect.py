@@ -13,15 +13,23 @@ Enhanced with codebase context awareness:
 - Tracks module dependencies
 """
 
+import ast
+import builtins
 import json
 import logging
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
 from src.utils.llm_client import LLMClient
+
+_BUILTIN_NAMES = frozenset(dir(builtins))
+_STDLIB_NAMES = frozenset(getattr(sys, "stdlib_module_names", ()))
+# Names commonly bound by the validation harness / pytest around a test body.
+_HARNESS_NAMES = frozenset({"tmp_path", "workspace", "self", "pytest"})
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +125,67 @@ class ModuleArchitectResult:
     error: str | None = None
 
 
+def _state_names(shared_state: str) -> set[str]:
+    """Top-level names bound in `shared_state` (`_count = 0`, `g: dict = {}`)."""
+    names: set[str] = set()
+    for line in (shared_state or "").splitlines():
+        m = re.match(r"\s*([A-Za-z_]\w*)\s*[:=]", line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def check_contract_consistency(
+    contract: ModuleContract, context: "CodebaseContext | None" = None
+) -> list[str]:
+    """Static self-consistency check on a ModuleContract's integration tests,
+    run before ModuleTDDBuilder so a doomed contract fails fast with a useful
+    message instead of after a full (repair-looped) build.
+
+    Catches: setup/steps that don't parse, and calls to names that aren't a
+    module function, an already-built dependency, a stdlib module, a builtin,
+    or a name bound within the test itself (the `manifest_io calls add_node`
+    class of failure). Returns a list of problems; empty means OK.
+    """
+    problems: list[str] = []
+    known = {f.name for f in contract.functions}
+    known |= _state_names(contract.shared_state)
+    known |= set(contract.dependencies.depends_on)
+    if context:
+        known |= {f.name for f in context.existing_functions}
+    allowed = known | _BUILTIN_NAMES | _STDLIB_NAMES | _HARNESS_NAMES
+
+    for t in contract.integration_tests:
+        script = "\n".join(
+            [t.setup or "", *(t.steps or []), f"_assertion_ = ({t.assertion or 'True'})"]
+        )
+        try:
+            tree = ast.parse(script)
+        except SyntaxError as exc:
+            problems.append(f"{t.name}: setup/steps/assertion do not parse ({exc})")
+            continue
+
+        bound: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                tgt = getattr(node, "targets", None) or [getattr(node, "target", None)]
+                for tt in tgt:
+                    bound |= {n.id for n in ast.walk(tt) if isinstance(n, ast.Name)}
+            elif isinstance(node, (ast.For, ast.comprehension)):
+                bound |= {n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)}
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                name = node.func.id
+                if name not in allowed and name not in bound:
+                    where = "an already-built module" if context else "the stdlib"
+                    problems.append(
+                        f"{t.name}: calls {name}() which is not a function of this "
+                        f"module, {where}, or a name bound in the test"
+                    )
+    return problems
+
+
 MODULE_ARCHITECT_PROMPT = '''You are a software architect designing a self-contained Python module.
 
 Given a requirement, design a COMPLETE MODULE with:
@@ -132,8 +201,18 @@ RULES:
 - NEVER invent helpers like init_db(), clear_db(), execute_sql(), create_*().
 - Reset shared state in `setup` by clearing the module-level variable directly
   (e.g. "_store.clear()"), not via a helper.
-- If the module persists to disk, tests take a directory argument and use
-  pathlib / a pytest tmp_path-style path passed in by the caller.
+- If the module persists to disk, use a fixed relative path (e.g.
+  Path("state.json")) — validation runs each module in its own writable
+  scratch directory.
+- GRAPH / DIRECTIONAL modules: fix ONE convention and use it in EVERY test.
+  State it in the docstring. e.g. "add_edge(a, b) adds the directed edge
+  a -> b, meaning a depends on b; get_dependents(x) returns nodes with an
+  edge INTO x". Do not flip source/target or dependency/dependent between
+  tests. A `setup` that builds the same graph must always use the same
+  argument order for the same meaning.
+- Every name a test calls must be defined: a function in this module's
+  `functions` list, an already-built dependency, or the stdlib. Don't
+  reference functions that belong to a different module.
 
 Respond with valid JSON only:
 ```json
@@ -211,9 +290,14 @@ Design the requested module. You must:
 ## HARD RULES FOR integration_tests
 
 - `setup` and `steps` may ONLY call: functions in this module's `functions`
-  list, the already-built functions listed above, and the stdlib.
+  list, the already-built functions listed above, and the stdlib. Every
+  called name must be defined somewhere — never reference a function that
+  belongs to a different module.
 - NEVER invent helpers like init_db(), clear_db(), execute_sql(), create_*().
 - Reset shared state by clearing the module-level variable directly.
+- GRAPH / DIRECTIONAL modules: fix ONE convention (e.g. "add_edge(a, b) is
+  the directed edge a -> b; a depends on b") and use the same argument order
+  for the same meaning in EVERY test. Never flip it.
 
 ## REQUIREMENT
 
@@ -318,9 +402,30 @@ class ModuleArchitect:
                 prompt = MODULE_ARCHITECT_PROMPT.format(requirement=requirement)
 
             result = self._llm.generate(prompt)
-            response = result["content"]
+            contract = self._parse_module(result["content"])
 
-            contract = self._parse_module(response)
+            # Self-consistency guard: one targeted re-ask if the integration
+            # tests reference undefined helpers / don't parse, then fail
+            # cleanly rather than handing ModuleTDDBuilder a doomed contract.
+            problems = check_contract_consistency(contract, context)
+            if problems:
+                logger.warning("Module contract inconsistent, re-asking: %s", problems)
+                fix_prompt = (
+                    f"{prompt}\n\nYour previous contract had these problems — fix them "
+                    f"and re-emit the full JSON:\n"
+                    + "\n".join(f"- {p}" for p in problems)
+                )
+                contract = self._parse_module(self._llm.generate(fix_prompt)["content"])
+                problems = check_contract_consistency(contract, context)
+                if problems:
+                    return ModuleArchitectResult(
+                        contract=None,
+                        architect_model=self._model_id,
+                        elapsed_seconds=time.time() - start_time,
+                        success=False,
+                        error="inconsistent contract: " + "; ".join(problems[:5]),
+                    )
+
             elapsed = time.time() - start_time
 
             # Emit audit event with dependency info
