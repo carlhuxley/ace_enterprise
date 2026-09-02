@@ -265,7 +265,7 @@ def _run_assembly(test_dir: Path, src_dir: Path) -> tuple[bool, list[str]]:
     from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
     from src.agents.podman_runner import PodmanRunner
 
-    orch = PodmanOrchestrator(PodmanRunner(test_timeout=60))
+    orch = PodmanOrchestrator(PodmanRunner(test_timeout=60, writable_workdir=True))
     try:
         phase = orch.pulse(files)
     except SecurityBreachError as exc:

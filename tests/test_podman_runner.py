@@ -6,9 +6,7 @@ podman is not in PATH via the shared_podman_runner session fixture.
 Lifecycle tests (start/stop) use their own runner instances.
 Pulse tests share one container for the whole session.
 """
-import hashlib
 import shutil
-from pathlib import Path
 
 import pytest
 
@@ -130,3 +128,50 @@ def test_multi_file_cross_import_in_container(shared_podman_runner, tmp_path):
     result = shared_podman_runner.send_pulse(files)
     assert result.exit_code == 0
     assert "passed" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# writable_workdir: validation runners can do relative-path disk I/O
+# ---------------------------------------------------------------------------
+
+_RELATIVE_WRITE_TEST = {
+    "test_write.py": (
+        "import json\n"
+        "from pathlib import Path\n"
+        "def test_relative_write_and_read_back():\n"
+        "    p = Path('scratch_manifest.json')\n"
+        "    p.write_text(json.dumps({'ok': True}))\n"
+        "    assert json.loads(p.read_text()) == {'ok': True}\n"
+    )
+}
+
+
+def test_unit_writable_workdir_defaults_false():
+    assert PodmanRunner()._writable_workdir is False
+    assert PodmanRunner(writable_workdir=True)._writable_workdir is True
+
+
+@skip_no_podman
+def test_relative_write_fails_on_default_readonly_workdir():
+    runner = PodmanRunner(container_name="harness_ro_workdir_test", test_timeout=20)
+    runner.start()
+    try:
+        result = runner.send_pulse(_RELATIVE_WRITE_TEST)
+        assert result.exit_code != 0
+        assert "Read-only file system" in result.stdout or "Errno 30" in result.stdout
+    finally:
+        runner.stop()
+
+
+@skip_no_podman
+def test_relative_write_succeeds_with_writable_workdir():
+    runner = PodmanRunner(
+        container_name="harness_rw_workdir_test", test_timeout=20, writable_workdir=True
+    )
+    runner.start()
+    try:
+        result = runner.send_pulse(_RELATIVE_WRITE_TEST)
+        assert result.exit_code == 0, result.stdout
+        assert "passed" in result.stdout
+    finally:
+        runner.stop()

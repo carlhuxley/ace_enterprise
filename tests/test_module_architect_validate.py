@@ -93,6 +93,42 @@ class TestValidateModuleSandboxed:
         assert any("not found" in f for f in failures)
 
     @skip_no_podman
+    def test_module_doing_relative_path_disk_io_can_be_validated(self):
+        """A module that writes/reads a file relative to cwd (atomic manifest
+        writes etc.) must not fail validation with Errno 30 — the sandbox
+        gives validation runs a writable working directory (#21 Part A)."""
+        contract = _contract(
+            shared_state="_store: dict = {}",
+            functions=[
+                FunctionSpec("save", "(key: str, value: str) -> None", "persist a pair"),
+                FunctionSpec("load_all", "() -> dict", "read the persisted pairs"),
+            ],
+            integration_tests=[
+                IntegrationTest(
+                    name="round_trip",
+                    setup="_store.clear()",
+                    steps=["save('a', '1')", "save('b', '2')", "result = load_all()"],
+                    assertion="result == {'a': '1', 'b': '2'}",
+                ),
+            ],
+        )
+        code = (
+            "import json\n"
+            "from pathlib import Path\n"
+            "_store: dict = {}\n"
+            "_PATH = Path('state.json')\n"
+            "def save(key, value):\n"
+            "    _store[key] = value\n"
+            "    tmp = _PATH.with_suffix('.tmp')\n"
+            "    tmp.write_text(json.dumps(_store))\n"
+            "    tmp.replace(_PATH)\n"
+            "def load_all():\n"
+            "    return json.loads(_PATH.read_text()) if _PATH.exists() else {}\n"
+        )
+        passed, failures = validate_module(contract, code)
+        assert passed is True, failures
+
+    @skip_no_podman
     def test_implementation_never_touches_host_process(self):
         """A submission that would corrupt host state if run in-process
         must not affect this test process -- proves execution genuinely
