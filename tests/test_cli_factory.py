@@ -79,6 +79,22 @@ class TestBuildAgentWiring:
         handle = build_agent(config)
         assert handle.routing is None
 
+    def test_model_ref_sets_the_runner_model_id(self, config):
+        handle = build_agent(config, model_ref="openrouter/qwen/qwen3-coder")
+        assert handle.runner._runner_kwargs["model_id"] == "openrouter/qwen/qwen3-coder"
+
+    def test_model_ref_beats_candidate_models_routing(self, config):
+        config.candidate_models = ["ollama/a", "ollama/b"]
+        with patch("src.cli.factory.route_model") as route:
+            handle = build_agent(config, model_ref="anthropic/claude-sonnet-4-5")
+        route.assert_not_called()
+        assert handle.routing is None
+        assert handle.runner._runner_kwargs["model_id"] == "anthropic/claude-sonnet-4-5"
+
+    def test_model_ref_with_bad_provider_raises(self, config):
+        with pytest.raises(ValueError, match="unknown provider"):
+            build_agent(config, model_ref="qwen/qwen3-coder")
+
     def test_single_candidate_model_does_not_route(self, config):
         config.candidate_models = ["openrouter/qwen/q1"]
         handle = build_agent(config)
