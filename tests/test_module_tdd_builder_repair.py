@@ -64,6 +64,13 @@ def test_repair_loop_gives_up_after_max_attempts():
     assert repair.call_count == 2   # bounded
 
 
+def test_validate_function_accepts_exception_classes():
+    b = ModuleTDDBuilder(llm_client=SimpleNamespace(model="x"))
+    spec = FunctionSpec("CircularDependencyError", "(Exception)", "raised on a cycle")
+    assert b._validate_function("class CircularDependencyError(Exception):\n    pass\n", spec) is None
+    assert b._validate_function("def register(): pass\n", spec) is not None  # neither def nor class of that name
+
+
 def test_repair_loop_stops_if_repair_returns_unchanged_code():
     b = _builder(max_repair_attempts=3)
     with patch.object(b, "_run_integration_tests",

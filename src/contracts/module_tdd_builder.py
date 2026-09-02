@@ -286,14 +286,14 @@ class ModuleTDDBuilder:
         Returns:
             FunctionBuildResult
         """
-        prompt = f"""You are implementing a Python function for a module.
+        prompt = f"""You are implementing ONE piece of a Python module.
 
 **Existing module code:**
 ```python
 {existing_code}
 ```
 
-**Function to implement:**
+**To implement — `{func.name}`:**
 ```python
 def {func.name}{func.signature}:
     \"\"\"{func.docstring}\"\"\"
@@ -304,12 +304,15 @@ def {func.name}{func.signature}:
 {chr(10).join(f"- {h}" for h in hints) if hints else "None"}
 
 **Rules:**
-1. ONLY output the function definition (not the whole module)
-2. The function operates on the shared state defined above
-3. Keep implementation minimal and correct
-4. No imports - use what's already in the module
+1. Output ONLY this one definition. It is usually a `def`; if `{func.name}`
+   is a class or exception (e.g. ends in Error/Exception, or is CamelCase),
+   output a `class` instead.
+2. It operates on the shared state shown above.
+3. Keep it minimal and correct.
+4. Standard-library imports are fine (json, pathlib, collections, ...) —
+   put them at the top of your output. No third-party packages.
 
-Output ONLY the Python function code:
+Output ONLY the Python code for `{func.name}`:
 """
 
         actual_model = None
@@ -375,12 +378,12 @@ Fix the implementation:
         in_func = False
 
         for line in lines:
-            if line.strip().startswith(f"def {function_name}"):
+            if line.strip().startswith((f"def {function_name}", f"class {function_name}")):
                 in_func = True
             if in_func:
                 func_lines.append(line)
-                if func_lines and line.strip() and not line.startswith(" ") and not line.startswith("\t"):
-                    if not line.startswith("def"):
+                if func_lines and line.strip() and not line.startswith((" ", "\t")):
+                    if not line.startswith(("def", "class")):
                         break
 
         return "\n".join(func_lines).strip()
@@ -395,9 +398,10 @@ Fix the implementation:
             # Check it parses (raises SyntaxError if not)
             compile(code, "<string>", "exec")
 
-            # Check function name exists
-            if f"def {func.name}" not in code:
-                return f"Function {func.name} not found in code"
+            # The spec entry may be a function OR a class (e.g. an exception
+            # like CircularDependencyError, or a dataclass).
+            if f"def {func.name}" not in code and f"class {func.name}" not in code:
+                return f"Definition of {func.name} (def or class) not found in code"
 
             return None
 
