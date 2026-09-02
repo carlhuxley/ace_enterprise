@@ -12,13 +12,15 @@ _registry: dict[str, list[str]] = {}
 
 
 def clear_dag():
-    """Clear the internal DAG state."""
+    """Clear the in-memory DAG state only.
+
+    The persisted manifest on disk is left intact so load_manifest() can
+    reconstruct the graph after an in-memory reset (that is exactly what the
+    persistence tests exercise). Delete module_manifest.json directly if you
+    want a clean slate on disk too.
+    """
     global _registry
     _registry = {}
-    # Also clear the manifest file
-    manifest_path = Path("module_manifest.json")
-    if manifest_path.exists():
-        manifest_path.unlink()
 
 
 def get_nodes() -> list[str]:
