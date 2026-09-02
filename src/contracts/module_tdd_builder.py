@@ -12,6 +12,7 @@ Flow:
 5. Learn patterns on success/failure
 """
 
+import ast
 import logging
 import os
 import re
@@ -512,11 +513,7 @@ def _safe_test_name(name: str) -> str:
 
 
 def _shared_state_names(shared_state: str) -> list[str]:
-    """Top-level names bound in `shared_state` (`_count = 0`, `inventory: dict = {}`).
-
-    `from <module> import *` skips underscore-prefixed names, so integration
-    tests that assert on private module state need them imported explicitly.
-    """
+    """Top-level names bound in `shared_state` (`_count = 0`, `inventory: dict = {}`)."""
     names: list[str] = []
     for line in (shared_state or "").splitlines():
         m = re.match(r"\s*([A-Za-z_]\w*)\s*[:=]", line)
@@ -525,37 +522,133 @@ def _shared_state_names(shared_state: str) -> list[str]:
     return names
 
 
+def _local_names(block: str) -> set[str]:
+    """Names bound (assigned / looped over) within a block of statements."""
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        return set()
+    out: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store,)):
+            out.add(node.id)
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            out |= {n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)}
+    return out
+
+
+def _qualify(src: str, module_names: set[str], skip: set[str]) -> str:
+    """Rewrite bare references to `module_names` -> `_module.<name>` (leaving
+    `skip` — names bound locally in the test — alone) so the generated pytest
+    reads and writes the module's live state instead of a stale `import *`
+    copy. Returns `src` unchanged if it doesn't parse."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return src
+    targets = module_names - skip
+
+    class _Q(ast.NodeTransformer):
+        def visit_Name(self, node: ast.Name):
+            if node.id in targets:
+                return ast.copy_location(
+                    ast.Attribute(
+                        value=ast.Name(id="_module", ctx=ast.Load()),
+                        attr=node.id,
+                        ctx=node.ctx,
+                    ),
+                    node,
+                )
+            return node
+
+    ast.fix_missing_locations(_Q().visit(tree))
+    return ast.unparse(tree)
+
+
+_RESET_FIXTURE = '''\
+import copy as _copy
+import types as _types
+
+import pytest as _pytest
+
+_STATE_NAMES = {state_names}
+
+
+def _snapshot():
+    snap = {{}}
+    for name in dir(_module):
+        if name.startswith("__"):
+            continue
+        value = getattr(_module, name)
+        if callable(value) or isinstance(value, (_types.ModuleType, type)):
+            if name not in _STATE_NAMES:
+                continue
+        try:
+            snap[name] = _copy.deepcopy(value)
+        except Exception:
+            pass
+    return snap
+
+
+_INITIAL_STATE = _snapshot()
+
+
+@_pytest.fixture(autouse=True)
+def _reset_module_state():
+    """Restore {module}'s module-level state before each test — the contract's
+    tests assume a fresh module and pytest shares one process."""
+    for name, value in _INITIAL_STATE.items():
+        setattr(_module, name, _copy.deepcopy(value))
+    yield
+'''
+
+
 def render_integration_tests(contract: ModuleContract, module_name: str) -> str:
     """Serialize a `ModuleContract`'s integration tests into a runnable pytest
-    file that imports from `<module_name>` and runs each test's
-    setup → steps → assertion.
-
-    Best-effort: the steps/assertion are the contract's own free-form strings,
-    executed as written. A test that poked module internals not covered by
-    `import *` + the shared-state names will fail honestly rather than be
-    silently skipped.
+    file: `import <module_name> as _module`, an autouse fixture that resets the
+    module's state before each test, and one `def test_*()` per integration
+    test whose setup/steps/assertion have bare module names rewritten to
+    `_module.<name>` so they act on the live module (#25).
     """
-    imports = f"from {module_name} import *  # noqa: F401,F403\n"
-    extra = _shared_state_names(contract.shared_state)
-    if extra:
-        imports += f"from {module_name} import {', '.join(extra)}  # noqa: F401\n"
+    module_names = {f.name for f in contract.functions}
+    module_names |= set(_shared_state_names(contract.shared_state))
+
+    state_names = _shared_state_names(contract.shared_state)
     header = (
         f'"""Integration tests for `{module_name}`, generated from its '
-        f'ModuleContract."""\n{imports}\n\n'
+        f'ModuleContract."""\n'
+        f"import {module_name} as _module  # noqa: F401\n\n"
+        + _RESET_FIXTURE.format(module=module_name, state_names=set(state_names) or set())
+        + "\n"
     )
 
     if not contract.integration_tests:
-        return header + "def test_module_importable():\n    assert True\n"
+        return header + "\ndef test_module_importable():\n    assert _module is not None\n"
 
     blocks: list[str] = []
     for t in contract.integration_tests:
-        body = [f"def {_safe_test_name(t.name)}():"]
-        for line in (t.setup or "").splitlines():
-            if line.strip():
-                body.append(f"    {line.strip()}")
-        for step in t.steps:
-            if step.strip():
-                body.append(f"    {step.strip()}")
-        body.append(f"    assert {t.assertion.strip() or 'True'}")
-        blocks.append("\n".join(body))
-    return header + "\n\n\n".join(blocks) + "\n"
+        raw = "\n".join(
+            [s.strip() for s in (t.setup or "").splitlines() if s.strip()]
+            + [s.strip() for s in t.steps if s.strip()]
+        )
+        fn = _safe_test_name(t.name)
+        try:
+            ast.parse(f"{raw}\n_ = ({t.assertion or 'True'})")
+        except SyntaxError as exc:
+            blocks.append(
+                f"def {fn}():\n    import pytest\n"
+                f"    pytest.fail({f'contract test {t.name!r} does not parse: {exc}'!r})"
+            )
+            continue
+        # A test-local var stays bare; a *module* name stays qualified even when
+        # assigned (e.g. `_count = 0` in setup means "reset module state").
+        skip = _local_names(raw) - module_names
+        body_lines = [
+            f"    {line}" for line in _qualify(raw, module_names, skip).splitlines() if line.strip()
+        ]
+        assertion = _qualify(t.assertion.strip() or "True", module_names, skip).strip()
+        block = [f"def {fn}():"]
+        block += body_lines or ["    pass"]
+        block.append(f"    assert {assertion}")
+        blocks.append("\n".join(block))
+    return header + "\n" + "\n\n\n".join(blocks) + "\n"

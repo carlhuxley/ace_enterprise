@@ -95,7 +95,9 @@ class TestValidateModuleSandboxed:
         code = "_count = 0\ndef other():\n    return 0\n"
         passed, failures = validate_module(_contract(), code)
         assert passed is False
-        assert any("not found" in f for f in failures)
+        # the rendered test calls _module.increment() which doesn't exist
+        joined = " ".join(failures).lower()
+        assert "increment" in joined and ("attribute" in joined or "increments_twice" in joined)
 
     @skip_no_podman
     def test_module_doing_relative_path_disk_io_can_be_validated(self):
