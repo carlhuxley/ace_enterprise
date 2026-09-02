@@ -803,7 +803,7 @@ def validate_module(
 
     owns_orchestrator = orchestrator is None
     if owns_orchestrator:
-        orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30))
+        orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30, writable_workdir=True))
 
     try:
         result = orchestrator.pulse(script)

@@ -36,12 +36,21 @@ class PodmanRunner:
         cpus: str = "0.5",
         memory: str = "256m",
         test_timeout: int = 10,
+        writable_workdir: bool = False,
     ) -> None:
         self._image = image
         self._name = container_name or f"harness_{uuid.uuid4().hex[:8]}"
         self._cpus = cpus
         self._memory = memory
         self._test_timeout = test_timeout
+        # RED/GREEN pods keep pytest's cwd on the read-only /workspace mount so
+        # generated code can't rewrite its own test file mid-run. Validation
+        # runners (validate_module, ContractValidator, the `ace project`
+        # assembly run) instead run pytest with cwd on the writable /tmp tmpfs,
+        # so a module that legitimately does relative-path disk I/O (atomic
+        # manifest writes, etc.) can be verified. The /workspace mount stays
+        # read-only either way — only the working directory changes.
+        self._writable_workdir = writable_workdir
         self._alive = False
         self._host_ws: Path | None = None
 
@@ -131,11 +140,15 @@ class PodmanRunner:
         for name, content in files.items():
             (self._host_ws / name).write_text(content)
 
+        # cwd on /tmp (writable tmpfs) for validation runners; on the read-only
+        # /workspace for RED/GREEN pods. Either way pytest collects from
+        # /workspace and the mount stays read-only.
+        workdir = "/tmp" if self._writable_workdir else _REMOTE_WS
         pytest_result = subprocess.run(
             [
-                "podman", "exec", "--workdir", _REMOTE_WS, self._name,
+                "podman", "exec", "--workdir", workdir, self._name,
                 # -B: don't write __pycache__/.pyc; -p no:cacheprovider: don't
-                # write .pytest_cache — the workspace mount is now read-only.
+                # write .pytest_cache — the workspace mount is read-only.
                 "python", "-B", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
                 f"--timeout={self._test_timeout}", "-p", "no:cacheprovider",
             ],
