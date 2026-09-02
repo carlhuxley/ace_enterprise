@@ -1,12 +1,8 @@
 """Tests for WorkerAgent and PythonLanguagePod (ace_enterprise-eyd)."""
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec
 from src.agents.worker_agent import WorkerAgent
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,6 +69,12 @@ class TestGenerateTest:
         result = w.generate_test(_spec(tmp_path))
         assert result == "def test_foo(): pass"
 
+    def test_prompt_warns_about_blocked_sandbox_imports(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_test(_spec(tmp_path))
+        prompt = _captured_prompt(w)
+        assert "os" in prompt and "subprocess" in prompt and "pathlib.Path" in prompt
+
 
 # ---------------------------------------------------------------------------
 # WorkerAgent — generate_implementation
@@ -115,8 +117,12 @@ class TestGenerateImplementation:
         w.generate_implementation(_spec(tmp_path))
         assert "Playbook" not in _captured_prompt(w)
 
+    def test_prompt_warns_about_blocked_sandbox_imports(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(_spec(tmp_path))
+        assert "SANDBOX:" in _captured_prompt(w)
+
     def test_context_map_queried_with_failing_test_ids(self, tmp_path):
-        from src.utils.context_map import ASTSignature
         cm = MagicMock()
         sig = MagicMock()
         sig.format_compact.return_value = "def process_order(cart: Cart) -> Order"
