@@ -69,11 +69,14 @@ class WorkerAgent:
         module_context: str = "",
         failing_test_ids: list[str] | None = None,
         test_code: str = "",
+        existing_code: str = "",
     ) -> str:
         if not module_context and self._context_map and failing_test_ids:
             module_context = self._context_from_map(failing_test_ids)
         bullets = self._get_bullets()
-        prompt = self._impl_prompt(spec, error_output, module_context, bullets, test_code)
+        prompt = self._impl_prompt(
+            spec, error_output, module_context, bullets, test_code, existing_code
+        )
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
@@ -117,13 +120,26 @@ class WorkerAgent:
         module_context: str,
         bullets: list[str],
         test_code: str = "",
+        existing_code: str = "",
     ) -> str:
+        if existing_code:
+            lead = (
+                "Extend the EXISTING module below so the whole test file passes. "
+                "Keep every function, class, and import that the already-passing "
+                "tests depend on — add to or refactor the code, do NOT rewrite it "
+                "from scratch or drop anything. Output the COMPLETE updated module."
+            )
+        else:
+            lead = "Write the minimal implementation to make the failing tests pass."
         parts = [
-            "Write minimal implementation to make the failing tests pass.",
+            lead,
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
             _SANDBOX_IMPORT_RULE,
         ]
+        if existing_code:
+            parts.append(f"\nExisting module ({spec.implementation_file.name}):\n"
+                         f"```python\n{existing_code}\n```")
         if test_code:
             parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
         if error_output:
