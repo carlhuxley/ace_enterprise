@@ -126,6 +126,9 @@ class ProjectBuilder:
         outcomes: list[ModuleOutcome] = []
         failed: set[str] = set()
         stopped_at: int | None = None
+        # Only modules produced by THIS run become context for later modules —
+        # never pre-existing files in src_dir.
+        built_paths: list[Path] = []
 
         for idx, name in enumerate(plan.build_order):
             module = by_name[name]
@@ -143,10 +146,13 @@ class ProjectBuilder:
 
             if resume and impl_path.exists() and test_path.exists():
                 outcomes.append(ModuleOutcome(name, ModuleStatus.SKIPPED))
+                built_paths.append(impl_path)
                 continue
 
-            outcome = self._build_module(module, src_dir, impl_path, test_path)
+            outcome = self._build_module(module, built_paths, impl_path, test_path)
             outcomes.append(outcome)
+            if outcome.status is ModuleStatus.BUILT:
+                built_paths.append(impl_path)
             if outcome.status is ModuleStatus.FAILED:
                 failed.add(name)
                 if stop_on_failure:
@@ -174,17 +180,11 @@ class ProjectBuilder:
     # ------------------------------------------------------------------
 
     def _build_module(
-        self, module: ModuleSpec, src_dir: Path, impl_path: Path, test_path: Path
+        self, module: ModuleSpec, built_paths: list[Path], impl_path: Path, test_path: Path
     ) -> ModuleOutcome:
-        from src.contracts.module_architect import extract_context_from_directory
         from src.contracts.module_tdd_builder import render_integration_tests
 
-        context = None
-        if any(src_dir.glob("*.py")):
-            try:
-                context = extract_context_from_directory(str(src_dir))
-            except Exception as exc:  # noqa: BLE001 -- context is best-effort
-                logger.warning("project: context scan failed for %s: %s", module.name, exc)
+        context = _context_from_built(built_paths)
 
         architect = self._make_architect()
         arch = architect.generate_module_contract(
@@ -225,6 +225,25 @@ class ProjectBuilder:
             )
         except Exception:  # noqa: BLE001 -- audit is best-effort
             logger.debug("project-build audit emit failed", exc_info=True)
+
+
+def _context_from_built(built_paths: list[Path]):
+    """A CodebaseContext from the modules built earlier in this run (their
+    function signatures), so a later module can import and call them. None
+    when nothing has been built yet."""
+    if not built_paths:
+        return None
+    from src.contracts.module_architect import CodebaseContext, extract_context_from_file
+
+    ctx = CodebaseContext()
+    for path in built_paths:
+        try:
+            got = extract_context_from_file(str(path))
+        except Exception:  # noqa: BLE001 -- context is best-effort
+            continue
+        ctx.existing_functions.extend(got.existing_functions)
+        ctx.patterns.extend(p for p in got.patterns if p not in ctx.patterns)
+    return ctx if ctx.existing_functions else None
 
 
 def _run_assembly(test_dir: Path, src_dir: Path) -> tuple[bool, list[str]]:

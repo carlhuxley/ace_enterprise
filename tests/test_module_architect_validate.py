@@ -24,13 +24,15 @@ skip_no_podman = pytest.mark.skipif(
 
 
 def _contract(**overrides) -> ModuleContract:
-    defaults = dict(
-        id="m1",
-        name="counter",
-        description="A simple counter module.",
-        shared_state="_count = 0",
-        functions=[FunctionSpec(name="increment", signature="() -> int", docstring="Increment and return count.")],
-        integration_tests=[
+    defaults = {
+        "id": "m1",
+        "name": "counter",
+        "description": "A simple counter module.",
+        "shared_state": "_count = 0",
+        "functions": [
+            FunctionSpec(name="increment", signature="() -> int", docstring="Increment and return count.")
+        ],
+        "integration_tests": [
             IntegrationTest(
                 name="increments_twice",
                 setup="",
@@ -38,8 +40,8 @@ def _contract(**overrides) -> ModuleContract:
                 assertion="_count == 2",
             ),
         ],
-        complexity=1,
-    )
+        "complexity": 1,
+    }
     defaults.update(overrides)
     return ModuleContract(**defaults)
 
@@ -110,3 +112,33 @@ class TestValidateModuleSandboxed:
         passed, _ = validate_module(_contract(), code)
         assert passed is True
         assert marker_name not in sys.modules
+
+
+class TestArchitectPromptsAreSelfContained:
+    """The architect prompts must not teach models to reference ambient
+    helpers (init_db/clear_db/execute_sql/create_*) in integration tests —
+    those NameError inside validate_module's sandbox (regression: every
+    `ace project` module failed this way)."""
+
+    def test_no_phantom_helpers_in_example_setup(self):
+        from src.contracts.module_architect import (
+            MODULE_ARCHITECT_CONTEXT_PROMPT,
+            MODULE_ARCHITECT_PROMPT,
+        )
+
+        for prompt in (MODULE_ARCHITECT_PROMPT, MODULE_ARCHITECT_CONTEXT_PROMPT):
+            for line in prompt.splitlines():
+                if "NEVER invent" in line:
+                    continue  # the prohibition itself names them — that's fine
+                assert "init_db(" not in line
+                assert '"setup":' not in line or "clear_db(" not in line
+
+    def test_prompts_state_the_stdlib_only_rule(self):
+        from src.contracts.module_architect import (
+            MODULE_ARCHITECT_CONTEXT_PROMPT,
+            MODULE_ARCHITECT_PROMPT,
+        )
+
+        for prompt in (MODULE_ARCHITECT_PROMPT, MODULE_ARCHITECT_CONTEXT_PROMPT):
+            assert "standard library" in prompt or "stdlib" in prompt
+            assert "NEVER invent helpers" in prompt
