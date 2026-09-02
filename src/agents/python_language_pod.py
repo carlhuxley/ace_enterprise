@@ -83,12 +83,22 @@ class PythonLanguagePod:
 
     def run_green(self, spec: PodSpec) -> PhaseResult:
         test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
+        # The impl file holds the last committed (passing) implementation — from
+        # earlier scenarios in a Gherkin-driven run. Hand it to GREEN so it
+        # extends that code instead of regenerating the module from scratch and
+        # losing previously-passing behaviour (issue #17).
+        existing_impl = (
+            spec.implementation_file.read_text()
+            if spec.implementation_file.exists()
+            else ""
+        )
         try:
             impl_code = self._worker.generate_implementation(
                 spec,
                 error_output=spec.error_output,
                 failing_test_ids=[str(spec.test_file)],
                 test_code=test_code,
+                existing_code=existing_impl,
             )
             _import_filter.check(impl_code)
         except ForbiddenImportError as exc:

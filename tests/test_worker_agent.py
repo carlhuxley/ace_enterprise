@@ -122,6 +122,24 @@ class TestGenerateImplementation:
         w.generate_implementation(_spec(tmp_path))
         assert "SANDBOX:" in _captured_prompt(w)
 
+    def test_no_existing_code_prompts_a_fresh_implementation(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(_spec(tmp_path))
+        prompt = _captured_prompt(w)
+        assert "minimal implementation" in prompt
+        assert "Existing module" not in prompt
+
+    def test_existing_code_prompts_an_extension_not_a_rewrite(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(
+            _spec(tmp_path),
+            existing_code="import json\n\ndef parse(s):\n    return json.loads(s)\n",
+        )
+        prompt = _captured_prompt(w)
+        assert "Extend the EXISTING module" in prompt
+        assert "do NOT rewrite it" in prompt
+        assert "def parse(s):" in prompt  # the current code is shown
+
     def test_context_map_queried_with_failing_test_ids(self, tmp_path):
         cm = MagicMock()
         sig = MagicMock()
@@ -212,6 +230,32 @@ class TestPythonLanguagePodFromWorker:
         s = _spec(tmp_path)
         pod.run_green(s)
         assert s.implementation_file.exists()
+
+    def _pod_with_captured_llm(self, tmp_path):
+        """A pod whose LLM mock we can still inspect after the pod's
+        _intercept_tokens wrapper reassigns llm_client.generate."""
+        from src.agents.python_language_pod import PythonLanguagePod
+        client = _llm(content="def process(): pass")
+        original_generate = client.generate  # grab before the pod wraps it
+        orch = MagicMock()
+        orch.pulse.return_value = PhaseResult(passed=True, output="1 passed", error=None)
+        pod = PythonLanguagePod(WorkerAgent(client), project_root=tmp_path, orchestrator=orch)
+        return pod, original_generate
+
+    def test_run_green_feeds_the_existing_impl_into_the_prompt(self, tmp_path):
+        pod, generate = self._pod_with_captured_llm(tmp_path)
+        s = _spec(tmp_path)
+        s.implementation_file.write_text("import math\n\ndef area(r):\n    return math.pi * r * r\n")
+        pod.run_green(s)
+        prompt = generate.call_args[0][0]
+        assert "def area(r):" in prompt
+        assert "Extend the EXISTING module" in prompt
+
+    def test_run_green_no_prior_impl_prompts_fresh(self, tmp_path):
+        pod, generate = self._pod_with_captured_llm(tmp_path)
+        pod.run_green(_spec(tmp_path))  # no impl file on disk yet
+        prompt = generate.call_args[0][0]
+        assert "Existing module" not in prompt
 
     def test_run_refactor_returns_phase_result(self, tmp_path):
         pod, _ = self._make_pod(tmp_path, green_passed=True)
