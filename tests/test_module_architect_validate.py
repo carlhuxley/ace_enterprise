@@ -261,6 +261,15 @@ class TestCheckContractConsistency:
         )
         assert check_contract_consistency(c) == []
 
+    def test_flags_a_module_function_that_duplicates_an_upstream_one(self):
+        # 'add_edge' is already provided by the built dag_graph module — this
+        # contract should import it, not put it back on its own surface (#28).
+        ctx = CodebaseContext(
+            existing_functions=[ExistingFunction("add_edge", "(a, b)", "", "dag_graph")]
+        )
+        problems = check_contract_consistency(_consistent_contract(), ctx)
+        assert any("add_edge" in p and "dag_graph" in p for p in problems)
+
 
 class TestGenerateModuleContractReAsks:
     def _architect(self, *responses):

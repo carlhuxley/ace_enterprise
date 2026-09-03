@@ -40,8 +40,10 @@ class FakeArchitect:
 class FakeBuilder:
     def __init__(self, fail: set[str] | None = None):
         self.fail = fail or set()
+        self.seen_deps: list[dict[str, str]] = []
 
-    def build_module(self, contract):
+    def build_module(self, contract, dep_modules=None):
+        self.seen_deps.append(dep_modules or {})
         ok = contract.name not in self.fail
         return SimpleNamespace(
             success=ok,
@@ -151,6 +153,22 @@ def test_later_modules_get_prior_modules_as_context(dirs):
     contexts = dict(arch.seen)
     assert contexts["the db module"] is None                 # nothing built yet
     assert contexts["the api module"] is not None            # db.py scanned into context
+
+
+def test_declared_dependency_sources_are_handed_to_the_builder(dirs):
+    """The builder gets the source of each *declared* upstream module so it
+    can import from it instead of reimplementing (issue #28)."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("api", "the api module", depends_on=("db",)),
+        ModuleSpec("db", "the db module"),
+    )
+    fb = FakeBuilder()
+    _builder(dirs, architect=FakeArchitect(), builder=fb).build(plan, root, src, tests)
+
+    assert fb.seen_deps[0] == {}                       # db: nothing built yet
+    assert set(fb.seen_deps[1]) == {"db"}              # api: db's source only
+    assert "db_fn" in fb.seen_deps[1]["db"]
 
 
 def test_preexisting_src_files_are_not_used_as_context(dirs):

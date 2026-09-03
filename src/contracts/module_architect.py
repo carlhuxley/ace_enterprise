@@ -183,6 +183,17 @@ def check_contract_consistency(
                         f"{t.name}: calls {name}() which is not a function of this "
                         f"module, {where}, or a name bound in the test"
                     )
+
+    # A module must not re-declare a symbol an upstream dependency already
+    # provides -- it should import and call it (issue #28).
+    if context:
+        own = {f.name for f in contract.functions}
+        for f in context.existing_functions:
+            if f.module and f.module != contract.name and f.name in own:
+                problems.append(
+                    f"function {f.name!r} is already provided by the already-built "
+                    f"module {f.module!r} -- import it, don't redeclare it"
+                )
     return problems
 
 
@@ -877,7 +888,8 @@ _PYTEST_FAIL_RE = re.compile(r"^(?:FAILED|ERROR)\s+test_[\w./]+::(\w+)\b(?:\s*-\
 
 
 def validate_module(
-    contract: ModuleContract, code: str, orchestrator=None
+    contract: ModuleContract, code: str, orchestrator=None,
+    extra_files: dict[str, str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Validate a module implementation by running the SAME pytest file
     `ProjectBuilder` delivers (`render_integration_tests`) as one pytest
@@ -890,6 +902,10 @@ def validate_module(
     Args:
         orchestrator: injected PodmanOrchestrator (shared across validations
             in tests); a fresh one is created and torn down per call otherwise.
+        extra_files: already-built upstream module sources ({module_name: code})
+            to drop alongside `code` in the sandbox, so `from <dep> import ...`
+            resolves during validation instead of forcing the implementer to
+            inline a copy (issue #28).
 
     Returns: (all_passed, list of failure messages)
     """
@@ -904,8 +920,12 @@ def validate_module(
 
     files = {
         f"{contract.name}.py": code,
-        f"test_{contract.name}.py": render_integration_tests(contract, contract.name),
+        f"test_{contract.name}.py": render_integration_tests(
+            contract, contract.name, dep_modules=extra_files
+        ),
     }
+    for _mod_name, _mod_src in (extra_files or {}).items():
+        files.setdefault(f"{_mod_name}.py", _mod_src)
 
     owns_orchestrator = orchestrator is None
     if owns_orchestrator:

@@ -99,6 +99,14 @@ def test_test_name_is_sanitised():
     assert "def test_adds_a_b_happy_path():" in src
 
 
+def test_dep_module_public_symbols_are_imported():
+    dep = {"dag_graph": "def add_edge(a, b):\n    pass\n\ndef has_cycle():\n    return False\n"}
+    src = render_integration_tests(_contract(), "counter", dep_modules=dep)
+    ast.parse(src)
+    assert "import counter as _module" in src
+    assert "from dag_graph import add_edge, has_cycle" in src
+
+
 def test_unparseable_step_is_left_as_is_and_still_valid_module():
     # a malformed step shouldn't crash rendering; the test just fails visibly
     src = render_integration_tests(
