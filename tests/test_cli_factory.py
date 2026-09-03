@@ -95,6 +95,16 @@ class TestBuildAgentWiring:
         with pytest.raises(ValueError, match="unknown provider"):
             build_agent(config, model_ref="qwen/qwen3-coder")
 
+    def test_model_ref_claude_cli_uses_the_local_cli_backend(self, config):
+        from src.utils.claude_cli_client import ClaudeCliClient
+        handle = build_agent(config, model_ref="claude-cli")
+        assert isinstance(handle.runner._pod._worker.llm_client, ClaudeCliClient)
+
+    def test_model_ref_claude_cli_with_a_model_picks_it(self, config):
+        handle = build_agent(config, model_ref="claude-cli/haiku")
+        assert handle.runner._pod._worker.llm_client._model == "haiku"
+        assert handle.runner._runner_kwargs["model_id"] == "claude-cli/claude-cli:haiku"
+
     def test_single_candidate_model_does_not_route(self, config):
         config.candidate_models = ["openrouter/qwen/q1"]
         handle = build_agent(config)

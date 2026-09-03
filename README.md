@@ -219,7 +219,14 @@ Tools: `get_guidance` (CGR³ verdict), `learn` (add bullet), `query` (semantic s
 
 ### ClaudeCliClient — No API Key Required
 
-Drop-in `LLMClient` replacement using the local `claude --print` CLI. No API keys, no billing — uses the active Claude Code session. Strips `CLAUDE*` env vars before subprocess invocation to prevent nested-session detection.
+Drop-in `LLMClient` replacement using the local `claude --print` CLI. No API keys, no billing — uses the active Claude Code session. Confined to a pure text completion (`--tools ""`, `--strict-mcp-config`, `--setting-sources ""`, a no-tools system prompt) and strips `CLAUDE*` env vars to prevent nested-session detection.
+
+Reachable from:
+- **`ace tdd --model claude-cli`** and **`ace project --model claude-cli`** (or `claude-cli/haiku` to pick a faster model)
+- the MCP tools (`build_feature` / `build_feature_ensemble` / `build_project`) — the default when no `model` arg is given
+- `bootstrap/orchestrate.py --client claude-cli`
+
+Each LLM call spawns a fresh `claude` subprocess (~2.5s boot). Fine for `ace tdd` / `ace project` (dozens of calls); **`benchmarks/runner.py` is API-only** — a full ablation makes hundreds of calls and the spawn overhead would dominate.
 
 ---
 

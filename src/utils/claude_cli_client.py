@@ -107,12 +107,15 @@ class ClaudeCliClient:
     compatibility but not enforceable via the CLI, so it's ignored.
     """
 
-    def __init__(self, timeout: int = 300) -> None:
+    def __init__(self, timeout: int = 300, model: str | None = None) -> None:
         self._timeout = timeout
-        # No API model string is selectable via the CLI (it uses whatever the
-        # authenticated Claude Code session is configured for) -- this is a
-        # stable identity label, not a real model version.
-        self.model = "claude-cli"
+        # `model` (e.g. "haiku", "sonnet", "opus") is passed to `claude --print
+        # --model`; None uses whatever the authenticated Claude Code session is
+        # configured for. Haiku is markedly faster per call — worth trading down
+        # for since every LLM call pays a ~2.5s CLI-subprocess boot tax.
+        self._model = model or None
+        self.provider = "claude-cli"
+        self.model = f"claude-cli:{model}" if model else "claude-cli"
 
     def generate(
         self,
@@ -129,6 +132,8 @@ class ClaudeCliClient:
             "claude", "--print", "--output-format", "text",
             "--tools", "", "--strict-mcp-config", "--setting-sources", "",
         ]
+        if self._model:
+            cmd += ["--model", self._model]
         combined_system_prompt = (
             f"{_NO_TOOLS_SYSTEM_PROMPT}\n\n{system_prompt}" if system_prompt else _NO_TOOLS_SYSTEM_PROMPT
         )

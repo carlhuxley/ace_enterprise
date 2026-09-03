@@ -1077,14 +1077,15 @@ class ACETools:
         """Build the LLM client for code generation.
 
         Defaults to ClaudeCliClient — no API key needed, uses the local Claude
-        Code session that's already running this MCP server. An explicit
-        'model' arg opts into a provider-backed LLMClient instead (e.g. for
-        other MCP-capable coding harnesses without a local Claude CLI).
+        Code session that's already running this MCP server. `model` opts into
+        a provider-backed LLMClient; `model="claude-cli"` (or
+        "claude-cli/haiku") keeps the CLI backend but picks a specific model.
         """
         model = args.get("model")
-        if not model:
+        if not model or model == "claude-cli" or model.startswith("claude-cli/"):
             from src.utils.claude_cli_client import ClaudeCliClient
-            return ClaudeCliClient()
+            _, _, sub = (model or "").partition("/")
+            return ClaudeCliClient(model=sub or None)
 
         from src.utils.llm_client import LLMClient
         provider = "openrouter" if "/" in model else "ollama"
