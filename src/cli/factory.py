@@ -155,24 +155,35 @@ _VALID_PROVIDERS = frozenset(
 
 def _split_model_ref(ref: str) -> tuple[str, str]:
     """Split a "<provider>/<model>" ref. The model half may itself contain
-    slashes (e.g. "openrouter/qwen/qwen3-coder:free")."""
+    slashes (e.g. "openrouter/qwen/qwen3-coder:free"). Also accepts the
+    special value "claude-cli" (optionally "claude-cli/haiku" etc.) for the
+    local Claude Code CLI backend."""
+    if ref == "claude-cli" or ref.startswith("claude-cli/"):
+        _, _, sub = ref.partition("/")
+        return "claude-cli", sub
     provider, sep, model = ref.partition("/")
     if not sep or not model:
         raise ValueError(
             f"model {ref!r} must be '<provider>/<model>' "
-            "(e.g. 'openrouter/qwen/qwen3-coder', 'ollama/qwen3-coder:30b')"
+            "(e.g. 'openrouter/qwen/qwen3-coder', 'ollama/qwen3-coder:30b', "
+            "'claude-cli', 'claude-cli/haiku')"
         )
     if provider not in _VALID_PROVIDERS:
         raise ValueError(
             f"unknown provider {provider!r} in {ref!r} — expected one of: "
-            + ", ".join(sorted(_VALID_PROVIDERS))
+            + ", ".join([*sorted(_VALID_PROVIDERS), "claude-cli"])
         )
     return provider, model
 
 
-def llm_client_from_ref(ref: str) -> LLMClient:
-    """Build an LLMClient from a "<provider>/<model>" ref."""
+def llm_client_from_ref(ref: str):
+    """Build an LLM client from a model ref: `<provider>/<model>`, or
+    `claude-cli[/<model>]` for the local Claude Code CLI (no API key)."""
     provider, model = _split_model_ref(ref)
+    if provider == "claude-cli":
+        from src.utils.claude_cli_client import ClaudeCliClient
+
+        return ClaudeCliClient(model=model or None)
     return LLMClient(provider=provider, model=model)
 
 

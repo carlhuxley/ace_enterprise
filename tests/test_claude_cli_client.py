@@ -221,3 +221,28 @@ class TestRetryHardening:
             client.generate(prompt="hi")
         assert run.call_count == 1
         sleep.assert_not_called()
+
+
+class TestModelSelection:
+    def test_no_model_omits_the_model_flag(self):
+        client = ClaudeCliClient()
+        assert client.model == "claude-cli"
+        assert client.provider == "claude-cli"
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt="hi")
+        assert "--model" not in run.call_args.args[0]
+
+    def test_model_is_passed_to_the_cli(self):
+        client = ClaudeCliClient(model="haiku")
+        assert client.model == "claude-cli:haiku"
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt="hi")
+        cmd = run.call_args.args[0]
+        assert cmd[cmd.index("--model") + 1] == "haiku"
+
+    def test_response_carries_the_model_label(self):
+        client = ClaudeCliClient(model="sonnet")
+        with patch("subprocess.run", return_value=_fake_completed_process()):
+            result = client.generate(prompt="hi")
+        assert result["actual_model"] == "claude-cli:sonnet"
+        assert result["provider"] == "claude-cli"

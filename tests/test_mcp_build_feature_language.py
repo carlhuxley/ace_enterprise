@@ -331,3 +331,10 @@ class TestResolveLLMClient:
         client = tools._resolve_llm_client({"model": "qwen/qwen3-coder:free"})
         assert isinstance(client, LLMClient)
         assert client.provider == "openrouter"
+
+    def test_claude_cli_model_keeps_the_cli_backend_with_a_chosen_model(self, tools):
+        from src.utils.claude_cli_client import ClaudeCliClient
+        client = tools._resolve_llm_client({"model": "claude-cli/haiku"})
+        assert isinstance(client, ClaudeCliClient)
+        assert client._model == "haiku"
+        assert tools._resolve_llm_client({"model": "claude-cli"})._model is None

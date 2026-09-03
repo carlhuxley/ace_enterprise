@@ -41,9 +41,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PROVIDER/MODEL",
         help=(
-            "Override the LLM for this run, e.g. 'openrouter/qwen/qwen3-coder' or "
-            "'ollama/qwen3-coder:30b'. Beats .ace/config.yaml candidate_models and "
-            "the .env default."
+            "Override the LLM for this run, e.g. 'openrouter/qwen/qwen3-coder', "
+            "'ollama/qwen3-coder:30b', or 'claude-cli' / 'claude-cli/haiku' for the "
+            "local Claude Code session (no API key; ~2.5s/call subprocess cost). "
+            "Beats .ace/config.yaml candidate_models and the .env default."
         ),
     )
     tdd.add_argument(
@@ -85,7 +86,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     proj.add_argument(
         "--model", default=None, metavar="PROVIDER/MODEL",
-        help="Override the LLM, e.g. 'openrouter/qwen/qwen3-coder' (default: .env)",
+        help=(
+            "Override the LLM, e.g. 'openrouter/qwen/qwen3-coder', or 'claude-cli' / "
+            "'claude-cli/haiku' for the local Claude Code session (default: .env)"
+        ),
     )
     proj.add_argument(
         "--plan-only", action="store_true",
