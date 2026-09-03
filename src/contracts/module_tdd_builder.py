@@ -127,12 +127,18 @@ class ModuleTDDBuilder:
         self,
         contract: ModuleContract,
         session_id: str | None = None,
+        dep_modules: dict[str, str] | None = None,
     ) -> ModuleBuildResult:
         """Build a complete module from contract using TDD.
 
         Args:
             contract: Module contract from architect
             session_id: Optional session ID for audit
+            dep_modules: already-built upstream module sources
+                ({module_name: code}). Their public symbols are offered to the
+                implementer as concrete imports, made available in the
+                validation sandbox, and guarded against local re-declaration
+                (issue #28).
 
         Returns:
             ModuleBuildResult with implementation and metrics
@@ -140,6 +146,7 @@ class ModuleTDDBuilder:
         start_time = time.time()
         function_results: list[FunctionBuildResult] = []
         total_cycles = 0
+        dep_import_lines = _dep_import_lines(dep_modules)
 
         # Track accumulated module code
         module_code = f"# {contract.name}\n# {contract.description}\n\n"
@@ -155,6 +162,7 @@ class ModuleTDDBuilder:
                 hints=contract.hints,
                 existing_code=module_code,
                 session_id=session_id,
+                dep_import_lines=dep_import_lines,
             )
 
             function_results.append(result)
@@ -200,7 +208,7 @@ class ModuleTDDBuilder:
         # the integration tests).
         logger.info("Running integration tests...")
         integration_results, integration_failures = self._run_integration_tests(
-            contract=contract, module_code=module_code,
+            contract=contract, module_code=module_code, dep_modules=dep_modules,
         )
         all_integration_passed = all(integration_results.values()) if integration_results else False
 
@@ -211,13 +219,16 @@ class ModuleTDDBuilder:
                 "Integration repair pass %d/%d (%d failing)",
                 repair, self._max_repair_attempts, len(integration_failures),
             )
-            repaired = self._repair_module(contract, module_code, integration_failures)
+            repaired = self._repair_module(
+                contract, module_code, integration_failures,
+                dep_import_lines=dep_import_lines,
+            )
             if repaired is None or repaired.strip() == module_code.strip():
                 break
             module_code = repaired
             total_cycles += 1
             integration_results, integration_failures = self._run_integration_tests(
-                contract=contract, module_code=module_code,
+                contract=contract, module_code=module_code, dep_modules=dep_modules,
             )
             all_integration_passed = (
                 all(integration_results.values()) if integration_results else False
@@ -269,6 +280,7 @@ class ModuleTDDBuilder:
         hints: list[str],
         existing_code: str,
         session_id: str | None = None,
+        dep_import_lines: list[str] | None = None,
     ) -> FunctionBuildResult:
         """Build a single function using TDD-style iteration.
 
@@ -287,6 +299,15 @@ class ModuleTDDBuilder:
         Returns:
             FunctionBuildResult
         """
+        dep_block = ""
+        if dep_import_lines:
+            dep_block = (
+                "\n\n**Already-built sibling modules — import what you need, do NOT "
+                "reimplement their functions:**\n```python\n"
+                + "\n".join(dep_import_lines)
+                + "\n```"
+            )
+
         prompt = f"""You are implementing ONE piece of a Python module.
 
 **Existing module code:**
@@ -302,7 +323,7 @@ def {func.name}{func.signature}:
 ```
 
 **Implementation hints:**
-{chr(10).join(f"- {h}" for h in hints) if hints else "None"}
+{chr(10).join(f"- {h}" for h in hints) if hints else "None"}{dep_block}
 
 **Rules:**
 1. Output ONLY this one definition. It is usually a `def`; if `{func.name}`
@@ -312,6 +333,8 @@ def {func.name}{func.signature}:
 3. Keep it minimal and correct.
 4. Standard-library imports are fine (json, pathlib, collections, ...) —
    put them at the top of your output. No third-party packages.
+5. If you need behaviour from an already-built sibling module listed above,
+   import it with the exact line shown — never redefine that function here.
 
 Output ONLY the Python code for `{func.name}`:
 """
@@ -410,20 +433,31 @@ Fix the implementation:
             return f"Syntax error: {e}"
 
     def _repair_module(
-        self, contract: ModuleContract, module_code: str, failures: list[str]
+        self, contract: ModuleContract, module_code: str, failures: list[str],
+        *, dep_import_lines: list[str] | None = None,
     ) -> str | None:
         """Ask the LLM to fix the whole module so the integration tests pass.
 
         Returns the repaired module source, or None on failure.
         """
         test_file = render_integration_tests(contract, contract.name)
+        dep_block = ""
+        if dep_import_lines:
+            dep_block = (
+                "\n# these symbols are provided by already-built sibling modules — "
+                "IMPORT them, never define them in this module:\n"
+                + "\n".join(dep_import_lines)
+                + "\n(a local def/class shadowing one of these names is a bug to fix)\n"
+            )
         prompt = (
             "The module below fails some of its integration tests. Rewrite the "
             "COMPLETE module so every test passes. Keep the public function "
-            "signatures. Standard library only.\n\n"
+            "signatures. Standard library only, plus the sibling-module imports "
+            "noted below.\n\n"
             f"# {contract.name}.py\n```python\n{module_code}\n```\n\n"
             f"# integration tests\n```python\n{test_file}\n```\n\n"
-            "# failures\n" + "\n".join(f"- {f}" for f in failures) + "\n\n"
+            f"# failures\n" + "\n".join(f"- {f}" for f in failures) + "\n"
+            + dep_block + "\n"
             "Output ONLY the corrected Python module."
         )
         try:
@@ -438,18 +472,28 @@ Fix the implementation:
         self,
         contract: ModuleContract,
         module_code: str,
+        dep_modules: dict[str, str] | None = None,
     ) -> tuple[dict[str, bool], list[str]]:
         """Run integration tests against the built module.
 
         Args:
             contract: Module contract with integration tests
             module_code: Complete module implementation
+            dep_modules: already-built upstream module sources, made available
+                in the sandbox and checked for local re-declaration (issue #28)
 
         Returns:
             Tuple of (dict mapping test name to pass/fail, list of failure messages)
         """
         # Use the existing validate_module function which runs integration tests
-        passed, failures = validate_module(contract, module_code)
+        passed, failures = validate_module(contract, module_code, extra_files=dep_modules)
+
+        # A downstream module that re-defines an upstream symbol still passes a
+        # flat-workspace test run — flag it as a failure so the repair loop
+        # replaces the duplicate with an import (issue #28).
+        dup = _redeclared_upstream(module_code, _upstream_symbols(dep_modules))
+        if dup:
+            failures = [*dup, *failures]
 
         # Log failures for debugging
         if failures:
@@ -520,6 +564,58 @@ def _shared_state_names(shared_state: str) -> list[str]:
         if m and m.group(1) not in names:
             names.append(m.group(1))
     return names
+
+
+def _upstream_symbols(dep_modules: dict[str, str] | None) -> dict[str, str]:
+    """Map each public top-level `def`/`class` name in the already-built
+    dependency sources to its owning module name."""
+    out: dict[str, str] = {}
+    for mod_name, src in (dep_modules or {}).items():
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not node.name.startswith("_"):
+                    out.setdefault(node.name, mod_name)
+    return out
+
+
+def _dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
+    """Concrete `from <module> import <symbols>` lines for every upstream
+    dependency, so prompts and rendered tests can hand the model exactly the
+    imports it should use instead of reimplementing (issue #28)."""
+    by_mod: dict[str, list[str]] = {}
+    for sym, mod in _upstream_symbols(dep_modules).items():
+        by_mod.setdefault(mod, []).append(sym)
+    return [
+        f"from {mod} import {', '.join(sorted(syms))}"
+        for mod, syms in sorted(by_mod.items())
+    ]
+
+
+def _redeclared_upstream(module_code: str, upstream: dict[str, str]) -> list[str]:
+    """Messages for any top-level `def`/`class` in `module_code` that shadows a
+    symbol an upstream dependency already provides — the module should import
+    it, not carry a duplicate (issue #28)."""
+    if not upstream:
+        return []
+    try:
+        tree = ast.parse(module_code)
+    except SyntaxError:
+        return []
+    msgs: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name in upstream:
+                mod = upstream[node.name]
+                msgs.append(
+                    f"{node.name}: defined locally but already provided by the "
+                    f"already-built module '{mod}' — delete this definition and "
+                    f"`from {mod} import {node.name}` instead"
+                )
+    return msgs
 
 
 def _local_names(block: str) -> set[str]:
@@ -603,21 +699,33 @@ def _reset_module_state():
 '''
 
 
-def render_integration_tests(contract: ModuleContract, module_name: str) -> str:
+def render_integration_tests(
+    contract: ModuleContract, module_name: str,
+    dep_modules: dict[str, str] | None = None,
+) -> str:
     """Serialize a `ModuleContract`'s integration tests into a runnable pytest
     file: `import <module_name> as _module`, an autouse fixture that resets the
     module's state before each test, and one `def test_*()` per integration
     test whose setup/steps/assertion have bare module names rewritten to
     `_module.<name>` so they act on the live module (#25).
+
+    `dep_modules` ({module_name: source}) are the already-built upstream
+    dependencies: their public symbols are imported at the top of the file so a
+    test step that calls one resolves (issue #28).
     """
     module_names = {f.name for f in contract.functions}
     module_names |= set(_shared_state_names(contract.shared_state))
 
     state_names = _shared_state_names(contract.shared_state)
+    dep_imports = "".join(
+        f"{line}  # noqa: F401\n" for line in _dep_import_lines(dep_modules)
+    )
     header = (
         f'"""Integration tests for `{module_name}`, generated from its '
         f'ModuleContract."""\n'
-        f"import {module_name} as _module  # noqa: F401\n\n"
+        f"import {module_name} as _module  # noqa: F401\n"
+        + dep_imports
+        + "\n"
         + _RESET_FIXTURE.format(module=module_name, state_names=set(state_names) or set())
         + "\n"
     )

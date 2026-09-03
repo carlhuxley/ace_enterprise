@@ -185,6 +185,10 @@ class ProjectBuilder:
         from src.contracts.module_tdd_builder import render_integration_tests
 
         context = _context_from_built(built_paths)
+        # Sources of this module's *declared* upstream dependencies — handed to
+        # the builder so it imports them instead of inlining copies (issue #28).
+        dep_names = set(module.depends_on)
+        dep_modules = {p.stem: _safe_read(p) for p in built_paths if p.stem in dep_names}
 
         architect = self._make_architect()
         arch = architect.generate_module_contract(
@@ -195,11 +199,13 @@ class ProjectBuilder:
                                  error=f"architect: {arch.error}")
 
         contract = arch.contract
-        build = self._make_builder().build_module(contract)
+        build = self._make_builder().build_module(contract, dep_modules=dep_modules)
 
         # Persist what was generated even on failure, so it can be inspected.
         impl_path.write_text(build.module_code or "")
-        test_path.write_text(render_integration_tests(contract, module.name))
+        test_path.write_text(
+            render_integration_tests(contract, module.name, dep_modules=dep_modules)
+        )
 
         if not build.success:
             return ModuleOutcome(
