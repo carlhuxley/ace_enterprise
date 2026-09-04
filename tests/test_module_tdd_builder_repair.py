@@ -101,6 +101,26 @@ def test_redeclared_upstream_clean_when_the_module_imports_instead():
     assert _redeclared_upstream(code, upstream) == []
 
 
+def test_redeclared_upstream_catches_a_def_guarded_by_try_except():
+    # the exact shape Haiku produced: a "fallback" duplicate under ImportError
+    upstream = _upstream_symbols({"dag_graph": "def add_edge(a, b): pass\n"})
+    code = (
+        "try:\n"
+        "    from graph import add_edge\n"
+        "except ImportError:\n"
+        "    def add_edge(a, b):\n"
+        "        pass\n"
+    )
+    msgs = _redeclared_upstream(code, upstream)
+    assert len(msgs) == 1 and "dag_graph" in msgs[0]
+
+
+def test_redeclared_upstream_ignores_a_method_named_like_an_upstream_symbol():
+    upstream = _upstream_symbols({"dag_graph": "def add_edge(a, b): pass\n"})
+    code = "class Graph:\n    def add_edge(self, a, b):\n        pass\n"
+    assert _redeclared_upstream(code, upstream) == []
+
+
 def test_locally_redefined_dependency_triggers_a_repair_pass():
     b = _builder(max_repair_attempts=1)
     # the isolated per-function build hands back code that reimplements an

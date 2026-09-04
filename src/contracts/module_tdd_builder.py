@@ -595,10 +595,37 @@ def _dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
     ]
 
 
+_DEF_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+# Compound statements whose bodies are still module scope — a def guarded by
+# one of these rebinds the module name just like a bare top-level def does.
+_SCOPE_TRANSPARENT: tuple[type[ast.AST], ...] = (
+    ast.Try, ast.If, ast.With, ast.AsyncWith,
+    ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
+    ast.Match, ast.match_case,
+    *((ast.TryStar,) if hasattr(ast, "TryStar") else ()),
+)
+
+
+def _module_scope_defs(tree: ast.Module) -> list[str]:
+    """Names bound by a `def`/`class` at module scope, including ones nested in
+    `try`/`if`/`with`/`for`/`while` blocks — but not methods or closures inside
+    a function or class body (those may legitimately reuse a name)."""
+    names: list[str] = []
+    stack: list[ast.AST] = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _DEF_NODES):
+            names.append(node.name)  # do not descend — its body is a new scope
+        elif isinstance(node, _SCOPE_TRANSPARENT):
+            stack.extend(ast.iter_child_nodes(node))
+    return names
+
+
 def _redeclared_upstream(module_code: str, upstream: dict[str, str]) -> list[str]:
-    """Messages for any top-level `def`/`class` in `module_code` that shadows a
-    symbol an upstream dependency already provides — the module should import
-    it, not carry a duplicate (issue #28)."""
+    """Messages for any module-scope `def`/`class` in `module_code` that shadows
+    a symbol an upstream dependency already provides — the module should import
+    it, not carry a duplicate (issue #28). Catches definitions guarded by
+    `try/except ImportError` and other compound statements (issue #30)."""
     if not upstream:
         return []
     try:
@@ -606,15 +633,14 @@ def _redeclared_upstream(module_code: str, upstream: dict[str, str]) -> list[str
     except SyntaxError:
         return []
     msgs: list[str] = []
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.name in upstream:
-                mod = upstream[node.name]
-                msgs.append(
-                    f"{node.name}: defined locally but already provided by the "
-                    f"already-built module '{mod}' — delete this definition and "
-                    f"`from {mod} import {node.name}` instead"
-                )
+    for name in dict.fromkeys(_module_scope_defs(tree)):
+        if name in upstream:
+            mod = upstream[name]
+            msgs.append(
+                f"{name}: defined locally but already provided by the "
+                f"already-built module '{mod}' — delete this definition and "
+                f"`from {mod} import {name}` instead"
+            )
     return msgs
 
 
