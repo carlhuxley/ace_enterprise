@@ -50,6 +50,7 @@ class FakeBuilder:
             module_code=f"def {contract.name}_fn():\n    return 1\n",
             total_cycles=2,
             error=None if ok else "green failed",
+            learned_bullets=["b1", "b2"] if ok else [],
         )
 
 
@@ -252,6 +253,37 @@ def test_assembly_failure_makes_the_result_unsuccessful(dirs):
     assert all(o.status is ModuleStatus.BUILT for o in result.outcomes)
     assert result.assembly_passed is False
     assert result.success is False
+
+
+def test_module_outcome_records_learned_bullet_count(dirs):
+    root, src, tests = dirs
+    plan = _plan(ModuleSpec("db", "the db module"))
+    result = _builder(dirs, architect=FakeArchitect(), builder=FakeBuilder()).build(
+        plan, root, src, tests
+    )
+    assert result.outcomes[0].learned == 2
+    assert result.outcomes[0].to_dict()["learned"] == 2
+
+
+def test_learn_is_wired_when_a_playbook_id_is_given():
+    pb = ProjectBuilder(llm_client=object(), playbook_id="test_proj_33_learn_wire")
+    assert pb._reflector is not None
+    assert pb._curator is not None
+    assert pb._playbook_manager is not None
+
+
+def test_no_learn_flag_loads_the_playbook_but_no_reflector():
+    pb = ProjectBuilder(
+        llm_client=object(), playbook_id="test_proj_33_skip", skip_learn=True
+    )
+    assert pb._reflector is None and pb._curator is None
+    assert pb._playbook_manager is not None  # still read prior bullets
+
+
+def test_no_playbook_id_means_no_learn_machinery():
+    pb = ProjectBuilder(llm_client=object())
+    assert pb._reflector is None
+    assert pb._playbook_manager is None
 
 
 def test_emits_project_build_completed_audit_event(dirs, tmp_path):

@@ -300,3 +300,18 @@ class TestGenerateModuleContractReAsks:
         assert result.contract is None
         assert "inconsistent contract" in result.error
         assert "add_node()" in result.error
+
+    def test_prior_lessons_are_prepended_to_the_architect_prompt(self):
+        from types import SimpleNamespace
+
+        arch = self._architect(self._json(calls_helper=False))
+        arch._playbook_manager = SimpleNamespace(
+            get_section_bullets=lambda pid, section: [
+                SimpleNamespace(content="import upstream modules, never reimplement them")
+            ]
+        )
+        arch._playbook_id = "proj_pb"
+        arch.generate_module_contract("build a graph")
+        sent = arch._llm.generate.call_args_list[0][0][0]
+        assert "PRIOR LESSONS" in sent
+        assert "import upstream modules" in sent

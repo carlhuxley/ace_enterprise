@@ -24,6 +24,8 @@ def _args(**overrides):
         "resume": False,
         "keep_going": False,
         "verbose": False,
+        "playbook_id": None,
+        "no_learn": True,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
