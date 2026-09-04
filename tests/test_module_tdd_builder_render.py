@@ -8,7 +8,7 @@ module (no stale `import *` copy). See #25.
 import ast
 
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
-from src.contracts.module_tdd_builder import render_integration_tests
+from src.contracts.module_tdd_builder import _clean_block, render_integration_tests
 
 
 def _contract(**overrides) -> ModuleContract:
@@ -105,6 +105,49 @@ def test_dep_module_public_symbols_are_imported():
     ast.parse(src)
     assert "import counter as _module" in src
     assert "from dag_graph import add_edge, has_cycle" in src
+
+
+def test_a_multiline_try_except_step_keeps_its_indentation():
+    # the observed Haiku failure: per-line stripping turned a valid try/except
+    # into `try:` directly followed by an unindented statement (#37)
+    src = render_integration_tests(
+        _contract(
+            integration_tests=[
+                IntegrationTest(
+                    "handles_missing_key",
+                    "_count = 0",
+                    ["try:\n    x = {}['missing']\nexcept KeyError:\n    x = None",
+                     "increment()"],
+                    "x is None",
+                ),
+            ]
+        ),
+        "counter",
+    )
+    ast.parse(src)  # must not raise -- the try/except must still be valid
+    assert "pytest.fail" not in src  # confirms it didn't hit the parse-failure fallback
+
+
+def test_clean_block_preserves_a_multiline_construct_that_parses_standalone():
+    block = "try:\n    x = 1\nexcept ValueError:\n    x = 0"
+    assert _clean_block(block) == block
+
+
+def test_clean_block_falls_back_to_per_line_strip_when_dedent_alone_does_not_parse():
+    # inconsistent noise-whitespace across otherwise-flat statements: dedent
+    # can't fix this (no single common prefix makes it valid), so the old
+    # forgiving per-line strip still applies
+    block = "  x = 1\ny = 2"
+    assert _clean_block(block) == "x = 1\ny = 2"
+
+
+def test_clean_block_strips_a_single_noisy_line_like_before():
+    assert _clean_block("   add_edge('a', 'b')   ") == "add_edge('a', 'b')"
+
+
+def test_clean_block_empty_input_yields_empty_string():
+    assert _clean_block("") == ""
+    assert _clean_block("   \n  ") == ""
 
 
 def test_unparseable_step_is_left_as_is_and_still_valid_module():

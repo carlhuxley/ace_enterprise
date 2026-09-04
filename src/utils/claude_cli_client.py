@@ -94,7 +94,13 @@ _NO_TOOLS_SYSTEM_PROMPT = (
     "nothing else."
 )
 
-_MAX_ATTEMPTS = 3
+# The "bare exit 1, empty stderr under sustained load" failure class documented
+# above has been observed to hit 2+ consecutive calls back to back, each
+# exhausting the old 3-attempt / flat-3s budget outright (issue #38). One more
+# attempt plus a backoff schedule (3s/6s/12s, not three closely-spaced
+# identical attempts) gives that condition more room to clear — retrying costs
+# seconds, not retrying costs the rest of a run.
+_MAX_ATTEMPTS = 4
 _RETRY_DELAY_SECONDS = 3.0
 
 
@@ -158,17 +164,20 @@ class ClaudeCliClient:
             else:
                 if result.returncode == 0:
                     break
-                last_error = RuntimeError(
-                    f"claude CLI error (exit {result.returncode}): {result.stderr.strip()}"
-                )
+                # stderr is empty for the "bare exit 1 under sustained load"
+                # class (#38) -- fall back to stdout, then an explicit marker,
+                # so a failure is debuggable instead of a bare "(exit 1): ".
+                detail = result.stderr.strip() or result.stdout.strip() or "<no output>"
+                last_error = RuntimeError(f"claude CLI error (exit {result.returncode}): {detail}")
                 result = None
 
             if attempt < _MAX_ATTEMPTS:
+                delay = _RETRY_DELAY_SECONDS * (2 ** (attempt - 1))
                 logger.warning(
                     f"claude CLI call failed (attempt {attempt}/{_MAX_ATTEMPTS}): "
-                    f"{last_error} -- retrying"
+                    f"{last_error} -- retrying in {delay:.0f}s"
                 )
-                time.sleep(_RETRY_DELAY_SECONDS)
+                time.sleep(delay)
 
         if result is None:
             raise RuntimeError(
