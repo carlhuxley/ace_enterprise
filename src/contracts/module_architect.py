@@ -142,10 +142,15 @@ def check_contract_consistency(
     run before ModuleTDDBuilder so a doomed contract fails fast with a useful
     message instead of after a full (repair-looped) build.
 
-    Catches: setup/steps that don't parse, and calls to names that aren't a
+    Catches: setup/steps that don't parse, calls to names that aren't a
     module function, an already-built dependency, a stdlib module, a builtin,
     or a name bound within the test itself (the `manifest_io calls add_node`
-    class of failure). Returns a list of problems; empty means OK.
+    class of failure); and `import`/`from ... import ...` statements naming a
+    module that isn't this module, an already-built dependency, or the stdlib
+    (the `from dag_manifest import add_node` hallucinated-module class of
+    failure, issue #35 — unlike a bare call this can't be fixed by the
+    module-code repair loop, since the bad reference lives in the fixed test
+    step). Returns a list of problems; empty means OK.
     """
     problems: list[str] = []
     known = {f.name for f in contract.functions}
@@ -154,6 +159,10 @@ def check_contract_consistency(
     if context:
         known |= {f.name for f in context.existing_functions}
     allowed = known | _BUILTIN_NAMES | _STDLIB_NAMES | _HARNESS_NAMES
+
+    known_modules = {contract.name}
+    if context:
+        known_modules |= {f.module for f in context.existing_functions if f.module}
 
     for t in contract.integration_tests:
         script = "\n".join(
@@ -182,6 +191,21 @@ def check_contract_consistency(
                     problems.append(
                         f"{t.name}: calls {name}() which is not a function of this "
                         f"module, {where}, or a name bound in the test"
+                    )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    mod = alias.name.partition(".")[0]
+                    if mod not in known_modules and mod not in _STDLIB_NAMES:
+                        problems.append(
+                            f"{t.name}: imports {mod!r}, which is not this module, "
+                            f"an already-built dependency, or the stdlib"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                mod = (node.module or "").partition(".")[0]
+                if mod and mod not in known_modules and mod not in _STDLIB_NAMES:
+                    problems.append(
+                        f"{t.name}: imports from {mod!r}, which is not this module, "
+                        f"an already-built dependency, or the stdlib"
                     )
 
     # A module must not re-declare a symbol an upstream dependency already
