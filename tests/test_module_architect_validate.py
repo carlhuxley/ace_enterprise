@@ -261,6 +261,55 @@ class TestCheckContractConsistency:
         )
         assert check_contract_consistency(c) == []
 
+    def test_flags_an_import_of_a_module_that_does_not_exist(self):
+        # the observed Haiku failure: a hallucinated module name in a test step,
+        # neither this module ('graph') nor an already-built dependency (#35)
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest(
+                    "t", "from dag_manifest import add_node", ["add_edge('a', 'b')"], "True",
+                ),
+            ]
+        )
+        problems = check_contract_consistency(c)
+        assert any("dag_manifest" in p for p in problems)
+
+    def test_flags_a_bare_import_of_an_undefined_module(self):
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest("t", "import dag_manifest", ["add_edge('a', 'b')"], "True"),
+            ]
+        )
+        problems = check_contract_consistency(c)
+        assert any("dag_manifest" in p for p in problems)
+
+    def test_accepts_an_import_from_an_already_built_dependency(self):
+        ctx = CodebaseContext(
+            existing_functions=[ExistingFunction("has_cycle", "()", "", "cycle_detector")]
+        )
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest(
+                    "t", "_edges.clear()",
+                    ["from cycle_detector import has_cycle", "c = has_cycle()", "add_edge('a', 'b')"],
+                    "c is False",
+                ),
+            ]
+        )
+        assert check_contract_consistency(c, ctx) == []
+
+    def test_accepts_a_stdlib_import(self):
+        c = _consistent_contract(
+            integration_tests=[
+                IntegrationTest(
+                    "t", "_edges.clear()",
+                    ["import json", "add_edge('a', 'b')", "s = json.dumps({})"],
+                    "s == '{}'",
+                ),
+            ]
+        )
+        assert check_contract_consistency(c) == []
+
     def test_flags_a_module_function_that_duplicates_an_upstream_one(self):
         # 'add_edge' is already provided by the built dag_graph module — this
         # contract should import it, not put it back on its own surface (#28).
