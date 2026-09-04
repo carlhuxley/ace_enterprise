@@ -379,23 +379,28 @@ class ModuleArchitect:
         model_id: str = "unknown",
         *,
         playbook_manager: Any = None,
+        playbook_id: str | None = None,
     ):
         self._llm = llm_client
         self._audit = audit_client
         self._model_id = model_id
         self._playbook_manager = playbook_manager
+        self._playbook_id = playbook_id
 
     _MAX_PRIOR_BULLETS = 10
 
     def _lessons_block(self) -> str:
-        """A '## PRIOR LESSONS' preamble from the playbook, or '' (issue #33)."""
-        if self._playbook_manager is None:
+        """A '## PRIOR LESSONS' preamble from this project's playbook, or ''
+        (issue #33). Scoped to `self._playbook_id`."""
+        if self._playbook_manager is None or not self._playbook_id:
             return ""
         try:
-            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules")
+            bullets = self._playbook_manager.get_section_bullets(
+                self._playbook_id, "strategies_and_hard_rules"
+            )
         except Exception:  # noqa: BLE001 -- retrieval is best-effort
             return ""
-        bullets = list(bullets or [])[-self._MAX_PRIOR_BULLETS :]
+        bullets = [b.content for b in bullets][-self._MAX_PRIOR_BULLETS :]
         if not bullets:
             return ""
         return (

@@ -135,6 +135,7 @@ class ProjectBuilder:
         return ModuleArchitect(
             self._llm, self._audit, self._model_id,
             playbook_manager=self._playbook_manager,
+            playbook_id=self._playbook_id,
         )
 
     def _default_builder(self):

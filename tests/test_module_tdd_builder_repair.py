@@ -227,7 +227,12 @@ def test_prior_lessons_reach_the_function_build_prompt():
     )
     b = ModuleTDDBuilder(
         llm_client=llm,
-        playbook_manager=SimpleNamespace(get_bullets=lambda s: ["always foo the bar first"]),
+        playbook_manager=SimpleNamespace(
+            get_section_bullets=lambda pid, s: [
+                SimpleNamespace(content="always foo the bar first")
+            ]
+        ),
+        playbook_id="proj_pb",
     )
     assert b._prior_lessons() == ["always foo the bar first"]
     b._build_function(

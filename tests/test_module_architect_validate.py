@@ -306,8 +306,11 @@ class TestGenerateModuleContractReAsks:
 
         arch = self._architect(self._json(calls_helper=False))
         arch._playbook_manager = SimpleNamespace(
-            get_bullets=lambda section: ["import upstream modules, never reimplement them"]
+            get_section_bullets=lambda pid, section: [
+                SimpleNamespace(content="import upstream modules, never reimplement them")
+            ]
         )
+        arch._playbook_id = "proj_pb"
         arch.generate_module_contract("build a graph")
         sent = arch._llm.generate.call_args_list[0][0][0]
         assert "PRIOR LESSONS" in sent

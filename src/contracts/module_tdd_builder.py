@@ -144,14 +144,18 @@ class ModuleTDDBuilder:
     _MAX_PRIOR_BULLETS = 12
 
     def _prior_lessons(self) -> list[str]:
-        """Bullet strings from the playbook to seed the build prompts (#33)."""
-        if self._playbook_manager is None:
+        """Bullet strings from *this project's* playbook to seed the build
+        prompts (#33). Scoped to `self._playbook_id` — `get_bullets()` without
+        an id aggregates across every playbook on disk."""
+        if self._playbook_manager is None or not self._playbook_id:
             return []
         try:
-            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules")
+            bullets = self._playbook_manager.get_section_bullets(
+                self._playbook_id, "strategies_and_hard_rules"
+            )
         except Exception:  # noqa: BLE001 -- retrieval is best-effort
             return []
-        return list(bullets or [])[-self._MAX_PRIOR_BULLETS :]
+        return [b.content for b in bullets][-self._MAX_PRIOR_BULLETS :]
 
     def build_module(
         self,
