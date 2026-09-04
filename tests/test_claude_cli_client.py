@@ -201,7 +201,37 @@ class TestRetryHardening:
             run.side_effect = FileNotFoundError(2, "No such file or directory", "claude")
             with pytest.raises(RuntimeError, match="claude CLI failed after"):
                 client.generate(prompt="hi")
-        assert run.call_count == 3  # _MAX_ATTEMPTS, no more
+        assert run.call_count == 4  # _MAX_ATTEMPTS, no more
+
+    def test_stdout_used_when_stderr_is_empty_on_failure(self):
+        # the observed live failure: exit 1, completely empty stderr -- the
+        # error must carry *some* diagnostic content rather than a bare
+        # "(exit 1): " (#38)
+        client = ClaudeCliClient()
+        with patch("subprocess.run") as run, patch("src.utils.claude_cli_client.time.sleep"):
+            run.return_value = _fake_completed_process(
+                returncode=1, stderr="", stdout="permission denied by hook"
+            )
+            with pytest.raises(RuntimeError, match="permission denied by hook"):
+                client.generate(prompt="hi")
+
+    def test_both_stdout_and_stderr_empty_still_gives_a_readable_message(self):
+        client = ClaudeCliClient()
+        with patch("subprocess.run") as run, patch("src.utils.claude_cli_client.time.sleep"):
+            run.return_value = _fake_completed_process(returncode=1, stderr="", stdout="")
+            with pytest.raises(RuntimeError, match="<no output>"):
+                client.generate(prompt="hi")
+
+    def test_retry_delay_backs_off_between_attempts(self):
+        # 3s / 6s / 12s, not three closely-spaced identical delays -- the
+        # documented "bare exit 1 under sustained load" class has been
+        # observed to exhaust a flat-delay budget outright (#38)
+        client = ClaudeCliClient()
+        with patch("subprocess.run") as run, patch("src.utils.claude_cli_client.time.sleep") as sleep:
+            run.side_effect = FileNotFoundError(2, "No such file or directory", "claude")
+            with pytest.raises(RuntimeError):
+                client.generate(prompt="hi")
+        assert [c.args[0] for c in sleep.call_args_list] == [3.0, 6.0, 12.0]
 
     def test_timeout_is_not_retried(self):
         """A slow/hung call needs a different response than "try again

@@ -20,6 +20,7 @@ import ast
 import logging
 import os
 import re
+import textwrap
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -672,6 +673,31 @@ def create_tdd_builder_from_config(
     )
 
 
+def _clean_block(block: str) -> str:
+    """One `setup`/`steps` field, ready to splice into a rendered test body.
+
+    Most fields are one or more flat statements the model sometimes pads
+    with stray leading whitespace -- historically handled by stripping every
+    line independently. But a field can also be a genuine multi-line
+    construct (`try/except`, `for`, `with`) whose indentation is
+    load-bearing; per-line stripping destroys those (issue #37 -- a `try:`
+    ends up directly followed by an unindented statement, a SyntaxError).
+
+    Dedent the field as a whole first (preserving relative indentation) and
+    use it if that alone parses as valid Python; only fall back to the old
+    per-line strip for this field if it doesn't.
+    """
+    if not block or not block.strip():
+        return ""
+    dedented = textwrap.dedent(block).strip("\n")
+    dedented = "\n".join(line.rstrip() for line in dedented.split("\n"))
+    try:
+        ast.parse(dedented)
+    except SyntaxError:
+        return "\n".join(s.strip() for s in block.splitlines() if s.strip())
+    return dedented
+
+
 def _safe_test_name(name: str) -> str:
     slug = re.sub(r"\W+", "_", name.strip().lower()).strip("_") or "case"
     return slug if slug.startswith("test_") else f"test_{slug}"
@@ -883,8 +909,7 @@ def render_integration_tests(
     blocks: list[str] = []
     for t in contract.integration_tests:
         raw = "\n".join(
-            [s.strip() for s in (t.setup or "").splitlines() if s.strip()]
-            + [s.strip() for s in t.steps if s.strip()]
+            b for b in (_clean_block(t.setup or ""), *(_clean_block(s) for s in t.steps)) if b
         )
         fn = _safe_test_name(t.name)
         try:
