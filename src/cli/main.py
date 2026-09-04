@@ -92,6 +92,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     proj.add_argument(
+        "--playbook-id",
+        default=None,
+        help="Playbook to read prior lessons from and write new ones to "
+             "(default: project directory name)",
+    )
+    proj.add_argument(
+        "--no-learn",
+        action="store_true",
+        help="Skip the LEARN phase — no Reflector/Curator, no playbook writes",
+    )
+    proj.add_argument(
         "--plan-only", action="store_true",
         help="Print the module plan and exit without building",
     )
@@ -287,6 +298,8 @@ def cmd_project(args: argparse.Namespace) -> int:
         print(f"error: project directory not found: {project_root}", file=sys.stderr)
         return 1
     config = ProjectConfig.load(project_root)
+    if args.playbook_id:
+        config.playbook_id = args.playbook_id
 
     llm = llm_client_from_ref(args.model) if args.model else default_llm_client()
     model_id = f"{llm.provider}/{llm.model}" if getattr(llm, "provider", None) else llm.model
@@ -301,6 +314,8 @@ def cmd_project(args: argparse.Namespace) -> int:
 
     print(f"Project:    {project_root}")
     print(f"Spec:       {spec_path}")
+    if not args.no_learn:
+        print(f"Playbook:   {config.playbook_id}")
     print()
     print(plan.render())
     print()
@@ -311,7 +326,10 @@ def cmd_project(args: argparse.Namespace) -> int:
         print("aborted.")
         return 1
 
-    builder = ProjectBuilder(llm, audit_client=audit, model_id=model_id)
+    builder = ProjectBuilder(
+        llm, audit_client=audit, model_id=model_id,
+        playbook_id=config.playbook_id, skip_learn=args.no_learn,
+    )
     result = builder.build(
         plan, project_root, config.src_dir, config.test_dir,
         resume=args.resume, stop_on_failure=not args.keep_going,
@@ -320,6 +338,8 @@ def cmd_project(args: argparse.Namespace) -> int:
     print("\nModules:")
     for o in result.outcomes:
         line = f"  {_PROJECT_STATUS_GLYPH.get(o.status.value, '?')} {o.name}  ({o.cycles} cycle(s))"
+        if getattr(o, "learned", 0):
+            line += f", +{o.learned} bullet(s)"
         if o.error:
             line += f" — {o.error}"
         print(line)
@@ -328,6 +348,10 @@ def cmd_project(args: argparse.Namespace) -> int:
         print(f"\nAssembly suite: {'passed' if result.assembly_passed else 'FAILED'}")
         for failure in result.assembly_failures:
             print(f"  {failure}")
+
+    total_learned = sum(getattr(o, "learned", 0) for o in result.outcomes)
+    if total_learned:
+        print(f"\nLearned {total_learned} bullet(s) → playbook '{config.playbook_id}'")
 
     return 0 if result.success else 1
 

@@ -42,6 +42,7 @@ class ModuleOutcome:
     contract_id: str | None = None
     cycles: int = 0
     error: str | None = None
+    learned: int = 0  # delta bullets written by the LEARN pass (#33)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +51,7 @@ class ModuleOutcome:
             "contract_id": self.contract_id,
             "cycles": self.cycles,
             "error": self.error,
+            "learned": self.learned,
         }
 
 
@@ -87,6 +89,8 @@ class ProjectBuilder:
         architect_factory=None,
         builder_factory=None,
         assembler=None,
+        playbook_id: str | None = None,
+        skip_learn: bool = False,
     ) -> None:
         self._llm = llm_client
         self._audit = audit_client
@@ -95,16 +99,54 @@ class ProjectBuilder:
         self._make_architect = architect_factory or self._default_architect
         self._make_builder = builder_factory or self._default_builder
         self._assemble = assembler or _run_assembly
+        # LEARN wiring (#33): one shared project playbook; a Reflector + Curator
+        # unless the caller opted out. Bullets written by each module's build
+        # are visible to the modules that follow it and to the next run.
+        self._playbook_id = playbook_id
+        self._playbook_manager = None
+        self._reflector = None
+        self._curator = None
+        if playbook_id and not skip_learn:
+            try:
+                from src.core.curator.module import Curator
+                from src.core.reflector.module import Reflector
+                from src.playbook.manager import PlaybookManager
+
+                self._playbook_manager = PlaybookManager()
+                self._playbook_manager.get_or_create_playbook(playbook_id)
+                self._reflector = Reflector(llm_client=self._llm)
+                self._curator = Curator(
+                    playbook_manager=self._playbook_manager, llm_client=self._llm
+                )
+            except Exception as exc:  # noqa: BLE001 -- learning is optional
+                logger.warning("ProjectBuilder: LEARN wiring unavailable: %s", exc)
+        elif playbook_id and skip_learn:
+            try:
+                from src.playbook.manager import PlaybookManager
+
+                self._playbook_manager = PlaybookManager()
+                self._playbook_manager.get_or_create_playbook(playbook_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ProjectBuilder: playbook load failed: %s", exc)
 
     def _default_architect(self):
         from src.contracts.module_architect import ModuleArchitect
 
-        return ModuleArchitect(self._llm, self._audit, self._model_id)
+        return ModuleArchitect(
+            self._llm, self._audit, self._model_id,
+            playbook_manager=self._playbook_manager,
+        )
 
     def _default_builder(self):
         from src.contracts.module_tdd_builder import ModuleTDDBuilder
 
-        return ModuleTDDBuilder(self._llm, self._audit, self._model_id)
+        return ModuleTDDBuilder(
+            self._llm, self._audit, self._model_id,
+            reflector=self._reflector,
+            curator=self._curator,
+            playbook_manager=self._playbook_manager,
+            playbook_id=self._playbook_id,
+        )
 
     # ------------------------------------------------------------------
 
@@ -229,13 +271,16 @@ class ProjectBuilder:
             render_integration_tests(contract, module.name, dep_modules=dep_modules)
         )
 
+        learned = len(getattr(build, "learned_bullets", []) or [])
         if not build.success:
             return ModuleOutcome(
                 module.name, ModuleStatus.FAILED,
                 contract_id=contract.id, cycles=build.total_cycles, error=build.error,
+                learned=learned,
             )
         return ModuleOutcome(
-            module.name, ModuleStatus.BUILT, contract_id=contract.id, cycles=build.total_cycles,
+            module.name, ModuleStatus.BUILT, contract_id=contract.id,
+            cycles=build.total_cycles, learned=learned,
         )
 
     def _emit(self, plan: ProjectPlan, result: ProjectBuildResult, session_id: str | None) -> None:

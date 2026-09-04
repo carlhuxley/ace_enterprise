@@ -21,6 +21,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -376,10 +377,32 @@ class ModuleArchitect:
         llm_client: LLMClient,
         audit_client: LocalAuditClient | None = None,
         model_id: str = "unknown",
+        *,
+        playbook_manager: Any = None,
     ):
         self._llm = llm_client
         self._audit = audit_client
         self._model_id = model_id
+        self._playbook_manager = playbook_manager
+
+    _MAX_PRIOR_BULLETS = 10
+
+    def _lessons_block(self) -> str:
+        """A '## PRIOR LESSONS' preamble from the playbook, or '' (issue #33)."""
+        if self._playbook_manager is None:
+            return ""
+        try:
+            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules")
+        except Exception:  # noqa: BLE001 -- retrieval is best-effort
+            return ""
+        bullets = list(bullets or [])[-self._MAX_PRIOR_BULLETS :]
+        if not bullets:
+            return ""
+        return (
+            "## PRIOR LESSONS (from earlier modules / runs — respect these)\n\n"
+            + "\n".join(f"- {b}" for b in bullets)
+            + "\n\n"
+        )
 
     def generate_module_contract(
         self,
@@ -411,6 +434,7 @@ class ModuleArchitect:
                 )
             else:
                 prompt = MODULE_ARCHITECT_PROMPT.format(requirement=requirement)
+            prompt = self._lessons_block() + prompt
 
             result = self._llm.generate(prompt)
             contract = self._parse_module(result["content"])

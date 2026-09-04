@@ -151,3 +151,87 @@ def test_repair_loop_stops_if_repair_returns_unchanged_code():
     assert result.success is False
     # repair returned the same module -> loop breaks, no 2nd call
     assert repair.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# LEARN pass (#33)
+# ---------------------------------------------------------------------------
+
+class _FakeReflector:
+    def reflect(self, task, gen, env):
+        self.task, self.gen, self.env = task, gen, env
+        return "reflection"
+
+
+class _FakeCurator:
+    def __init__(self):
+        self.applied = []
+
+    def curate(self, reflector_output, playbook_id, task_context=None):
+        self.task_context = task_context
+        return SimpleNamespace(
+            delta_bullets=[SimpleNamespace(section="strategies_and_hard_rules")]
+        )
+
+    def apply_updates(self, playbook_id, output):
+        self.applied.append((playbook_id, output))
+
+
+def _learning_builder(**kw):
+    b = _builder(**kw)
+    b._reflector, b._curator = _FakeReflector(), _FakeCurator()
+    b._playbook_id = "proj_pb"
+    return b
+
+
+def test_learn_pass_writes_bullets_and_populates_the_result():
+    b = _learning_builder()
+    with patch.object(b, "_run_integration_tests", return_value=({"bumps": True}, [])):
+        result = b.build_module(_contract())
+    assert len(result.learned_bullets) == 1
+    assert b._curator.applied and b._curator.applied[0][0] == "proj_pb"
+    assert b._reflector.env.result == "SUCCESS"
+
+
+def test_learn_pass_carries_the_failure_signal():
+    b = _learning_builder(max_repair_attempts=0)
+    with patch.object(b, "_run_integration_tests",
+                      return_value=({"bumps": False}, ["bumps: boom"])):
+        b.build_module(_contract())
+    assert b._reflector.env.result == "FAILED"
+    assert "boom" in b._reflector.env.actual
+
+
+def test_no_learn_pass_without_reflector_or_playbook():
+    b = _builder()  # no reflector / curator / playbook_id
+    with patch.object(b, "_run_integration_tests", return_value=({"bumps": True}, [])):
+        result = b.build_module(_contract())
+    assert result.learned_bullets == []
+
+
+def test_learn_pass_never_fails_the_build():
+    b = _learning_builder()
+    b._reflector.reflect = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("reflect boom"))
+    with patch.object(b, "_run_integration_tests", return_value=({"bumps": True}, [])):
+        result = b.build_module(_contract())
+    assert result.success is True
+    assert result.learned_bullets == []
+
+
+def test_prior_lessons_reach_the_function_build_prompt():
+    prompts: list[str] = []
+    llm = SimpleNamespace(
+        model="x",
+        generate=lambda p, **k: prompts.append(p)
+        or {"content": "def bump():\n    return 1\n", "actual_model": "x", "provider": "y"},
+    )
+    b = ModuleTDDBuilder(
+        llm_client=llm,
+        playbook_manager=SimpleNamespace(get_bullets=lambda s: ["always foo the bar first"]),
+    )
+    assert b._prior_lessons() == ["always foo the bar first"]
+    b._build_function(
+        FunctionSpec("bump", "() -> int", "d"), "_n = 0", [], "",
+        prior_lessons=["always foo the bar first"],
+    )
+    assert any("always foo the bar first" in p for p in prompts)

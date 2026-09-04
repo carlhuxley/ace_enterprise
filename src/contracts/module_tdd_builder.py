@@ -2,14 +2,18 @@
 
 This combines:
 1. ModuleArchitect's contract (what to build)
-2. Kent Beck-style TDD methodology (how to build) -- RED/GREEN/REFACTOR/LEARN
+2. Per-function generate → static-validate iteration
+3. A whole-module integration-repair loop
 
 Flow:
 1. Take ModuleContract from architect
-2. For each function, run TDD cycle (RED → GREEN → REFACTOR → LEARN)
-3. Assemble complete module
-4. Run integration tests as final validation
-5. Learn patterns on success/failure
+2. Build each function in isolation (generate → _validate_function)
+3. Assemble the complete module
+4. Run the rendered integration tests as final validation, repairing the
+   whole module against failures up to `max_repair_attempts` times
+5. If a Reflector + Curator are wired (issue #33), run one LEARN pass over the
+   finished ModuleBuildResult and write delta bullets to the playbook so a
+   later module / a re-run starts from those lessons
 """
 
 import ast
@@ -18,6 +22,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -59,6 +64,7 @@ class ModuleBuildResult:
     total_cycles: int
     elapsed_seconds: float
     error: str | None = None
+    learned_bullets: list = field(default_factory=list)  # delta bullets from the LEARN pass
 
 
 def function_spec_to_requirement(func: FunctionSpec, shared_state: str, hints: list[str]) -> str:
@@ -105,6 +111,11 @@ class ModuleTDDBuilder:
         model_id: str = "unknown",
         max_attempts_per_function: int = 3,
         max_repair_attempts: int = 2,
+        *,
+        reflector: Any = None,
+        curator: Any = None,
+        playbook_manager: Any = None,
+        playbook_id: str | None = None,
     ):
         """Initialize the module TDD builder.
 
@@ -116,12 +127,31 @@ class ModuleTDDBuilder:
             max_repair_attempts: Max whole-module repair passes after the
                 integration tests first run (functions are built in isolation,
                 so integration failures need a fix-it loop that sees them)
+            reflector, curator, playbook_manager, playbook_id: wire all four to
+                enable the LEARN pass (issue #33) — prior bullets are fed into
+                the build prompts and a delta is written back after each module.
         """
         self._llm = llm_client
         self._audit = audit_client
         self._model_id = model_id
         self._max_attempts = max_attempts_per_function
         self._max_repair_attempts = max_repair_attempts
+        self._reflector = reflector
+        self._curator = curator
+        self._playbook_manager = playbook_manager
+        self._playbook_id = playbook_id
+
+    _MAX_PRIOR_BULLETS = 12
+
+    def _prior_lessons(self) -> list[str]:
+        """Bullet strings from the playbook to seed the build prompts (#33)."""
+        if self._playbook_manager is None:
+            return []
+        try:
+            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules")
+        except Exception:  # noqa: BLE001 -- retrieval is best-effort
+            return []
+        return list(bullets or [])[-self._MAX_PRIOR_BULLETS :]
 
     def build_module(
         self,
@@ -147,6 +177,7 @@ class ModuleTDDBuilder:
         function_results: list[FunctionBuildResult] = []
         total_cycles = 0
         dep_import_lines = _dep_import_lines(dep_modules)
+        prior_lessons = self._prior_lessons()
 
         # Track accumulated module code
         module_code = f"# {contract.name}\n# {contract.description}\n\n"
@@ -163,6 +194,7 @@ class ModuleTDDBuilder:
                 existing_code=module_code,
                 session_id=session_id,
                 dep_import_lines=dep_import_lines,
+                prior_lessons=prior_lessons,
             )
 
             function_results.append(result)
@@ -222,6 +254,7 @@ class ModuleTDDBuilder:
             repaired = self._repair_module(
                 contract, module_code, integration_failures,
                 dep_import_lines=dep_import_lines,
+                prior_lessons=prior_lessons,
             )
             if repaired is None or repaired.strip() == module_code.strip():
                 break
@@ -262,6 +295,13 @@ class ModuleTDDBuilder:
                 session_id=session_id,
             )
 
+        # LEARN pass — one reflection over the finished module (#33). Both a
+        # clean pass and a repaired/failed module carry reusable signal.
+        learned = self._learn(
+            contract, module_code, integration_failures,
+            passed=all_integration_passed, repairs=repair,
+        )
+
         return ModuleBuildResult(
             contract_id=contract.id,
             module_code=module_code,
@@ -271,7 +311,69 @@ class ModuleTDDBuilder:
             total_cycles=total_cycles,
             elapsed_seconds=elapsed,
             error=error_msg,
+            learned_bullets=learned,
         )
+
+    # ------------------------------------------------------------------
+    # Learning loop (Reflector → Curator → playbook write) — mirrors
+    # tdd_cycle_runner._learn, one pass per module (#33).
+    # ------------------------------------------------------------------
+
+    def _learn(
+        self, contract: ModuleContract, module_code: str, failures: list[str],
+        *, passed: bool, repairs: int,
+    ) -> list:
+        if self._reflector is None or self._curator is None or not self._playbook_id:
+            return []
+        from src.storage.schemas import EnvironmentFeedback, GeneratorOutput, TaskInput
+
+        task = TaskInput(
+            id=f"module_{contract.name}_{contract.id}",
+            query=f"Build the '{contract.name}' module: {contract.description}",
+            type="module_tdd",
+        )
+        gen_output = GeneratorOutput(
+            trajectory=(
+                f"# module built via {repairs} integration-repair pass(es)\n"
+                + render_integration_tests(contract, contract.name)
+            ),
+            solution=module_code,
+            bullets_used=[],
+            bullet_feedback={},
+            latency_ms=0,
+            tokens_used=0,
+        )
+        env_feedback = EnvironmentFeedback(
+            result="SUCCESS" if passed else "FAILED",
+            actual="all integration tests passed" if passed else "\n".join(failures[:5]),
+            feedback=None if passed else "; ".join(failures[:3]),
+        )
+        try:
+            reflector_output = self._reflector.reflect(task, gen_output, env_feedback)
+            curator_output = self._curator.curate(
+                reflector_output, self._playbook_id,
+                task_context={"module": contract.name, "repairs": repairs, "passed": passed},
+            )
+            self._curator.apply_updates(self._playbook_id, curator_output)
+            logger.info(
+                "ModuleTDDBuilder: wrote %d bullet(s) to playbook '%s' after building '%s'",
+                len(curator_output.delta_bullets), self._playbook_id, contract.name,
+            )
+            if self._audit is not None:
+                for bullet in curator_output.delta_bullets:
+                    try:
+                        self._audit.emit_simple(
+                            event_type=AuditEventType.PATTERN_LEARNED,
+                            actor_id=self._model_id,
+                            payload={"section": bullet.section, "module": contract.name},
+                            playbook_id=self._playbook_id,
+                        )
+                    except Exception:  # noqa: BLE001 -- audit is best-effort
+                        pass
+            return list(curator_output.delta_bullets)
+        except Exception as exc:  # noqa: BLE001 -- learning must never fail a build
+            logger.warning("ModuleTDDBuilder: LEARN pass failed: %s", exc)
+            return []
 
     def _build_function(
         self,
@@ -281,6 +383,7 @@ class ModuleTDDBuilder:
         existing_code: str,
         session_id: str | None = None,
         dep_import_lines: list[str] | None = None,
+        prior_lessons: list[str] | None = None,
     ) -> FunctionBuildResult:
         """Build a single function using TDD-style iteration.
 
@@ -307,6 +410,12 @@ class ModuleTDDBuilder:
                 + "\n".join(dep_import_lines)
                 + "\n```"
             )
+        lessons_block = ""
+        if prior_lessons:
+            lessons_block = (
+                "\n\n**Lessons from earlier builds — apply these:**\n"
+                + "\n".join(f"- {b}" for b in prior_lessons)
+            )
 
         prompt = f"""You are implementing ONE piece of a Python module.
 
@@ -323,7 +432,7 @@ def {func.name}{func.signature}:
 ```
 
 **Implementation hints:**
-{chr(10).join(f"- {h}" for h in hints) if hints else "None"}{dep_block}
+{chr(10).join(f"- {h}" for h in hints) if hints else "None"}{dep_block}{lessons_block}
 
 **Rules:**
 1. Output ONLY this one definition. It is usually a `def`; if `{func.name}`
@@ -435,12 +544,20 @@ Fix the implementation:
     def _repair_module(
         self, contract: ModuleContract, module_code: str, failures: list[str],
         *, dep_import_lines: list[str] | None = None,
+        prior_lessons: list[str] | None = None,
     ) -> str | None:
         """Ask the LLM to fix the whole module so the integration tests pass.
 
         Returns the repaired module source, or None on failure.
         """
         test_file = render_integration_tests(contract, contract.name)
+        lessons_block = ""
+        if prior_lessons:
+            lessons_block = (
+                "\n# lessons from earlier builds — apply these:\n"
+                + "\n".join(f"# - {b}" for b in prior_lessons)
+                + "\n"
+            )
         dep_block = ""
         if dep_import_lines:
             dep_block = (
@@ -457,7 +574,7 @@ Fix the implementation:
             f"# {contract.name}.py\n```python\n{module_code}\n```\n\n"
             f"# integration tests\n```python\n{test_file}\n```\n\n"
             f"# failures\n" + "\n".join(f"- {f}" for f in failures) + "\n"
-            + dep_block + "\n"
+            + dep_block + lessons_block + "\n"
             "Output ONLY the corrected Python module."
         )
         try:
