@@ -53,6 +53,23 @@ class FakeBuilder:
         )
 
 
+class SiblingCallingBuilder:
+    """Emits `web` code that calls core_fn() regardless of what the plan
+    declared — models the #30 'plan under-specified the DAG' shape."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, set[str]]] = []
+
+    def build_module(self, contract, dep_modules=None):
+        self.calls.append((contract.name, set(dep_modules or {})))
+        code = (
+            "def web_fn():\n    return core_fn() + 1\n"
+            if contract.name == "web"
+            else f"def {contract.name}_fn():\n    return 1\n"
+        )
+        return SimpleNamespace(success=True, module_code=code, total_cycles=1, error=None)
+
+
 def _plan(*modules: ModuleSpec) -> ProjectPlan:
     return ProjectPlan(spec="x", modules=list(modules))
 
@@ -169,6 +186,48 @@ def test_declared_dependency_sources_are_handed_to_the_builder(dirs):
     assert fb.seen_deps[0] == {}                       # db: nothing built yet
     assert set(fb.seen_deps[1]) == {"db"}              # api: db's source only
     assert "db_fn" in fb.seen_deps[1]["db"]
+
+
+def test_undeclared_sibling_call_adds_the_edge_and_rebuilds(dirs):
+    """A module that calls a built sibling it never declared gets the edge
+    added and is rebuilt with that sibling wired in (issue #30)."""
+    root, src, tests = dirs
+    # build_order is lexical (no deps): core, then web. web's code calls core_fn().
+    plan = _plan(
+        ModuleSpec("web", "the web module"),
+        ModuleSpec("core", "the core module"),
+    )
+    fb = SiblingCallingBuilder()
+    result = _builder(dirs, architect=FakeArchitect(), builder=fb).build(plan, root, src, tests)
+
+    web_deps = [deps for name, deps in fb.calls if name == "web"]
+    assert web_deps == [set(), {"core"}]          # built once bare, then rebuilt with core
+    assert all(o.status is ModuleStatus.BUILT for o in result.outcomes)
+
+
+def test_declared_sibling_call_does_not_trigger_a_rebuild(dirs):
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("web", "the web module", depends_on=("core",)),
+        ModuleSpec("core", "the core module"),
+    )
+    fb = SiblingCallingBuilder()
+    _builder(dirs, architect=FakeArchitect(), builder=fb).build(plan, root, src, tests)
+    assert [name for name, _ in fb.calls if name == "web"] == ["web"]   # built once
+
+
+def test_undeclared_sibling_deps_detects_a_bare_call(dirs, tmp_path):
+    from src.cli.project_builder import _undeclared_sibling_deps
+
+    core = tmp_path / "core.py"
+    core.write_text("def core_fn():\n    return 1\n")
+    web = tmp_path / "web.py"
+    web.write_text("def web_fn():\n    return core_fn()\n")
+    spec = ModuleSpec("web", "the web module")
+    missing = _undeclared_sibling_deps(
+        web, spec, {"web": spec, "core": ModuleSpec("core", "c")}, [core]
+    )
+    assert missing == {"core"}
 
 
 def test_preexisting_src_files_are_not_used_as_context(dirs):

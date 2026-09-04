@@ -14,8 +14,9 @@ No generated code executes on the host.
 
 from __future__ import annotations
 
+import ast
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -125,6 +126,7 @@ class ProjectBuilder:
         by_name = {m.name: m for m in plan.modules}
         outcomes: list[ModuleOutcome] = []
         failed: set[str] = set()
+        relinked: set[str] = set()
         stopped_at: int | None = None
         # Only modules produced by THIS run become context for later modules —
         # never pre-existing files in src_dir.
@@ -150,6 +152,26 @@ class ProjectBuilder:
                 continue
 
             outcome = self._build_module(module, built_paths, impl_path, test_path)
+
+            # The plan may have under-specified the DAG: if the generated module
+            # reaches for an already-built sibling it never declared, add that
+            # edge and rebuild once so the dependency-import machinery engages
+            # instead of the model inlining a copy (issue #30).
+            missing = _undeclared_sibling_deps(impl_path, module, by_name, built_paths)
+            if missing and name not in relinked:
+                relinked.add(name)
+                logger.warning(
+                    "%s uses undeclared sibling module(s) %s — adding the "
+                    "dependency edge(s) and rebuilding",
+                    name, ", ".join(sorted(missing)),
+                )
+                module = replace(
+                    module,
+                    depends_on=tuple(dict.fromkeys((*module.depends_on, *sorted(missing)))),
+                )
+                by_name[name] = module
+                outcome = self._build_module(module, built_paths, impl_path, test_path)
+
             outcomes.append(outcome)
             if outcome.status is ModuleStatus.BUILT:
                 built_paths.append(impl_path)
@@ -231,6 +253,53 @@ class ProjectBuilder:
             )
         except Exception:  # noqa: BLE001 -- audit is best-effort
             logger.debug("project-build audit emit failed", exc_info=True)
+
+
+def _undeclared_sibling_deps(
+    impl_path: Path,
+    module: ModuleSpec,
+    by_name: dict[str, ModuleSpec],
+    built_paths: list[Path],
+) -> set[str]:
+    """Already-built sibling modules this one calls into or imports from but
+    never listed in `depends_on` — a plan that under-specified the DAG (#30).
+
+    Only already-built siblings count, so adding the edge and rebuilding can
+    never introduce a cycle.
+    """
+    try:
+        tree = ast.parse(impl_path.read_text())
+    except (OSError, SyntaxError):
+        return set()
+
+    from src.contracts.module_architect import extract_context_from_file
+
+    built_stems = {p.stem: p for p in built_paths if p.stem != module.name}
+    provider: dict[str, str] = {}
+    for stem, path in built_stems.items():
+        try:
+            ctx = extract_context_from_file(str(path))
+        except Exception:  # noqa: BLE001 -- context extraction is best-effort
+            continue
+        for fn in ctx.existing_functions:
+            provider.setdefault(fn.name, stem)
+
+    referenced = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    imported: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            imported |= {a.name.split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            imported.add(n.module.split(".")[0])
+
+    declared = set(module.depends_on)
+    missing = {
+        owner for sym, owner in provider.items()
+        if owner not in declared and sym in referenced
+    }
+    missing |= (imported & set(built_stems) & set(by_name)) - declared
+    missing.discard(module.name)
+    return missing
 
 
 def _context_from_built(built_paths: list[Path]):

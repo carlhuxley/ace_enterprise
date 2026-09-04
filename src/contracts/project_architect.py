@@ -112,7 +112,9 @@ Rules:
 - name: snake_case, becomes <name>.py
 - description: one concrete sentence naming the functions/behaviour this module
   provides (a second model implements the module from this line alone)
-- depends_on: names of modules whose code this one imports/builds on. No cycles.
+- depends_on: names of modules this one imports from or calls into. If the
+  module will use a function that belongs to another module, that other module
+  MUST appear here. No cycles.
 - 2-8 modules. Prefer a few cohesive modules over many tiny ones.
 
 Output ONLY a JSON object, no prose:
