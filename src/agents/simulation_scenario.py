@@ -39,13 +39,27 @@ class SimulationScenario(Protocol):
         ...
 
     def observe(self, p: Any, client: int, step: int, max_steps: int) -> dict[str, float]:
-        """Return this step's full observation: physical readings plus any
-        context (e.g. target position) the controller needs. Handed to both
-        the controller and metrics()."""
+        """Return this step's full observation: ground-truth physical
+        readings plus any context the scenario needs. Handed to metrics()
+        for grading and to controller_view() to derive what the controller
+        actually sees -- not necessarily handed to the controller directly."""
         ...
 
     def metrics(self, observation: dict[str, float]) -> dict[str, float]:
-        """Map an observation to the named metrics a Gherkin spec can bound."""
+        """Map a full (ground-truth) observation to the named metrics a
+        Gherkin spec can bound. Always sees the real observation, regardless
+        of what controller_view() hides from the controller -- the oracle
+        must grade on truth even when the controller can't perceive it."""
+        ...
+
+    def controller_view(self, observation: dict[str, float]) -> dict[str, float]:
+        """Derive what the controller actually perceives from the full
+        observation. A scenario with nothing to hide returns `observation`
+        unchanged; a scenario modeling imperfect/partial sensing (e.g. a
+        force/torque sensor plus a miscalibrated position estimate, with no
+        ground-truth coordinates) returns a reduced or corrupted dict here
+        instead. This is the only place perception can differ from truth --
+        metrics() above always grades on the real observation."""
         ...
 
     def apply_action(self, p: Any, client: int, action: dict[str, float]) -> None:

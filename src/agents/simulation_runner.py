@@ -32,8 +32,14 @@ __all__ = [
     "check_final",
     "check_integral",
     "run_simulation",
+    "summarize_telemetry",
     "main",
 ]
+
+# A metric's trailing trace samples spanning less than this range are
+# considered "unchanged" -- i.e. the controller stopped making progress
+# toward that bound rather than merely approaching it slowly.
+_STAGNATION_EPSILON = 1e-4
 
 
 @dataclass
@@ -115,6 +121,33 @@ def check_integral(accumulated: dict, bounds: list[MetricBound]) -> MetricBound 
     return None
 
 
+def summarize_telemetry(telemetry: SimulationTelemetry, bounds: list[MetricBound]) -> str:
+    """A concise, scenario-agnostic diagnosis of one run, meant to be fed
+    back as GREEN-retry context (PhaseResult.output) -- not a raw telemetry
+    dump. A full trace of 1000+ float samples per metric buries the signal a
+    retrying LLM actually needs: which bound(s) failed, by how much, and
+    whether the metric was still moving toward the target or had simply
+    stopped (a stall, not slow progress).
+    """
+    lines = [f"{'PASSED' if telemetry.success else 'FAILED'} ({telemetry.phase}) after {telemetry.steps_taken} step(s)"]
+    for bound in bounds:
+        value = telemetry.final_metrics.get(bound.metric)
+        if value is None:
+            continue
+        met = compare(value, bound.operator, bound.threshold)
+        status = "OK" if met else "NOT MET"
+        note = ""
+        if not met:
+            trace = telemetry.metric_traces.get(bound.metric) or []
+            tail = trace[-max(1, len(trace) // 5):] if trace else []
+            if len(tail) >= 3 and (max(tail) - min(tail)) < _STAGNATION_EPSILON:
+                note = " -- unchanged for the tail of the run (no progress toward this target, not just slow)"
+        lines.append(f"- {bound.metric}: final={value:.6g}, target {bound.operator} {bound.threshold} [{status}]{note}")
+    if telemetry.failure_reason:
+        lines.append(f"failure_reason: {telemetry.failure_reason}")
+    return "\n".join(lines)
+
+
 def run_simulation(p, client, scenario, controller, bounds: list[MetricBound], max_steps: int, trace_stride: int) -> SimulationTelemetry:
     peak_metrics: dict[str, float] = {}
     accumulated: dict[str, float] = {}
@@ -146,7 +179,8 @@ def run_simulation(p, client, scenario, controller, bounds: list[MetricBound], m
             break
 
         try:
-            action = controller.compute_action(observation)
+            controller_observation = scenario.controller_view(observation)
+            action = controller.compute_action(controller_observation)
         except Exception as exc:
             raise RuntimeError(f"controller.compute_action failed: {exc}") from exc
         scenario.apply_action(p, client, action)

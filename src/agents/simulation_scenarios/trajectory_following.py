@@ -75,6 +75,9 @@ class TrajectoryFollowingScenario:
             "target_x": tx, "target_y": ty, "target_z": tz,
         }
 
+    def controller_view(self, observation: dict) -> dict:
+        return observation  # nothing hidden -- the controller sees ground truth
+
     def metrics(self, observation: dict) -> dict:
         dx = observation["x"] - observation["target_x"]
         dy = observation["y"] - observation["target_y"]

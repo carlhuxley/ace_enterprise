@@ -120,6 +120,9 @@ class PegInHoleScenario:
             "hole_floor_z": self._hole_floor_z,
         }
 
+    def controller_view(self, observation: dict) -> dict:
+        return observation  # nothing hidden -- the controller sees ground truth
+
     def metrics(self, observation: dict) -> dict:
         radial_error = math.hypot(observation["x"], observation["y"])
         depth = (observation["z"] - PEG_HALF_LENGTH_M) - observation["hole_floor_z"]

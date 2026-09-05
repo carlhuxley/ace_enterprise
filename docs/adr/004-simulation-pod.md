@@ -42,12 +42,14 @@ bottom one ever touches pybullet or any one physical task:
   `controller_contract`) plus `load_scenario()`/`scenario_path()` for loading
   a scenario by dotted path. This is the entire seam between "generic physics
   oracle" and "one physical task" -- everything physical lives behind it.
-- `src/agents/simulation_scenarios/*.py` -- concrete scenarios. Two ship:
-  `PegInHoleScenario` (peg insertion into a square-walled socket) and
-  `TrajectoryFollowingScenario` (a free-flying actor tracking a moving
-  target, sharing no code or metric names with the peg scenario). Adding a
-  third physical task (fruit-picking grip force, deburring path accuracy,
-  ...) requires only a new module here.
+- `src/agents/simulation_scenarios/*.py` -- concrete scenarios. Three ship:
+  `PegInHoleScenario` (peg insertion into a square-walled socket, full
+  ground-truth position given to the controller), `TrajectoryFollowingScenario`
+  (a free-flying actor tracking a moving target, sharing no code or metric
+  names with the peg scenario), and `TactilePegInHoleScenario` (the same
+  physical task as `PegInHoleScenario`, but blinded -- see "Partial
+  observability" below). Adding a fourth physical task (fruit-picking grip
+  force, deburring path accuracy, ...) requires only a new module here.
 - `src/agents/simulation_runner.py` -- the actual step loop, run inside a
   subprocess. Checks a scenario's reported metrics against `MetricBound`s
   every step: `scope="instantaneous"` bounds end the run immediately on
@@ -125,6 +127,82 @@ exceed the actual speed limit in combined magnitude -- exactly the metric
 `TrajectoryFollowingScenario` bounds -- which is why both scenarios clip the
 velocity vector's magnitude instead.
 
+### Partial observability: `controller_view()` vs. `metrics()`
+`PegInHoleScenario` hands the controller its exact position and the hole's
+exact center, which lets an LLM solve it open-loop by computing radial error
+directly -- proving synthesis works, but never exercising real tactile
+control (confirmed live: Sonnet's first attempt against `PegInHoleScenario`
+converged in 99 steps with zero contact force the entire run). To force a
+genuinely contact-rich task, `SimulationScenario` gained a fourth method,
+`controller_view(observation) -> dict`, sitting between `observe()` and the
+controller: `observe()`'s output (ground truth) still goes to `metrics()` for
+grading, but `controller_view()` derives a separate, possibly-reduced dict
+that's the *only* thing `compute_action()` ever sees. `PegInHoleScenario` and
+`TrajectoryFollowingScenario` implement it as the identity function;
+`TactilePegInHoleScenario` uses it to expose only `z_position`, `f_normal`,
+`f_lateral_x/y` (a wrist force/torque sensor), and a fixed, deliberately-wrong
+`hole_x_estimate`/`hole_y_estimate` -- no ground-truth (x, y) at all. This
+required no protocol-consumer changes beyond `simulation_runner.py`'s loop
+(`controller.compute_action(scenario.controller_view(observation))` instead
+of the raw observation) and one identity-method addition per existing
+scenario.
+
+Tuning the blinded task's difficulty against rigid-body contact turned out to
+be its own lesson: a physical clearance loose enough to give a tactile search
+real room to converge (0.5mm, vs. a 1.5mm fixed calibration bias) let the
+*null* controller solve the task by accident -- a cylinder's rounded edge
+catching a box socket's sharp corner self-centers under gravity alone with
+pybullet's default friction, with no control at all. Raising the peg's
+`lateralFriction` (2.0) fixed this by pinning a loaded/resting peg in place
+regardless of clearance width, forcing an active controller to retreat fully
+clear of contact (zero normal load) before it can reposition -- confirmed via
+a hand-written "retreat, reposition while airborne, redescend" reference
+controller (`tests/test_simulation_oracle.py`'s
+`test_retreat_and_reposition_strategy_converges`), which is also the strategy
+a real compliant-insertion algorithm would use.
+
+### GREEN-retry feedback: summary, not a raw telemetry dump
+`PhaseResult.output` (what `TDDCycleRunner` feeds back as `spec.error_output`
+on the next GREEN attempt) originally held the full `SimulationTelemetry` as
+JSON -- for a 4000-step run with `metric_traces`, that's several thousand
+floats. This was found live to be worse than merely noisy: at `temperature=0`
+(`ClaudeCliClient`'s default), reproducing the identical unhelpful diagnosis
+verbatim on the same failure meant the *next* full prompt is byte-identical
+across attempts too, producing byte-identical code, forever -- and separately,
+the resulting multi-KB prompts pushed real `claude --print` calls past a
+180s timeout on retries. `simulation_runner.summarize_telemetry()` replaces
+the raw dump with a few lines per bound (`metric: final=X, target OP Y
+[OK|NOT MET]`), flagging when a trace's tail is flat (`-- unchanged for the
+tail of the run (no progress toward this target, not just slow)`) --
+generically, from `MetricBound`/`SimulationTelemetry` alone, no scenario
+knowledge required. `SimulationPod._with_stagnation_note()` additionally
+detects when a cycle's current diagnosis is byte-identical to its immediately
+preceding one and appends an explicit "try a materially different approach"
+note, which is what actually breaks the temperature-0 repeat-forever loop
+once the underlying cause (identical feedback text) is understood.
+
+### Every attempt is archived, not just the winner
+`commit_to_disk()` only ever writes `spec.implementation_file` on success (by
+design, elsewhere in this file) -- but that means a failing attempt's
+generated code was previously unrecoverable for post-hoc debugging.
+`SimulationPod._archive_attempt()` now writes every GREEN/REFACTOR attempt's
+code (pass or fail, even one `ImportFilter` rejects) to
+`<implementation_file's dir>/attempts/`, unconditionally.
+
+### Real validation: what actually happened
+Run live against `TactilePegInHoleScenario` via `ClaudeCliClient` (Sonnet, no
+mocking): two independent attempts each wrote a legitimately sophisticated
+strategy -- force-safety overrides, contact detection, an Archimedean spiral
+search -- and each stalled at a *different* fixed offset for the same root
+cause: the spiral's commanded speed is proportional to its current radius,
+and near the search's low-radius starting point that speed falls below the
+static-friction threshold needed to move a loaded peg at all (measured
+empirically at roughly 0.02-0.03 m/s for this scenario's mass/geometry). Both
+attempts got physically wedged at first contact and never moved again. This
+is a genuine, non-obvious robotics gotcha -- the same one a hand-derived
+reference controller fell into on a first pass during this scenario's own
+tuning -- not a synthesis failure exposed by weak prompting.
+
 ### `run_refactor` re-verifies through the oracle
 Unlike GoLanguagePod's `gofmt` (semantics-preserving by construction), an LLM
 asked to refactor a controller script for clarity/smoothness is not
@@ -153,3 +231,16 @@ phase.
   `TDDCycleRunner(pod=SimulationPod(llm_client, project_root, scenario))`.
 - Full container sandboxing of the simulation subprocess remains open
   follow-up work (tracked via GitHub issue).
+- Deliberately deferred (not implemented here): a formal engine-level
+  "no-stall" `MetricBound` scope (windowed progress checking, e.g. "this
+  metric must change by at least X within any Y-step window") would let a
+  Gherkin spec itself penalize the stall pattern found in real validation,
+  rather than relying on stagnation-aware retry feedback to help the LLM
+  self-correct across attempts. A real, bigger protocol change; tracked as
+  follow-up, not folded into this ADR's scope.
+  Also deliberately not implemented: letting `Reflector`/`Curator` run on a
+  *failed* GREEN, not just a passing one. `TDDCycleRunner._learn()` is shared
+  infrastructure across every pod (Python/Go/TypeScript too) -- changing its
+  learning gate is a cross-cutting harness decision affecting all of them,
+  not a SimulationPod-scoped change, and deserves its own deliberate
+  discussion rather than being folded in here.

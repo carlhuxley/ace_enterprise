@@ -311,3 +311,108 @@ class TestTokenUsage:
 
         assert pod.token_usage()[0].input_tokens == 0
         original_generate.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Attempt archiving -- a failed attempt's code must not be lost, since
+# commit_to_disk only ever writes the winning controller.
+# ---------------------------------------------------------------------------
+
+class TestAttemptArchiving:
+    def test_failed_green_attempt_is_archived(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        llm_client = make_llm_client(content="def compute_action(observation):\n    return {'vx': 0.0, 'vy': 0.0, 'vz': -0.02}\n")
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client)
+
+        s = spec(tmp_path)
+        pod.run_green(s)
+
+        attempts_dir = s.implementation_file.parent / "attempts"
+        archived = list(attempts_dir.glob("*.py"))
+        assert len(archived) == 1
+        assert "def compute_action" in archived[0].read_text()
+        assert not s.implementation_file.exists()  # failed attempts never overwrite the winner slot
+
+    def test_successive_attempts_get_distinct_archive_files(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        s = spec(tmp_path)
+        pod.run_green(s)
+        pod.run_green(s)
+
+        attempts_dir = s.implementation_file.parent / "attempts"
+        assert len(list(attempts_dir.glob("*.py"))) == 2
+
+    def test_forbidden_import_is_still_archived(self, tmp_path):
+        llm_client = make_llm_client(content="import os\ndef compute_action(observation):\n    return {'vx':0,'vy':0,'vz':0}\n")
+        oracle = MagicMock()
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client)
+
+        s = spec(tmp_path)
+        pod.run_green(s)
+
+        attempts_dir = s.implementation_file.parent / "attempts"
+        archived = list(attempts_dir.glob("*.py"))
+        assert len(archived) == 1
+        assert "import os" in archived[0].read_text()
+
+
+# ---------------------------------------------------------------------------
+# Stagnation escalation -- breaks a temperature-0 retry loop stuck
+# reproducing the identical diagnosis (and therefore identical code) forever.
+# ---------------------------------------------------------------------------
+
+class TestStagnationNote:
+    def test_no_note_on_first_failure(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        result = pod.run_green(spec(tmp_path, cycle=1))
+
+        assert "exact outcome also occurred" not in result.output
+
+    def test_note_appears_when_same_cycle_repeats_identical_failure(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        first = pod.run_green(spec(tmp_path, cycle=1))
+        second = pod.run_green(spec(tmp_path, cycle=1))
+
+        assert "exact outcome also occurred" not in first.output
+        assert "exact outcome also occurred" in second.output
+
+    def test_no_note_when_failure_changes(self, tmp_path):
+        oracle = MagicMock()
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        oracle.run.return_value = make_telemetry(success=False, final_metrics={"error": 0.5})
+        pod.run_green(spec(tmp_path, cycle=1))
+
+        oracle.run.return_value = make_telemetry(success=False, final_metrics={"error": 0.05})
+        second = pod.run_green(spec(tmp_path, cycle=1))
+
+        assert "exact outcome also occurred" not in second.output
+
+    def test_different_cycles_do_not_share_stagnation_state(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        pod.run_green(spec(tmp_path, cycle=1))
+        result = pod.run_green(spec(tmp_path, cycle=2))
+
+        assert "exact outcome also occurred" not in result.output
+
+    def test_no_note_on_success(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        result = pod.run_green(spec(tmp_path, cycle=1))
+
+        assert "exact outcome also occurred" not in result.output

@@ -29,7 +29,7 @@ from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.simulation_invariants import MetricBound, extract_invariants
 from src.agents.simulation_oracle import SimulationEnvironmentError, SimulationOracle
-from src.agents.simulation_runner import SimulationTelemetry
+from src.agents.simulation_runner import summarize_telemetry
 from src.agents.simulation_scenario import SimulationScenario
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,13 @@ class SimulationPod:
         self._actual_model: str | None = None
         self._requested_model: str | None = None
         self._provider: str | None = None
+        # Every GREEN/REFACTOR attempt is archived regardless of outcome (see
+        # _archive_attempt) -- a failing attempt's code would otherwise be
+        # lost entirely, since commit_to_disk only ever writes the winner.
+        self._attempt_counter: int = 0
+        # Last attempt's diagnosis per cycle, used to detect a retry loop
+        # stuck reproducing the identical failure (see _with_stagnation_note).
+        self._last_diagnostic: dict[int, str] = {}
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -90,7 +97,7 @@ class SimulationPod:
         self._record_usage(spec.cycle_number)
         return PhaseResult(
             passed=telemetry.success,
-            output=_telemetry_to_json(telemetry),
+            output=summarize_telemetry(telemetry, invariants),
             error=None if not telemetry.success else "RED phase unexpectedly succeeded with no controller",
         )
 
@@ -102,15 +109,19 @@ class SimulationPod:
             prompt = self._green_prompt(spec)
             response = self._llm_client.generate(prompt)
             controller_code = _extract_code(response.get("content", ""))
-            _import_filter.check(controller_code)
-        except ForbiddenImportError as exc:
-            self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        result = self._run_oracle(controller_code, invariants)
+        self._archive_attempt(spec, "green", controller_code)
+
+        try:
+            _import_filter.check(controller_code)
+        except ForbiddenImportError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+
+        result = self._run_oracle(spec, controller_code, invariants)
         if result.passed:
             commit_to_disk(controller_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
@@ -129,15 +140,19 @@ class SimulationPod:
             prompt = self._refactor_prompt(current_code)
             response = self._llm_client.generate(prompt)
             refactored_code = _extract_code(response.get("content", ""))
-            _import_filter.check(refactored_code)
-        except ForbiddenImportError as exc:
-            self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        result = self._run_oracle(refactored_code, invariants)
+        self._archive_attempt(spec, "refactor", refactored_code)
+
+        try:
+            _import_filter.check(refactored_code)
+        except ForbiddenImportError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+
+        result = self._run_oracle(spec, refactored_code, invariants)
         # A failed refactor must not clobber a working controller on disk.
         if result.passed:
             commit_to_disk(refactored_code, spec.implementation_file)
@@ -153,16 +168,44 @@ class SimulationPod:
         extracted = extract_invariants(spec.gherkin_context or spec.feature_requirement)
         return extracted if extracted else self._scenario.default_invariants()
 
-    def _run_oracle(self, controller_code: str, invariants: list[MetricBound]) -> PhaseResult:
+    def _run_oracle(self, spec: PodSpec, controller_code: str, invariants: list[MetricBound]) -> PhaseResult:
         try:
             telemetry = self._oracle.run(controller_code, invariants)
         except SimulationEnvironmentError as exc:
             return PhaseResult(passed=False, output="", error=f"SimulationEnvironment: {exc}")
+        summary = summarize_telemetry(telemetry, invariants)
+        if not telemetry.success:
+            summary = self._with_stagnation_note(spec.cycle_number, summary)
         return PhaseResult(
             passed=telemetry.success,
-            output=_telemetry_to_json(telemetry),
+            output=summary,
             error=None if telemetry.success else telemetry.failure_reason,
         )
+
+    def _archive_attempt(self, spec: PodSpec, phase: str, code: str) -> None:
+        self._attempt_counter += 1
+        attempts_dir = spec.implementation_file.parent / "attempts"
+        filename = f"{spec.implementation_file.stem}_cycle{spec.cycle_number}_{phase}_attempt{self._attempt_counter}.py"
+        commit_to_disk(code, attempts_dir / filename)
+
+    def _with_stagnation_note(self, cycle_number: int, summary: str) -> str:
+        """At temperature 0, an identical diagnosis fed back verbatim
+        produces an identical prompt next attempt, which produces identical
+        code, which produces the identical diagnosis again -- a retry loop
+        that repeats forever without this. Detecting a repeat and saying so
+        explicitly is what actually breaks it."""
+        previous = self._last_diagnostic.get(cycle_number)
+        self._last_diagnostic[cycle_number] = summary
+        if previous == summary:
+            return (
+                summary
+                + "\n\nNOTE: this exact outcome also occurred on the previous attempt -- "
+                  "repeating the same control strategy will not work. Try a materially "
+                  "different approach (e.g. if your controller pauses all motion once it "
+                  "detects resistance, make sure it explicitly resumes exploratory motion "
+                  "afterward instead of remaining still)."
+            )
+        return summary
 
     def _green_prompt(self, spec: PodSpec) -> str:
         gherkin_section = f"\n\nGherkin spec:\n{spec.gherkin_context}" if spec.gherkin_context else ""
@@ -217,10 +260,6 @@ def _extract_code(content: str) -> str:
     if code_match:
         return content[code_match.start():].strip()
     return content.strip()
-
-
-def _telemetry_to_json(telemetry: SimulationTelemetry) -> str:
-    return json.dumps(dataclasses.asdict(telemetry))
 
 
 def _invariants_to_json(invariants: list[MetricBound]) -> str:

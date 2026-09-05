@@ -6,12 +6,14 @@ for real-physics coverage.
 """
 from src.agents.simulation_invariants import MetricBound
 from src.agents.simulation_runner import (
+    SimulationTelemetry,
     check_final,
     check_instantaneous,
     check_integral,
     compare,
     infer_max_steps,
     run_simulation,
+    summarize_telemetry,
 )
 
 
@@ -119,6 +121,9 @@ class ConvergingScenario:
     def observe(self, p, client, step, max_steps):
         return {"step": step, "max_steps": max_steps, "error": self._error}
 
+    def controller_view(self, observation):
+        return observation
+
     def metrics(self, observation):
         return {"error": observation["error"], "force": 1.0}
 
@@ -202,6 +207,34 @@ class TestRunSimulationConvergence:
             raised = "boom" in str(exc)
         assert raised
 
+    def test_controller_only_sees_what_controller_view_returns(self):
+        """The controller must never receive the raw observation directly --
+        only what the scenario's controller_view() derives from it. This is
+        what lets a scenario hide ground-truth fields (e.g. absolute
+        position) from the controller while metrics() still grades on truth."""
+
+        class BlindingScenario(ConvergingScenario):
+            def controller_view(self, observation):
+                return {"step": observation["step"], "max_steps": observation["max_steps"]}
+
+        class RecordingController:
+            def __init__(self):
+                self.seen = []
+
+            def compute_action(self, observation):
+                self.seen.append(observation)
+                return {}
+
+        controller = RecordingController()
+        run_simulation(
+            FakePyBullet(), 0, BlindingScenario(), controller, make_bounds(),
+            max_steps=3, trace_stride=1,
+        )
+
+        assert controller.seen  # at least one call happened before convergence/exhaustion
+        assert "error" not in controller.seen[0]
+        assert set(controller.seen[0]) == {"step", "max_steps"}
+
     def test_metric_traces_and_peaks_are_recorded(self):
         telemetry = run_simulation(
             FakePyBullet(), 0, ConstantErrorScenario(start_error=2.0), NullController(),
@@ -211,3 +244,66 @@ class TestRunSimulationConvergence:
         assert telemetry.peak_metrics["error"] == 2.0
         # step 1 (always sampled) plus every 2nd step through 10: 1,2,4,6,8,10
         assert telemetry.metric_traces["error"] == [2.0] * 6
+
+
+# ---------------------------------------------------------------------------
+# summarize_telemetry -- concise, scenario-agnostic diagnosis for GREEN-retry
+# feedback (PhaseResult.output), not a raw telemetry dump.
+# ---------------------------------------------------------------------------
+
+def make_telemetry(**overrides):
+    fields = {
+        "success": False,
+        "steps_taken": 100,
+        "violated": False,
+        "violated_metric": None,
+        "stalled": True,
+        "phase": "stalled",
+        "peak_metrics": {},
+        "final_metrics": {"force": 1.0, "error": 0.05},
+        "metric_traces": {},
+        "failure_reason": "stalled: exhausted 100 steps without convergence",
+    }
+    fields.update(overrides)
+    return SimulationTelemetry(**fields)
+
+
+class TestSummarizeTelemetry:
+    def test_marks_satisfied_bound_as_ok(self):
+        bounds = [MetricBound("force", "<=", 12.0, "instantaneous")]
+        summary = summarize_telemetry(make_telemetry(), bounds)
+        assert "force: final=1, target <= 12.0 [OK]" in summary
+
+    def test_marks_unsatisfied_bound_as_not_met(self):
+        bounds = [MetricBound("error", "<=", 0.01, "final", within_steps=100)]
+        summary = summarize_telemetry(make_telemetry(), bounds)
+        assert "error: final=0.05, target <= 0.01 [NOT MET]" in summary
+
+    def test_flags_stagnation_when_trace_tail_is_flat(self):
+        bounds = [MetricBound("error", "<=", 0.01, "final", within_steps=100)]
+        telemetry = make_telemetry(metric_traces={"error": [1.0, 0.5, 0.2] + [0.05] * 20})
+        summary = summarize_telemetry(telemetry, bounds)
+        assert "no progress toward this target" in summary
+
+    def test_does_not_flag_stagnation_when_still_converging(self):
+        bounds = [MetricBound("error", "<=", 0.01, "final", within_steps=100)]
+        telemetry = make_telemetry(metric_traces={"error": [1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.08, 0.06, 0.055, 0.05]})
+        summary = summarize_telemetry(telemetry, bounds)
+        assert "no progress" not in summary
+
+    def test_includes_failure_reason_and_phase(self):
+        bounds = []
+        summary = summarize_telemetry(make_telemetry(), bounds)
+        assert "FAILED (stalled) after 100 step(s)" in summary
+        assert "failure_reason: stalled: exhausted 100 steps without convergence" in summary
+
+    def test_passed_run_is_labeled_passed(self):
+        telemetry = make_telemetry(success=True, phase="converged", stalled=False, failure_reason=None)
+        bounds = [MetricBound("force", "<=", 12.0, "instantaneous")]
+        summary = summarize_telemetry(telemetry, bounds)
+        assert summary.startswith("PASSED (converged)")
+
+    def test_ignores_bounds_for_metrics_not_reported(self):
+        bounds = [MetricBound("unreported_metric", "<=", 1.0, "instantaneous")]
+        summary = summarize_telemetry(make_telemetry(), bounds)
+        assert "unreported_metric" not in summary
