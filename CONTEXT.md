@@ -157,6 +157,12 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **EfficiencyReport** — Full token efficiency report, surfaced under the `token_efficiency` key. Contains per-language scores and cross-language comparisons.
 
+**EnsembleBuildResult** — Result of a multi-candidate blind build for one feature. Contains candidate solutions, consensus report, and the winning solution.
+
+**EnsembleBuildRunner** — Drives a multi-candidate blind build for one feature in one language. Generates candidates from multiple models, evaluates them blindly, builds consensus, and commits the winner.
+
+**EnsembleCandidate** — One model's attempt at a feature in a multi-candidate build. The `model` field is kept out of the public view to enable blind evaluation.
+
 **EnsembleLearner** — Orchestrates multiple models learning in parallel. Each model runs Generator → Reflector → Curator, then votes on proposed bullets. Supports cross-voting, deliberation, and configurable voting strategies.
 
 **EnsembleResult** — Complete result from an ensemble learning session. Contains approved, rejected, and pending bullets, plus duration and summary.
@@ -217,6 +223,8 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **MarkdownImporter** — Imports knowledge from markdown files into playbook bullets. Parses markdown headings as sections and list items as bullets.
 
+**MetricBound** — One physical acceptance criterion for simulation-based TDD, e.g. `peak_force <= 12.0 (instantaneous)`. Extracted from Gherkin scenario steps by `extract_invariants()`.
+
 **MLExperimentKnowledge** — Knowledge base for ML experiments. Integrates with MLflow run tracking to store decisions and patterns from ML training runs.
 
 **ModelAttributionTracker** — Tracks OpenRouter model attribution in performance metrics. Records completions with model ID, provider, task type, and quality scores.
@@ -231,7 +239,11 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ModuleArchitect** — Generates module-level contracts for stateful systems. Considers shared state, database schemas, and inter-module dependencies.
 
+**ModuleBuildResult** — Result of building a complete module via TDD. Contains per-function build results and integration test outcomes.
+
 **ModuleContract** — Contract for an entire module with shared state. Contains function specs, shared state definition, and integration tests.
+
+**ModuleSpec** — One module in a project plan. `name` becomes `<name>.py` / `<name>_test.py` in the output.
 
 **ModuleTDDBuilder** — Builds module implementations using TDD methodology. Iterates over function specs, building each via TDD-style cycles.
 
@@ -275,11 +287,19 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **ProductionDataAnalyzer** — Analyzes quality data from existing experiment_logs. Extracts model performance metrics, backfills quality scores, and generates production reports.
 
+**ProjectArchitect** — Decomposes a project specification into a `ProjectPlan` (a DAG of `ModuleSpec` objects with dependency ordering).
+
 **ProjectArchitecture** — Manages cached project architecture information. Provides folder structure with purposes for intelligent file placement.
+
+**ProjectBuildResult** — Result of building every module of a `ProjectPlan` in dependency order. Contains per-module outcomes and overall success.
+
+**ProjectBuilder** — Drives `ModuleArchitect` + `ModuleTDDBuilder` over a `ProjectPlan`. Builds modules in dependency order, detects undeclared sibling dependencies, and runs the full project test suite.
 
 **ProjectConfig** — Manages project configuration (.ace/config.yml). Supports loading, saving, and initialization of ACE configuration for a project.
 
 **ProjectDetector** — Detects and analyzes Python project structure. Finds project root, source directory, test directory, and package manager.
+
+**ProjectPlan** — A DAG of `ModuleSpec` objects with dependency ordering. Produced by `ProjectArchitect` from a project specification.
 
 **ProjectStructure** — Represents the project folder structure with purposes. Used by `ProjectAwareTDD` for intelligent file placement.
 
@@ -313,11 +333,19 @@ Use these terms exactly in code, docs, and architecture discussions.
 
 **SemanticCodeAnalyzer** — Analyzes code for security-sensitive patterns: SQL injection, eval/exec usage, hardcoded secrets.
 
+**SimulationOracle** — Runs a controller script against a `SimulationScenario` inside a PyBullet DIRECT client. Produces `SimulationTelemetry` with per-step observations and metric values.
+
+**SimulationPod** — LanguagePod implementation for PyBullet-backed TDD cycles. Parameterized by a `SimulationScenario` and `SimulationOracle`. Extracts `MetricBound` invariants from Gherkin specs.
+
+**SimulationScenario** — One physical task, built and stepped inside a PyBullet DIRECT client. Implementations include `PegInHoleScenario` and `TrajectoryFollowingScenario`.
+
+**SimulationTelemetry** — Outcome of one scenario run. Contains per-step observations, metric values, and pass/fail status for each invariant.
+
 **SuccessRateCalculator** — Measures experiment success rates across the system. Computes overall rate, rate by type, rate by playbook version, and trends over time.
 
 **TDDCycleAnalyzer** — Measures first-pass GREEN rate and whether it improves over time. Computes per-period rates and trend analysis.
 
-**TDDCycleRunner** — Orchestrates RED → GREEN → REFACTOR for one feature. Handles GREEN retries with error feedback, aborts on security/policy failures, and supports optional learning loop (Reflector → Curator) and audit trail.
+**TDDCycleRunner** — Orchestrates RED → GREEN → REFACTOR for one feature. Handles GREEN retries with error feedback, aborts on security/policy failures, and supports optional learning loop (Reflector → Curator) and audit trail. RED generation/parsing failures that never reached the container are retried up to `max_red_attempts` times.
 
 **TDDFailureRecorder** — Records TDD failures and interventions for self-improvement. Creates beads issues and adds troubleshooting bullets to the playbook.
 
@@ -384,3 +412,5 @@ Use these terms exactly in code, docs, and architecture discussions.
 **ADR 015 — Curator Bullet Parsing with Code Fence Support** — The Curator's `_parse_synthesis` method correctly handles multi-line bullet content that includes fenced code blocks. It tracks code fence state to prevent content loss when a bullet contains a code block after a colon-introduced line.
 
 **ADR 016 — Semantic Deduplication in PlaybookManager** — `PlaybookManager._is_redundant()` uses both exact-match (cheap) and semantic similarity (via embeddings) to detect duplicate bullets. This prevents the Curator from adding semantically identical bullets that differ only in wording.
+
+**ADR 017 — RED Phase Retry for Generation Failures** — `TDDCycleRunner` retries RED phase up to `max_red
