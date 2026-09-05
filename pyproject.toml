@@ -43,6 +43,12 @@ ml = [
     "numpy>=1.24.0",
 ]
 
+simulation = [
+    # PegInHoleOracle (src/agents/simulation_oracle.py) -- headless physics
+    # test oracle for SimulationPod, proving the TDD harness is domain-agnostic.
+    "pybullet>=3.2.5",
+]
+
 dev = [
     # Testing
     "pytest>=7.4.0",
