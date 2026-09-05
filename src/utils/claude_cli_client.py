@@ -113,13 +113,20 @@ class ClaudeCliClient:
     compatibility but not enforceable via the CLI, so it's ignored.
     """
 
-    def __init__(self, timeout: int = 300, model: str | None = None) -> None:
+    def __init__(self, timeout: int = 300, model: str | None = None, effort: str | None = None) -> None:
         self._timeout = timeout
         # `model` (e.g. "haiku", "sonnet", "opus") is passed to `claude --print
         # --model`; None uses whatever the authenticated Claude Code session is
         # configured for. Haiku is markedly faster per call — worth trading down
         # for since every LLM call pays a ~2.5s CLI-subprocess boot tax.
         self._model = model or None
+        # `effort` (low/medium/high/xhigh/max) is passed to `claude --print
+        # --effort`; None uses the CLI's own default. Higher effort trades
+        # latency for more deliberation before answering -- useful for tasks
+        # where a model's default pass tends to miss a boundary condition it
+        # would catch given more time to check its own reasoning, without
+        # switching model or provider.
+        self._effort = effort or None
         self.provider = "claude-cli"
         self.model = f"claude-cli:{model}" if model else "claude-cli"
 
@@ -140,6 +147,8 @@ class ClaudeCliClient:
         ]
         if self._model:
             cmd += ["--model", self._model]
+        if self._effort:
+            cmd += ["--effort", self._effort]
         combined_system_prompt = (
             f"{_NO_TOOLS_SYSTEM_PROMPT}\n\n{system_prompt}" if system_prompt else _NO_TOOLS_SYSTEM_PROMPT
         )

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from src.agents.language_pod import LanguagePod, PodSpec
 from src.agents.simulation_invariants import MetricBound
 from src.agents.simulation_oracle import SimulationEnvironmentError
-from src.agents.simulation_pod import SimulationPod
+from src.agents.simulation_pod import SimulationPod, _sanitize_error
 from src.agents.simulation_runner import SimulationTelemetry
 
 
@@ -50,12 +50,13 @@ def make_llm_client(content="def compute_action(observation):\n    return {'vx':
     return client
 
 
-def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None):
+def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_manager=None):
     return SimulationPod(
         llm_client=llm_client or make_llm_client(),
         project_root=tmp_path,
         scenario=scenario or make_scenario(),
         oracle=oracle or MagicMock(),
+        playbook_manager=playbook_manager,
     )
 
 
@@ -248,6 +249,76 @@ class TestRunGreen:
 
 
 # ---------------------------------------------------------------------------
+# Playbook bullet injection -- mirrors GoLanguagePod's _get_go_bullets():
+# without this, a Curator-written bullet from a previous cycle's learning
+# has no way back into synthesis.
+# ---------------------------------------------------------------------------
+
+class TestPlaybookBullets:
+    def test_no_playbook_manager_means_no_bullets_section(self, tmp_path):
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=None)
+
+        pod.run_green(spec(tmp_path))
+
+        prompt = original_generate.call_args.args[0]
+        assert "Learned guidance" not in prompt
+
+    def test_bullets_from_relevant_sections_are_included(self, tmp_path):
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets.side_effect = lambda section: {
+            "strategies_and_hard_rules": ["retreat fully before repositioning"],
+            "domain_knowledge": ["static friction clamps sub-threshold velocity commands"],
+            "troubleshooting": [],
+        }[section]
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager)
+
+        pod.run_green(spec(tmp_path))
+
+        prompt = original_generate.call_args.args[0]
+        assert "Learned guidance from previous cycles:" in prompt
+        assert "retreat fully before repositioning" in prompt
+        assert "static friction clamps sub-threshold velocity commands" in prompt
+
+    def test_playbook_lookup_failure_does_not_break_synthesis(self, tmp_path):
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets.side_effect = RuntimeError("playbook unavailable")
+        llm_client = make_llm_client()
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.passed is True
+
+    def test_refactor_prompt_also_includes_bullets(self, tmp_path):
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets.side_effect = lambda section: (
+            ["keep search speed above the friction threshold"] if section == "domain_knowledge" else []
+        )
+        llm_client = make_llm_client(content="def compute_action(observation):\n    return {'vx': 0.0, 'vy': 0.0, 'vz': -0.01}\n")
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager)
+
+        s = spec(tmp_path)
+        s.implementation_file.write_text("def compute_action(observation):\n    return {'vx': 0.0, 'vy': 0.0, 'vz': 0.0}\n")
+        pod.run_refactor(s)
+
+        prompt = original_generate.call_args.args[0]
+        assert "keep search speed above the friction threshold" in prompt
+
+
+# ---------------------------------------------------------------------------
 # run_refactor
 # ---------------------------------------------------------------------------
 
@@ -416,3 +487,36 @@ class TestStagnationNote:
         result = pod.run_green(spec(tmp_path, cycle=1))
 
         assert "exact outcome also occurred" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_error -- caps what a raw llm_client exception contributes to
+# PhaseResult.error, so a timeout's verbose message (which can itself embed
+# an entire previous prompt) can't compound across GREEN retries.
+# ---------------------------------------------------------------------------
+
+class TestSanitizeError:
+    def test_short_message_passes_through_unchanged(self):
+        assert _sanitize_error(RuntimeError("boom")) == "boom"
+
+    def test_long_message_is_truncated_to_its_tail(self):
+        long_message = "x" * 1000 + "timed out after 300 seconds"
+        result = _sanitize_error(RuntimeError(long_message))
+        assert len(result) <= 310
+        assert result.endswith("timed out after 300 seconds")
+
+    def test_generic_exception_does_not_compound_across_retries(self, tmp_path):
+        """A raised exception's error must not blow past _MAX_ERROR_LEN even
+        when the message itself embeds an entire previous prompt (the actual
+        failure mode this guards against)."""
+        huge_prompt = "Learned guidance from previous cycles:\n" + ("- bullet\n" * 500)
+        llm_client = make_llm_client()
+        llm_client.generate.side_effect = RuntimeError(f"Command [...] {huge_prompt} timed out after 300 seconds")
+        oracle = MagicMock()
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.passed is False
+        assert len(result.error) <= 310
+        assert result.error.endswith("timed out after 300 seconds")

@@ -189,19 +189,95 @@ generated code was previously unrecoverable for post-hoc debugging.
 code (pass or fail, even one `ImportFilter` rejects) to
 `<implementation_file's dir>/attempts/`, unconditionally.
 
-### Real validation: what actually happened
-Run live against `TactilePegInHoleScenario` via `ClaudeCliClient` (Sonnet, no
-mocking): two independent attempts each wrote a legitimately sophisticated
-strategy -- force-safety overrides, contact detection, an Archimedean spiral
-search -- and each stalled at a *different* fixed offset for the same root
-cause: the spiral's commanded speed is proportional to its current radius,
-and near the search's low-radius starting point that speed falls below the
-static-friction threshold needed to move a loaded peg at all (measured
-empirically at roughly 0.02-0.03 m/s for this scenario's mass/geometry). Both
-attempts got physically wedged at first contact and never moved again. This
-is a genuine, non-obvious robotics gotcha -- the same one a hand-derived
-reference controller fell into on a first pass during this scenario's own
-tuning -- not a synthesis failure exposed by weak prompting.
+### Playbook bullet injection was missing entirely
+An early round of live validation (see below) tried to fix real failures by
+hand-editing physics hints directly into `TactilePegInHoleScenario.controller_contract()`
+-- e.g. telling the LLM the exact velocity-vs-friction threshold that had
+caused a stall. That is Reflector's and Curator's job, done manually and
+baked permanently into the task spec instead of learned; any resulting
+"success" would prove a human can prompt-engineer a fix, not that ACE
+learns one. Those hints were reverted.
+
+The deeper problem the exercise surfaced: `SimulationPod._green_prompt()`
+had no mechanism to retrieve playbook bullets at all, unlike
+`GoLanguagePod._get_go_bullets()`. Even a hypothetical successful
+Reflector/Curator pass would have had nowhere to feed its insight back into
+synthesis. `SimulationPod` now takes an optional `playbook_manager` and
+injects bullets from Curator's four standard sections
+(`strategies_and_hard_rules`, `domain_knowledge`, `troubleshooting`,
+`code_snippets` -- see Curator's own "Available Sections" prompt; there is no
+simulation-specific section to target) into both `_green_prompt()` and
+`_refactor_prompt()` as "Learned guidance from previous cycles:".
+
+### Real validation: autonomous multi-cycle learning, confirmed live
+With hand-authored hints removed and bullet injection wired, a clean-room
+run against `TactilePegInHoleScenario` via `ClaudeCliClient` (Sonnet, no
+mocking, no hints) produced two full learning cycles:
+
+- **Attempt 1** (empty playbook): stalled. The archived code's own spiral
+  radius grew too slowly to sweep its full search extent within the step
+  budget.
+- **Reflector**, given only the telemetry summary and the actual failed code
+  (recovered from the attempt archive -- a failing attempt is never
+  committed to `implementation_file`), correctly diagnosed: *"the search
+  pattern's maximum extent must exceed the worst-case uncertainty, and its
+  coverage rate must complete that extent well within the budget... never
+  impose an artificial constraint tighter than the quantity the controller
+  is supposed to discover."* **Curator** wrote 8 bullets from that analysis.
+- **Attempt 2** (8 bullets injected, confirmed present in the actual prompt
+  sent): fixed exactly that bug, but stalled on an *unrelated* one the first
+  bullets didn't cover -- a hardcoded tangential search speed below the
+  static-friction threshold needed to move a loaded peg at all (measured
+  empirically at roughly 0.02-0.03 m/s for this scenario's mass/geometry).
+  Both this and Attempt 1's bug are a genuine, non-obvious robotics gotcha --
+  a hand-derived reference controller fell into the same trap on its own
+  first pass during this scenario's tuning.
+- **Reflector cycle 2**, on Attempt 2's real failure, correctly generalized
+  the pattern (*"corrective behavior must have an unconditional execution
+  path... never gated behind a single hardcoded threshold"*) -- though it
+  also partially over-generalized, treating `z_position` as a forbidden
+  sensor reading because the Gherkin says "no position sensor," when the
+  contract explicitly provides `z_position` as a legitimate depth reading.
+  A real instance of Reflector being partially wrong, left as-is rather than
+  corrected by hand. **Curator** wrote 5 more bullets (13 total, two
+  independently-discovered failure modes).
+- **Attempt 3** (13 bullets): **converged autonomously** in 229 steps --
+  `radial_error` final 0.000496m against a 0.0005m tolerance (a 4-micron
+  margin), `peak_force` 0.09N, `depth` 0.018m, all within bounds. REFACTOR
+  then ran and also passed, further refining the converged controller.
+
+`TDDCycleRunner._learn()` only runs after a passing GREEN (see "Deferred"
+below), so Attempts 1 and 2's learning passes were invoked directly, using
+the exact same `Reflector.reflect()` / `Curator.curate()` /
+`Curator.apply_updates()` call shape `_learn()` uses internally, just
+triggered on failure. This is a validation-script pattern, not a change to
+the shared harness gate.
+
+### Infra: a timeout's error message can compound across retries
+`ClaudeCliClient` wraps a timed-out subprocess call in a `RuntimeError`
+whose message embeds the *entire command it ran* -- including, on a GREEN
+retry, the previous attempt's whole prompt. Passed through
+`PhaseResult.error` verbatim, that becomes the *next* attempt's
+`error_output`, which embeds the whole thing again: an exponentially
+growing prompt that makes further timeouts more likely, not less (observed
+live: a fully "successful" cascade of this kind burned all 3 of one GREEN
+retry budget on nothing but timeouts). `SimulationPod._sanitize_error()`
+caps any generic exception's contribution to `PhaseResult.error` at 300
+characters, keeping only the tail (where the actionable part of a
+`ClaudeCliClient` message -- "...timed out after Ns" -- actually is).
+
+Separately: the `claude` CLI itself has no server-side timeout --
+`ClaudeCliClient`'s `timeout` is purely a client-side `subprocess.run()`
+deadline. A live retry at `--effort max` (added to `ClaudeCliClient` as an
+optional, non-physics-specific parameter -- it's a legitimate lever for
+"would more deliberation avoid missing a boundary condition," tested here at
+zero cost since it stays within the same subscription/CLI, not a different
+model or provider) took over 600 seconds twice without ever returning, while
+every attempt that actually completed that session did so under 300s at
+default effort. Higher effort trades latency for deliberation; for a
+task already constrained by a client-side timeout, that trade was net
+negative here -- reverting to default effort with a longer timeout (500s)
+is what actually produced Attempt 3's convergence above.
 
 ### `run_refactor` re-verifies through the oracle
 Unlike GoLanguagePod's `gofmt` (semantics-preserving by construction), an LLM
@@ -214,9 +290,12 @@ phase.
 ## Consequences
 
 - `TDDCycleRunner`, `Reflector`, `Curator`, and `Playbook` require zero
-  changes to drive a physics simulation instead of a test runner, for either
+  changes to drive a physics simulation instead of a test runner, for any
   shipped scenario -- this is the proof of domain-agnosticism the ADR set
-  out to establish.
+  out to establish, confirmed live end-to-end: a real, un-hinted LLM
+  synthesis attempt against `TactilePegInHoleScenario` converged
+  autonomously after two real Reflector/Curator learning cycles (see "Real
+  validation" above).
 - Adding a new physical task (fruit-picking, deburring, ...) requires only a
   new `SimulationScenario` module; `SimulationPod`, `SimulationOracle`, and
   `simulation_runner.py` need no changes.
@@ -238,9 +317,13 @@ phase.
   rather than relying on stagnation-aware retry feedback to help the LLM
   self-correct across attempts. A real, bigger protocol change; tracked as
   follow-up, not folded into this ADR's scope.
-  Also deliberately not implemented: letting `Reflector`/`Curator` run on a
-  *failed* GREEN, not just a passing one. `TDDCycleRunner._learn()` is shared
-  infrastructure across every pod (Python/Go/TypeScript too) -- changing its
-  learning gate is a cross-cutting harness decision affecting all of them,
-  not a SimulationPod-scoped change, and deserves its own deliberate
-  discussion rather than being folded in here.
+  Also deliberately not implemented: letting `TDDCycleRunner._learn()` itself
+  run on a *failed* GREEN, not just a passing one. It's shared infrastructure
+  across every pod (Python/Go/TypeScript too) -- changing its learning gate
+  is a cross-cutting harness decision affecting all of them, not a
+  SimulationPod-scoped change, and deserves its own deliberate discussion
+  rather than being folded in here. (The capability itself -- Reflector/
+  Curator analyzing a failed cycle -- was validated live via a
+  validation-script pattern that calls them directly with `_learn()`'s exact
+  call shape; see "Real validation" above. Only the harness's automatic gate
+  remains untouched.)

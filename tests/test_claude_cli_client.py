@@ -276,3 +276,26 @@ class TestModelSelection:
             result = client.generate(prompt="hi")
         assert result["actual_model"] == "claude-cli:sonnet"
         assert result["provider"] == "claude-cli"
+
+
+class TestEffortSelection:
+    def test_no_effort_omits_the_effort_flag(self):
+        client = ClaudeCliClient()
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt="hi")
+        assert "--effort" not in run.call_args.args[0]
+
+    def test_effort_is_passed_to_the_cli(self):
+        client = ClaudeCliClient(effort="max")
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt="hi")
+        cmd = run.call_args.args[0]
+        assert cmd[cmd.index("--effort") + 1] == "max"
+
+    def test_effort_and_model_can_be_combined(self):
+        client = ClaudeCliClient(model="sonnet", effort="high")
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt="hi")
+        cmd = run.call_args.args[0]
+        assert cmd[cmd.index("--model") + 1] == "sonnet"
+        assert cmd[cmd.index("--effort") + 1] == "high"

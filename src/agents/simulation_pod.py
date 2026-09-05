@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 _import_filter = ImportFilter()
 
+# Sections Curator's curate() call actually chooses among (see Curator's
+# "Available Sections" prompt block) -- not a simulation-specific section,
+# since Curator has no notion of one to target.
+_BULLET_SECTIONS = ("strategies_and_hard_rules", "domain_knowledge", "troubleshooting")
+
 
 def commit_to_disk(code: str, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -64,11 +69,17 @@ class SimulationPod:
         project_root: Path,
         scenario: SimulationScenario,
         oracle: SimulationOracle | None = None,
+        playbook_manager=None,
     ) -> None:
         self._llm_client = llm_client
         self._project_root = project_root
         self._scenario = scenario
         self._oracle = oracle or SimulationOracle(scenario)
+        # Optional: mirrors GoLanguagePod's _get_go_bullets() pattern. Without
+        # this, playbook bullets a Curator wrote from a previous cycle's
+        # learning have nowhere to re-enter synthesis -- see docs/adr/004
+        # ("no playbook-injection point" gap).
+        self._playbook_manager = playbook_manager
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._actual_model: str | None = None
@@ -111,7 +122,7 @@ class SimulationPod:
             controller_code = _extract_code(response.get("content", ""))
         except Exception as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=str(exc))
+            return PhaseResult(passed=False, output="", error=_sanitize_error(exc))
 
         self._archive_attempt(spec, "green", controller_code)
 
@@ -142,7 +153,7 @@ class SimulationPod:
             refactored_code = _extract_code(response.get("content", ""))
         except Exception as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=str(exc))
+            return PhaseResult(passed=False, output="", error=_sanitize_error(exc))
 
         self._archive_attempt(spec, "refactor", refactored_code)
 
@@ -213,16 +224,40 @@ class SimulationPod:
         return (
             f"Feature: {spec.feature_requirement}\n\n"
             f"{self._scenario.controller_contract()}"
-            f"{gherkin_section}{error_section}"
+            f"{self._bullets_section()}{gherkin_section}{error_section}"
         )
 
     def _refactor_prompt(self, current_code: str) -> str:
         return (
             f"Refactor this controller for clarity and smoother, more direct "
             f"motion, without changing its control strategy or breaking the "
-            f"contract below.\n\n{self._scenario.controller_contract()}\n\n"
+            f"contract below.\n\n{self._scenario.controller_contract()}"
+            f"{self._bullets_section()}\n\n"
             f"Current controller:\n```python\n{current_code}\n```"
         )
+
+    def _bullets_section(self) -> str:
+        bullets = self._get_bullets()
+        if not bullets:
+            return ""
+        return "\n\nLearned guidance from previous cycles:\n" + "\n".join(f"- {b}" for b in bullets)
+
+    def _get_bullets(self) -> list[str]:
+        """Mirrors GoLanguagePod._get_go_bullets(): without this, whatever
+        Curator writes from a previous cycle's Reflector analysis has no way
+        back into synthesis. Curator's standard curate() call only ever
+        chooses among these four sections (see Curator's "Available
+        Sections" prompt) -- there's no simulation-specific section name to
+        target, so all of them are checked."""
+        if self._playbook_manager is None:
+            return []
+        bullets: list[str] = []
+        for section in _BULLET_SECTIONS:
+            try:
+                bullets.extend(self._playbook_manager.get_bullets(section))
+            except Exception:
+                continue
+        return bullets
 
     def _record_usage(self, cycle_number: int) -> None:
         self._token_log.append(TokenUsage(
@@ -247,6 +282,27 @@ class SimulationPod:
             return result
 
         self._llm_client.generate = _tracking_generate
+
+
+_MAX_ERROR_LEN = 300
+
+
+def _sanitize_error(exc: Exception) -> str:
+    """Cap what an llm_client exception contributes to PhaseResult.error.
+
+    ClaudeCliClient wraps a timed-out/failed subprocess call in a
+    RuntimeError whose message embeds the *entire* command it ran --
+    including, on a GREEN retry, the previous attempt's whole prompt. Passed
+    through verbatim, that becomes the next attempt's error_output, which
+    embeds the whole thing again, and again: an exponentially growing prompt
+    that makes further timeouts more likely, not less. The actionable part
+    of such a message is its tail ("...timed out after Ns" / "...(exit N):
+    detail"), so keep only that instead of the full repr.
+    """
+    message = str(exc)
+    if len(message) <= _MAX_ERROR_LEN:
+        return message
+    return f"...{message[-_MAX_ERROR_LEN:]}"
 
 
 _PY_CODE_START = re.compile(r"^(import\s|from\s|def\s|class\s)", re.MULTILINE)
