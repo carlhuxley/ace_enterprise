@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+# pybullet has no prebuilt wheel for this base image/Python combination, so
+# pip falls back to building its C extension from source -- needs a
+# compiler. Purged after the build (not needed at runtime, and leaving a
+# compiler in a sandboxed execution image is an avoidable attack-surface
+# increase for what only ever runs untrusted, LLM-generated Python). bandit
+# is the same static scanner every other harness runs as defense-in-depth
+# against generated code (see podman_runner.py).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && pip install --no-cache-dir pybullet==3.2.7 bandit==1.9.4 \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Trusted framework code baked into the image at build time -- this is
+# ACE's own oracle logic (simulation_runner.py and its direct dependencies),
+# not the untrusted controller script, which arrives per-pulse via the
+# read-only /workspace bind mount (see SimulationPodmanRunner.send_pulse).
+# Built from the repo root as context (see build_simulation_image()), not
+# docker/harness/, since these COPY paths are repo-relative.
+WORKDIR /opt/ace_sim
+COPY src/__init__.py src/__init__.py
+COPY src/agents/simulation_runner.py src/agents/simulation_runner.py
+COPY src/agents/simulation_invariants.py src/agents/simulation_invariants.py
+COPY src/agents/simulation_scenario.py src/agents/simulation_scenario.py
+COPY src/agents/simulation_scenarios/ src/agents/simulation_scenarios/
+
+RUN mkdir -p /workspace

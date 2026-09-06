@@ -3,14 +3,11 @@
 Uses controlled pod doubles so we can drive exact pass/fail sequences
 without touching the container or LLM.
 """
-import dataclasses
+from datetime import UTC
 from pathlib import Path
-
-import pytest
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -99,14 +96,14 @@ class TokenPod(ControlledPod):
         self._provider = provider
 
     def _usage_kwargs(self, spec: PodSpec, input_tokens: int) -> dict:
-        return dict(
-            cycle_number=spec.cycle_number,
-            input_tokens=input_tokens,
-            output_tokens=0,
-            actual_model=self._actual_model,
-            requested_model=self._requested_model,
-            provider=self._provider,
-        )
+        return {
+            "cycle_number": spec.cycle_number,
+            "input_tokens": input_tokens,
+            "output_tokens": 0,
+            "actual_model": self._actual_model,
+            "requested_model": self._requested_model,
+            "provider": self._provider,
+        }
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
         self._usage.append(TokenUsage(**self._usage_kwargs(spec, 50)))
@@ -477,7 +474,11 @@ def test_learned_bullets_in_cycle_result(tmp_path):
     assert result.learned_bullets[0].content == "use dataclasses for value objects"
 
 
-def test_learning_skipped_on_green_failure(tmp_path):
+def test_learning_runs_on_stagnant_green_failure(tmp_path):
+    """A GREEN that exhausts every retry attempt without ever passing or
+    hitting a hard abort is stagnation -- there's a real, exhausted attempt
+    worth reflecting on, so Reflector/Curator run even though the cycle
+    failed overall."""
     reflector = _SpyReflector()
     curator = _SpyCurator()
     runner = TDDCycleRunner(
@@ -485,6 +486,23 @@ def test_learning_skipped_on_green_failure(tmp_path):
         max_green_attempts=1,
         reflector=reflector,
         curator=curator,
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert len(reflector.calls) == 1
+    assert len(curator.curate_calls) == 1
+    assert len(curator.apply_calls) == 1
+    assert len(result.learned_bullets) == 1
+
+
+def test_learning_skipped_on_green_abort(tmp_path):
+    """A security/policy abort is not stagnation -- it's an immediate stop,
+    not a genuinely exhausted attempt, so it must not produce bullets."""
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        AbortingGreenPod(), max_green_attempts=3, reflector=reflector, curator=curator,
     )
     result = runner.run(_spec(tmp_path))
 
@@ -533,9 +551,9 @@ class _SpyAuditClient:
         self.events = []
 
     def emit_simple(self, *, event_type, actor_id, payload, playbook_id=None):
-        self.events.append(dict(
-            event_type=event_type, actor_id=actor_id, payload=payload, playbook_id=playbook_id,
-        ))
+        self.events.append({
+            "event_type": event_type, "actor_id": actor_id, "payload": payload, "playbook_id": playbook_id,
+        })
         return True
 
 
@@ -709,9 +727,9 @@ def test_performance_aggregator_distinguishes_models_after_real_cycles(tmp_path)
     emitted through the real TDDCycleRunner, land as two separate agents in
     PerformanceAggregator -- the actual precondition AdaptiveBroker.route_task()
     needs to have more than one candidate to choose between."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from src.audit.schemas import AuditEvent, AuditEventType as _ET
+    from src.audit.schemas import AuditEvent
     from src.broker.performance_aggregator import PerformanceAggregator
 
     class _RecordingAuditClient:
@@ -724,7 +742,7 @@ def test_performance_aggregator_distinguishes_models_after_real_cycles(tmp_path)
                 event_type=event_type,
                 actor_id=actor_id,
                 actor_type="agent",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 payload=payload,
                 prev_hash="0" * 64,
                 playbook_id=playbook_id,

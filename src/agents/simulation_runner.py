@@ -20,6 +20,7 @@ and run_simulation() need a real PyBullet DIRECT client.
 """
 import json
 import sys
+from collections import deque
 from dataclasses import asdict, dataclass, field
 
 from src.agents.simulation_invariants import MetricBound
@@ -31,6 +32,7 @@ __all__ = [
     "check_instantaneous",
     "check_final",
     "check_integral",
+    "check_windowed",
     "run_simulation",
     "summarize_telemetry",
     "main",
@@ -121,6 +123,27 @@ def check_integral(accumulated: dict, bounds: list[MetricBound]) -> MetricBound 
     return None
 
 
+def check_windowed(history: dict[str, deque], bounds: list[MetricBound]) -> MetricBound | None:
+    """Return the first violated windowed-scope bound, or None.
+
+    `history[metric]` is a deque of that metric's raw per-step values, sized
+    (by the caller) to hold exactly `within_steps + 1` samples once full --
+    so `history[metric][0]` and `history[metric][-1]` are exactly
+    `within_steps` steps apart. Bounds with insufficient history yet
+    (deque not full) are skipped, not violated.
+    """
+    for bound in bounds:
+        if bound.scope != "windowed":
+            continue
+        buf = history.get(bound.metric)
+        if buf is None or bound.within_steps is None or len(buf) <= bound.within_steps:
+            continue
+        delta = abs(buf[-1] - buf[0])
+        if not compare(delta, bound.operator, bound.threshold):
+            return bound
+    return None
+
+
 def summarize_telemetry(telemetry: SimulationTelemetry, bounds: list[MetricBound]) -> str:
     """A concise, scenario-agnostic diagnosis of one run, meant to be fed
     back as GREEN-retry context (PhaseResult.output) -- not a raw telemetry
@@ -155,6 +178,17 @@ def run_simulation(p, client, scenario, controller, bounds: list[MetricBound], m
     final_metrics: dict[str, float] = {}
     has_final_bounds = any(b.scope == "final" for b in bounds)
 
+    # Windowed bounds need raw (unrounded, unsampled) per-step history,
+    # independent of metric_traces' trace_stride sampling -- a stall window
+    # of e.g. 100 steps must not silently miss samples. Sized to exactly
+    # within_steps + 1 per metric so the deque's ends are always exactly
+    # within_steps apart once full.
+    window_size: dict[str, int] = {}
+    for bound in bounds:
+        if bound.scope == "windowed" and bound.within_steps is not None:
+            window_size[bound.metric] = max(window_size.get(bound.metric, 0), bound.within_steps + 1)
+    history: dict[str, deque] = {name: deque(maxlen=n) for name, n in window_size.items()}
+
     violated_bound = None
     converged = False
     step = 0
@@ -169,8 +203,10 @@ def run_simulation(p, client, scenario, controller, bounds: list[MetricBound], m
             accumulated[name] = accumulated.get(name, 0.0) + value
             if step == 1 or step % trace_stride == 0:
                 metric_traces.setdefault(name, []).append(round(value, 6))
+            if name in history:
+                history[name].append(value)
 
-        violated_bound = check_instantaneous(metric_values, bounds)
+        violated_bound = check_instantaneous(metric_values, bounds) or check_windowed(history, bounds)
         if violated_bound is not None:
             break
 

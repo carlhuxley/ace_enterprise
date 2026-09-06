@@ -54,6 +54,18 @@ class TestConvergenceTarget:
         assert result[0].within_steps == 500
 
 
+class TestWindowedBound:
+    def test_extracts_windowed_bound_with_window_size(self):
+        text = "And the radial error must change by at least 0.001 every 100 steps"
+        result = extract_invariants(text)
+        assert result == [MetricBound("radial_error", ">=", 0.001, "windowed", within_steps=100)]
+
+    def test_step_suffix_required_but_singular_form_accepted(self):
+        text = "And depth must change by at least 0.0005 every 1 step"
+        result = extract_invariants(text)
+        assert result[0].within_steps == 1
+
+
 class TestFullScenario:
     def test_extracts_a_mix_of_bound_kinds(self):
         text = """
@@ -63,6 +75,7 @@ class TestFullScenario:
             And the grip force must maintain >= 3.0
             And final radial error must reach <= 0.0015 within 500 steps
             And final depth must reach <= 0.024 within 500 steps
+            And the radial error must change by at least 0.001 every 100 steps
         """
         result = extract_invariants(text)
         assert result == [
@@ -70,4 +83,5 @@ class TestFullScenario:
             MetricBound("grip_force", ">=", 3.0, "instantaneous"),
             MetricBound("radial_error", "<=", 0.0015, "final", within_steps=500),
             MetricBound("depth", "<=", 0.024, "final", within_steps=500),
+            MetricBound("radial_error", ">=", 0.001, "windowed", within_steps=100),
         ]

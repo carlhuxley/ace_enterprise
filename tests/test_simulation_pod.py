@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from src.agents.language_pod import LanguagePod, PodSpec
 from src.agents.simulation_invariants import MetricBound
 from src.agents.simulation_oracle import SimulationEnvironmentError
-from src.agents.simulation_pod import SimulationPod, _sanitize_error
+from src.agents.simulation_pod import SimulationPod, _environment_error_message, _sanitize_error
 from src.agents.simulation_runner import SimulationTelemetry
 
 
@@ -520,3 +520,35 @@ class TestSanitizeError:
         assert result.passed is False
         assert len(result.error) <= 310
         assert result.error.endswith("timed out after 300 seconds")
+
+
+# ---------------------------------------------------------------------------
+# _environment_error_message -- a bandit "Security gate:" finding must reach
+# TDDCycleRunner's _is_abort() prefix check unprefixed by the ordinary
+# "SimulationEnvironment: " wrap every other environment failure gets.
+# ---------------------------------------------------------------------------
+
+class TestEnvironmentErrorMessage:
+    def test_ordinary_environment_error_gets_prefixed(self):
+        result = _environment_error_message(SimulationEnvironmentError("pybullet not installed"))
+        assert result == "SimulationEnvironment: pybullet not installed"
+
+    def test_security_gate_error_is_not_double_prefixed(self):
+        exc = SimulationEnvironmentError("Security gate: HIGH=1 MEDIUM=0 LOW=0")
+        result = _environment_error_message(exc)
+        assert result == "Security gate: HIGH=1 MEDIUM=0 LOW=0"
+        assert not result.startswith("SimulationEnvironment:")
+
+    def test_run_green_propagates_security_gate_prefix_for_abort_detection(self, tmp_path):
+        """This is what actually matters end-to-end: TDDCycleRunner's
+        _is_abort() checks result.error.startswith("Security gate:") to
+        decide whether to abort without retrying -- a double-prefixed
+        message would silently defeat that and waste retries on a security
+        finding that will never pass."""
+        oracle = MagicMock()
+        oracle.run.side_effect = SimulationEnvironmentError("Security gate: HIGH=1 MEDIUM=0 LOW=0")
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.error.startswith("Security gate:")

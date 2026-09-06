@@ -4,12 +4,15 @@ and `scenario`, so these tests exercise the real bound-checking logic
 without needing pybullet installed -- see tests/test_simulation_oracle.py
 for real-physics coverage.
 """
+from collections import deque
+
 from src.agents.simulation_invariants import MetricBound
 from src.agents.simulation_runner import (
     SimulationTelemetry,
     check_final,
     check_instantaneous,
     check_integral,
+    check_windowed,
     compare,
     infer_max_steps,
     run_simulation,
@@ -97,6 +100,39 @@ class TestCheckIntegral:
     def test_none_when_satisfied(self):
         bounds = [MetricBound("energy", "<=", 10.0, "integral")]
         assert check_integral({"energy": 5.0}, bounds) is None
+
+
+class TestCheckWindowed:
+    def test_none_when_history_not_yet_full(self):
+        bounds = [MetricBound("error", ">=", 0.01, "windowed", within_steps=5)]
+        history = {"error": deque([1.0, 1.0, 1.0], maxlen=6)}  # needs 6 to be full
+        assert check_windowed(history, bounds) is None
+
+    def test_violated_when_window_shows_no_real_change(self):
+        bounds = [MetricBound("error", ">=", 0.01, "windowed", within_steps=5)]
+        history = {"error": deque([1.0] * 6, maxlen=6)}
+        violated = check_windowed(history, bounds)
+        assert violated is not None
+        assert violated.metric == "error"
+
+    def test_none_when_window_shows_real_progress(self):
+        bounds = [MetricBound("error", ">=", 0.01, "windowed", within_steps=5)]
+        history = {"error": deque([1.0, 0.9, 0.8, 0.7, 0.6, 0.5], maxlen=6)}
+        assert check_windowed(history, bounds) is None
+
+    def test_ignores_non_windowed_bounds(self):
+        bounds = [MetricBound("error", "<=", 0.05, "final", within_steps=5)]
+        history = {"error": deque([1.0] * 6, maxlen=6)}
+        assert check_windowed(history, bounds) is None
+
+    def test_missing_history_for_metric_is_skipped(self):
+        bounds = [MetricBound("untracked", ">=", 0.01, "windowed", within_steps=5)]
+        assert check_windowed({}, bounds) is None
+
+    def test_uses_absolute_delta_so_direction_does_not_matter(self):
+        bounds = [MetricBound("depth", ">=", 0.01, "windowed", within_steps=3)]
+        history = {"depth": deque([0.0, 0.005, 0.01, 0.02], maxlen=4)}  # increasing, not decreasing
+        assert check_windowed(history, bounds) is None
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +280,45 @@ class TestRunSimulationConvergence:
         assert telemetry.peak_metrics["error"] == 2.0
         # step 1 (always sampled) plus every 2nd step through 10: 1,2,4,6,8,10
         assert telemetry.metric_traces["error"] == [2.0] * 6
+
+
+class TestRunSimulationWindowedBounds:
+    """Windowed bounds formalize stall detection as a real Gherkin-declared
+    invariant, enforced live during the run -- not just a post-hoc diagnosis
+    in summarize_telemetry()."""
+
+    def test_frozen_metric_violates_before_the_step_budget_is_exhausted(self):
+        bounds = [MetricBound("error", ">=", 0.01, "windowed", within_steps=5)]
+        telemetry = run_simulation(
+            FakePyBullet(), 0, ConstantErrorScenario(), NullController(), bounds,
+            max_steps=100, trace_stride=1,
+        )
+        assert telemetry.success is False
+        assert telemetry.violated is True
+        assert telemetry.violated_metric == "error"
+        assert telemetry.phase == "violated:error"
+        assert telemetry.steps_taken < 100  # caught well before exhausting the budget
+
+    def test_genuinely_progressing_metric_does_not_violate(self):
+        bounds = [
+            MetricBound("error", ">=", 0.0001, "windowed", within_steps=5),
+            MetricBound("error", "<=", 0.05, "final", within_steps=50),
+        ]
+        telemetry = run_simulation(
+            FakePyBullet(), 0, ConvergingScenario(), NullController(), bounds,
+            max_steps=50, trace_stride=1,
+        )
+        assert telemetry.success is True
+        assert telemetry.violated is False
+        assert telemetry.phase == "converged"
+
+    def test_windowed_bound_on_an_unreported_metric_never_fires(self):
+        bounds = [MetricBound("nonexistent", ">=", 0.01, "windowed", within_steps=5)]
+        telemetry = run_simulation(
+            FakePyBullet(), 0, ConstantErrorScenario(), NullController(), bounds,
+            max_steps=10, trace_stride=1,
+        )
+        assert telemetry.violated is False
 
 
 # ---------------------------------------------------------------------------

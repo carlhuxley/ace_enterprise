@@ -5,7 +5,12 @@ Handles GREEN retries with error feedback and aborts on security/policy failures
 
 Optional learning loop: if reflector + curator + playbook_id are provided, a
 Reflector/Curator pass runs after each successful cycle to extract reusable
-patterns and write them back to the playbook.
+patterns and write them back to the playbook. It also runs on a *stagnant*
+GREEN failure -- every retry attempt spent without ever passing or hitting a
+hard abort (see _is_stagnant) -- so a genuinely exhausted attempt still
+teaches the playbook something, not just a winning one. A single off-target
+first try that a normal retry could still fix is not stagnation and does not
+trigger learning.
 
 Optional audit trail: if audit_client is provided, TEST_GENERATED,
 IMPLEMENTATION_GENERATED, PATTERN_LEARNED, and CYCLE_COMPLETED events are
@@ -176,6 +181,12 @@ class TDDCycleRunner:
                 token_usage=self._pod.token_usage()[token_start:],
                 error=green_result.error or "GREEN phase failed",
             )
+            # _learn() already handles a FAILED outcome internally (see
+            # EnvironmentFeedback.result below); it was only ever gated by
+            # the success check this branch used to return before reaching.
+            if _is_stagnant(green_attempts, self._max_green_attempts, green_result):
+                learned = self._learn(spec, cycle_result)
+                cycle_result = dataclasses.replace(cycle_result, learned_bullets=learned)
             self._log(spec, cycle_result)
             self._emit_cycle_completed(spec, cycle_result, time.monotonic() - cycle_start)
             return cycle_result
@@ -198,7 +209,8 @@ class TDDCycleRunner:
             error=None if refactor_result.passed else (refactor_result.error or "REFACTOR phase failed"),
         )
 
-        # Learning runs only after GREEN passes — there must be real code to reflect on.
+        # Also runs on a stagnant GREEN failure (see the early-return branch
+        # above) — this branch is the ordinary post-success path.
         if cycle_result.green_result.passed:
             learned = self._learn(spec, cycle_result)
             cycle_result = dataclasses.replace(cycle_result, learned_bullets=learned)
@@ -352,6 +364,15 @@ def _read_if_exists(path: Path) -> str:
         return path.read_text()
     except OSError:
         return ""
+
+
+def _is_stagnant(green_attempts: int, max_green_attempts: int, green_result: PhaseResult) -> bool:
+    """True when GREEN exhausted its full retry budget without ever passing
+    or hitting a hard abort -- a genuinely stuck attempt worth reflecting on,
+    as opposed to a single off-target try a normal retry could still fix.
+    This is pod-agnostic: it only needs the attempt count TDDCycleRunner
+    already tracks, not any pod-specific telemetry/diagnosis format."""
+    return green_attempts >= max_green_attempts and not _is_abort(green_result)
 
 
 def _is_abort(result: PhaseResult) -> bool:

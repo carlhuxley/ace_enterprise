@@ -28,7 +28,11 @@ from pathlib import Path
 from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.simulation_invariants import MetricBound, extract_invariants
-from src.agents.simulation_oracle import SimulationEnvironmentError, SimulationOracle
+from src.agents.simulation_oracle import (
+    SECURITY_GATE_PREFIX,
+    SimulationEnvironmentError,
+    SimulationOracle,
+)
 from src.agents.simulation_runner import summarize_telemetry
 from src.agents.simulation_scenario import SimulationScenario
 
@@ -102,7 +106,7 @@ class SimulationPod:
             telemetry = self._oracle.run(self._scenario.null_action_source(), invariants)
         except SimulationEnvironmentError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"SimulationEnvironment: {exc}")
+            return PhaseResult(passed=False, output="", error=_environment_error_message(exc))
 
         commit_to_disk(_invariants_to_json(invariants), spec.test_file)
         self._record_usage(spec.cycle_number)
@@ -183,7 +187,7 @@ class SimulationPod:
         try:
             telemetry = self._oracle.run(controller_code, invariants)
         except SimulationEnvironmentError as exc:
-            return PhaseResult(passed=False, output="", error=f"SimulationEnvironment: {exc}")
+            return PhaseResult(passed=False, output="", error=_environment_error_message(exc))
         summary = summarize_telemetry(telemetry, invariants)
         if not telemetry.success:
             summary = self._with_stagnation_note(spec.cycle_number, summary)
@@ -282,6 +286,18 @@ class SimulationPod:
             return result
 
         self._llm_client.generate = _tracking_generate
+
+
+def _environment_error_message(exc: SimulationEnvironmentError) -> str:
+    """A bandit-HIGH finding must reach TDDCycleRunner as a hard abort (see
+    _is_abort()'s "Security gate:" prefix check) -- prefixing it with
+    "SimulationEnvironment: " like every other environment failure would
+    break that exact-prefix match and let a genuine security gate get
+    retried like an ordinary infra hiccup."""
+    message = str(exc)
+    if message.startswith(SECURITY_GATE_PREFIX):
+        return message
+    return f"SimulationEnvironment: {message}"
 
 
 _MAX_ERROR_LEN = 300

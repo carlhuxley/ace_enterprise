@@ -16,7 +16,7 @@ from typing import Literal
 __all__ = ["MetricBound", "extract_invariants"]
 
 Operator = Literal["<=", "<", ">=", ">", "=="]
-Scope = Literal["instantaneous", "final", "integral"]
+Scope = Literal["instantaneous", "final", "integral", "windowed"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,15 @@ class MetricBound:
                               satisfy the bound by some point within `within_steps`.
     scope="integral"      -- checked once at the end, against the metric's value
                               accumulated (summed) over the whole run.
+    scope="windowed"      -- checked every step once `within_steps` samples of
+                              history exist: |m_t - m_{t-within_steps}| must
+                              satisfy (operator, threshold). Formalizes stall
+                              detection in the Gherkin contract itself --
+                              operator ">=" makes it "must make real progress
+                              over this window, not just stay technically
+                              within some other bound"; a run that merely
+                              holds still fails it even if every instantaneous
+                              bound is otherwise satisfied.
     """
 
     metric: str
@@ -51,6 +60,12 @@ _LOWER_RE = re.compile(
 # "And final <metric> must reach <= <value> within <steps>" -- convergence target.
 _CONVERGENCE_RE = re.compile(
     rf"{_KEYWORD}\s+final\s+(.+?)\s+must\s+reach\s*<=\s*{_NUM}\s+within\s+(\d+)(?:\s*steps?)?",
+    re.IGNORECASE,
+)
+# "And <metric> must change by at least <value> every <steps> steps" -- windowed
+# stall-detection bound: |m_t - m_{t-steps}| >= value.
+_WINDOWED_RE = re.compile(
+    rf"{_KEYWORD}\s+(?:the\s+)?(.+?)\s+must\s+change\s+by\s+at\s+least\s+{_NUM}\s+every\s+(\d+)\s*steps?",
     re.IGNORECASE,
 )
 
@@ -91,6 +106,14 @@ def extract_invariants(gherkin_text: str | None) -> list[MetricBound]:
             operator="<=",
             threshold=float(match.group(2)),
             scope="final",
+            within_steps=int(match.group(3)),
+        ))
+    for match in _WINDOWED_RE.finditer(gherkin_text):
+        bounds.append(MetricBound(
+            metric=_clean_metric_name(match.group(1)),
+            operator=">=",
+            threshold=float(match.group(2)),
+            scope="windowed",
             within_steps=int(match.group(3)),
         ))
     return bounds

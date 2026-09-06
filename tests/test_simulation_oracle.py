@@ -229,3 +229,118 @@ class TestTelemetryTraces:
 
         assert set(telemetry.metric_traces) == {"peak_force", "radial_error", "depth"}
         assert len(telemetry.metric_traces["peak_force"]) > 0
+
+
+class FakeContainerRunner:
+    """A ContainerRunner-shaped double for SimulationOracle's own
+    container-path branching logic -- no real podman or pybullet involved,
+    since none of this depends on either; see test_simulation_podman_runner.py
+    for real-container coverage."""
+
+    def __init__(self, pulse_result=None, raise_on_pulse=None):
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.pulse_calls = 0
+        self._pulse_result = pulse_result
+        self._raise_on_pulse = raise_on_pulse
+
+    def start(self):
+        self.start_calls += 1
+
+    def stop(self):
+        self.stop_calls += 1
+
+    def is_alive(self):
+        return self.start_calls > self.stop_calls
+
+    def run_simulation_pulse(self, controller_code, args_payload):
+        self.pulse_calls += 1
+        if self._raise_on_pulse is not None:
+            exc, self._raise_on_pulse = self._raise_on_pulse, None  # only the first call raises
+            raise exc
+        return self._pulse_result
+
+
+def _fake_pulse(exit_code=0, stdout="", stderr="", bandit_high=0, bandit_medium=0, bandit_low=0):
+    from src.agents.podman_orchestrator import PulseResult
+
+    return PulseResult(
+        exit_code=exit_code, stdout=stdout, stderr=stderr,
+        bandit_high=bandit_high, bandit_medium=bandit_medium, bandit_low=bandit_low,
+    )
+
+
+class TestContainerizedExecutionBranching:
+    def test_runner_is_started_lazily_on_first_run(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(stdout='{"success": true, "steps_taken": 1, "violated": false, "violated_metric": null, "stalled": false, "phase": "converged", "failure_reason": null}'))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        assert runner.start_calls == 0
+        oracle.run("code", [])
+        assert runner.start_calls == 1
+
+    def test_runner_is_not_restarted_on_subsequent_calls(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(stdout='{"success": true, "steps_taken": 1, "violated": false, "violated_metric": null, "stalled": false, "phase": "converged", "failure_reason": null}'))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        oracle.run("code", [])
+        oracle.run("code", [])
+
+        assert runner.start_calls == 1
+        assert runner.pulse_calls == 2
+
+    def test_close_stops_a_started_runner(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(stdout='{"success": true, "steps_taken": 1, "violated": false, "violated_metric": null, "stalled": false, "phase": "converged", "failure_reason": null}'))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+        oracle.run("code", [])
+
+        oracle.close()
+
+        assert runner.stop_calls == 1
+
+    def test_close_is_a_no_op_if_never_started(self):
+        runner = FakeContainerRunner()
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+        oracle.close()
+        assert runner.stop_calls == 0
+
+    def test_bandit_high_raises_with_security_gate_prefix(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(bandit_high=1, stdout="irrelevant"))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        with pytest.raises(SimulationEnvironmentError) as exc_info:
+            oracle.run("code", [])
+
+        assert str(exc_info.value).startswith("Security gate:")
+
+    def test_nonzero_exit_code_raises_environment_error(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(exit_code=1, stderr="boom"))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        with pytest.raises(SimulationEnvironmentError, match="boom"):
+            oracle.run("code", [])
+
+    def test_non_json_stdout_raises_environment_error(self):
+        runner = FakeContainerRunner(pulse_result=_fake_pulse(stdout="not json"))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        with pytest.raises(SimulationEnvironmentError, match="non-JSON"):
+            oracle.run("code", [])
+
+    def test_a_dead_container_is_restarted_and_retried_once(self):
+        good_pulse = _fake_pulse(stdout='{"success": true, "steps_taken": 1, "violated": false, "violated_metric": null, "stalled": false, "phase": "converged", "failure_reason": null}')
+        runner = FakeContainerRunner(pulse_result=good_pulse, raise_on_pulse=RuntimeError("container died"))
+
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+        telemetry = oracle.run("code", [])
+
+        assert telemetry.success is True
+        assert runner.start_calls == 2  # initial lazy start + the retry's restart
+        assert runner.pulse_calls == 2  # the failing call + the retry that succeeded
+
+    def test_timeout_raises_environment_error(self):
+        runner = FakeContainerRunner(raise_on_pulse=TimeoutError("timed out after 30s"))
+        oracle = SimulationOracle(PegInHoleScenario(), runner=runner)
+
+        with pytest.raises(SimulationEnvironmentError, match="timed out"):
+            oracle.run("code", [])

@@ -99,23 +99,26 @@ every run before the controller had a chance to align. Splitting bounds into
 peg-seating task and a continuous-tracking task without either scenario
 special-casing the other's semantics.
 
-### Subprocess isolation, not Podman (yet)
-`SimulationOracle.run()` executes the simulation in a subprocess via
-`sys.executable -m src.agents.simulation_runner`, not in-process. This
+### Subprocess isolation by default; Podman available via SimulationPodmanRunner
+`SimulationOracle.run()` executes the simulation in a subprocess by default
+(`sys.executable -m src.agents.simulation_runner`, not in-process). This
 mirrors the ADR 002 "subprocess vs in-process" rationale, but for a stronger
 reason here: PyBullet's `p.DIRECT` client is a stateful, process-global C
 extension, so subprocess-per-run guarantees no state leaks between
 RED/GREEN/REFACTOR calls, and bounds a crash or runaway controller loop to a
 child process with a timeout.
 
-This is a narrower isolation boundary than PythonLanguagePod/GoLanguagePod get
-from `PodmanOrchestrator` (network isolation, read-only workspace, capability
-drops) -- it's the same milestone GoLanguagePod started at before
-ace_enterprise-jww added container sandboxing. `ImportFilter` runs against
-generated controller code before it ever reaches the subprocess, narrowing
-the blast radius the same way it does for PythonLanguagePod, but full
-Podman-based sandboxing of the simulation subprocess is tracked as follow-up
-work, not done here.
+On its own this is a narrower isolation boundary than PythonLanguagePod/
+GoLanguagePod get from `PodmanOrchestrator` (network isolation, read-only
+workspace, capability drops) -- it's the same milestone GoLanguagePod
+started at before ace_enterprise-jww added container sandboxing.
+`ImportFilter` runs against generated controller code before it ever
+reaches the subprocess, narrowing the blast radius the same way it does for
+PythonLanguagePod. Full parity is now available, opt-in, via
+`SimulationOracle(scenario, runner=SimulationPodmanRunner())` -- see
+"Container sandboxing: SimulationPodmanRunner" below for why it needed a
+new runner rather than reusing `PodmanOrchestrator` directly. The bare
+subprocess stays the default so no existing caller or test needs podman.
 
 ### Controller contract is translation-only, per scenario
 Both shipped scenarios' `compute_action` returns a linear velocity command
@@ -246,12 +249,16 @@ mocking, no hints) produced two full learning cycles:
   margin), `peak_force` 0.09N, `depth` 0.018m, all within bounds. REFACTOR
   then ran and also passed, further refining the converged controller.
 
-`TDDCycleRunner._learn()` only runs after a passing GREEN (see "Deferred"
-below), so Attempts 1 and 2's learning passes were invoked directly, using
-the exact same `Reflector.reflect()` / `Curator.curate()` /
-`Curator.apply_updates()` call shape `_learn()` uses internally, just
-triggered on failure. This is a validation-script pattern, not a change to
-the shared harness gate.
+At the time of this run, `TDDCycleRunner._learn()` only ran after a passing
+GREEN, so Attempts 1 and 2's learning passes were invoked directly in the
+validation script, using the exact same `Reflector.reflect()` /
+`Curator.curate()` / `Curator.apply_updates()` call shape `_learn()` uses
+internally, just triggered on failure -- a script-level pattern, not yet a
+change to the shared harness gate. That gate was promoted into
+`TDDCycleRunner` itself in the very next round (see "Stagnation-driven
+learning is now native to TDDCycleRunner" below); a fresh run today would
+trigger this same learning automatically, no validation-script workaround
+needed.
 
 ### Infra: a timeout's error message can compound across retries
 `ClaudeCliClient` wraps a timed-out subprocess call in a `RuntimeError`
@@ -278,6 +285,101 @@ default effort. Higher effort trades latency for deliberation; for a
 task already constrained by a client-side timeout, that trade was net
 negative here -- reverting to default effort with a longer timeout (500s)
 is what actually produced Attempt 3's convergence above.
+
+### Stagnation-driven learning is now native to TDDCycleRunner
+The three items below (all originally listed as deliberately deferred, or
+tracked follow-up) were implemented in the next work session, closing out
+this ADR's open items.
+
+`TDDCycleRunner._learn()` was already outcome-agnostic internally --
+`EnvironmentFeedback.result` was always `"SUCCESS" if result.success else
+"FAILED"`, computed unconditionally. The only thing gating learning to
+successful cycles was the *caller's* check, `if cycle_result.green_result.passed:
+learn(...)`, immediately before the function returned. `_is_stagnant(green_attempts,
+max_green_attempts, green_result)` -- true when every configured GREEN retry
+was spent without ever passing or hitting a hard abort -- now gates a second
+call to `_learn()` in the early-return failure branch. This is pod-agnostic:
+it only needs the attempt count `TDDCycleRunner` already tracks for every
+pod, not any pod-specific telemetry format, so Python/Go/TypeScript pods get
+the same capability with no changes on their side. A single off-target first
+try that a normal retry could still fix is not stagnation (the loop only
+reaches this branch after either an abort or the full retry budget is
+spent, so "not aborted" already implies "exhausted" by construction) and so
+does not spend a Reflector/Curator call on it.
+
+### Windowed bounds formalize stall detection in the Gherkin contract
+`MetricBound` gained `scope="windowed"`: `|m_t - m_{t-within_steps}|` must
+satisfy `(operator, threshold)` once `within_steps` samples of raw
+(unsampled, not `trace_stride`-decimated) history exist for that metric --
+checked live, every step, ending the run immediately on violation exactly
+like an instantaneous bound. `extract_invariants()` parses "`<metric>` must
+change by at least `<value>` every `<N>` steps" into a windowed bound with
+operator `">="` (the "must make real progress" stall-detection case this
+was built for), but `compare()` is generic over the operator, so a
+`<=`-windowed bound ("must not change by more than X in N steps," a
+smoothness constraint) works from the same mechanism with no extra code --
+just not reachable from this one Gherkin phrasing yet.
+
+Confirmed live: adding a windowed bound to `TactilePegInHoleScenario`'s
+invariants catches the null controller's stall at step 989, instead of
+running out the full 4000-step budget to report "stalled" only at the very
+end -- the same category of stagnation `summarize_telemetry()`'s
+"unchanged for the tail of the run" note already *diagnosed* after the
+fact is now something a spec can *enforce* during the run itself.
+
+### Container sandboxing: SimulationPodmanRunner
+`SimulationOracle` gained an optional `runner` parameter (a
+`SimulationPodmanRunner`, `src/agents/simulation_podman_runner.py`); passing
+one switches `run()` from the bare host subprocess to the same
+rootless-Podman sandbox (`--network none`, `--cap-drop all`, read-only
+workspace, tmpfs `/tmp`) every other pod's generated code already runs
+in -- confirmed to produce identical telemetry to the bare-subprocess path
+for the same controller/scenario. The bare subprocess stays the default
+(no podman or image required), so every existing test is unaffected.
+
+Two real mismatches with the existing `PodmanOrchestrator`/`PodmanRunner`
+machinery had to be worked around rather than reused directly:
+
+- **Pass/fail isn't the exit code.** Every other pod's oracle (pytest, `go
+  test`, vitest) treats `exit_code == 0` as "passed" --
+  `PodmanOrchestrator._to_phase_result()` hardcodes exactly that mapping.
+  `simulation_runner.py` exits 0 whenever it ran to completion *regardless*
+  of whether the simulation converged or stalled -- pass/fail is a nested
+  field (`SimulationTelemetry.success`) inside its JSON stdout, a
+  fundamentally different contract. `SimulationPodmanRunner` therefore
+  doesn't return control to `PodmanOrchestrator.pulse()` at all; `run_simulation_pulse()`
+  is a new method or `SimulationOracle` calls directly, returning the raw
+  `PulseResult` for `SimulationOracle` to interpret with its own (already
+  correct) `_parse_telemetry()`/exit-code logic -- the same one the bare
+  subprocess path already used.
+- **The scenario/invariants payload isn't a file.** Every other pod's
+  `send_pulse(files: dict[str, str])` sends everything the tool needs as
+  workspace files. `simulation_runner.py` takes its args as a JSON payload
+  on stdin (scenario dotted path, invariants, step budget) -- exactly what
+  the bare-subprocess path already piped in. `run_simulation_pulse()`
+  writes only the untrusted controller script to the bind-mounted
+  workspace and pipes the JSON payload over `podman exec -i`'s stdin,
+  unchanged from the bare-subprocess protocol; only the transport (host
+  subprocess vs. containerized one) differs.
+
+`docker/harness/Containerfile.simulation` bakes ACE's own trusted oracle
+code (`simulation_runner.py` and its direct dependencies -- not the
+untrusted controller, which still arrives per-pulse) into the image at
+build time, the same trust boundary every other harness image already
+draws. pybullet has no prebuilt wheel for the `python:3.12-slim` base, so
+the image needs a compiler to build it from source at image-build time
+only -- `build-essential` is installed and then purged in the same layer,
+so the final image (like every other execution sandbox here) has no
+compiler available to code it runs. bandit still scans the controller
+script inside the container for the same defense-in-depth reason every
+other pod's container runs it, even though `ImportFilter` already screened
+the code on the host; a `bandit_high` finding is surfaced as a
+`SimulationEnvironmentError` whose message starts with the literal
+`"Security gate:"` prefix `_is_abort()` checks for -- `SimulationPod`'s
+`_environment_error_message()` helper is what keeps this prefix from being
+buried under the ordinary `"SimulationEnvironment: "` wrap every other
+environment failure gets, which would otherwise silently defeat abort
+detection and waste retries on a finding that will never pass.
 
 ### `run_refactor` re-verifies through the oracle
 Unlike GoLanguagePod's `gofmt` (semantics-preserving by construction), an LLM
@@ -308,22 +410,19 @@ phase.
   implementations of the same feature, which isn't the axis SimulationPod
   demonstrates. It's driven directly via
   `TDDCycleRunner(pod=SimulationPod(llm_client, project_root, scenario))`.
-- Full container sandboxing of the simulation subprocess remains open
-  follow-up work (tracked via GitHub issue).
-- Deliberately deferred (not implemented here): a formal engine-level
-  "no-stall" `MetricBound` scope (windowed progress checking, e.g. "this
-  metric must change by at least X within any Y-step window") would let a
-  Gherkin spec itself penalize the stall pattern found in real validation,
-  rather than relying on stagnation-aware retry feedback to help the LLM
-  self-correct across attempts. A real, bigger protocol change; tracked as
-  follow-up, not folded into this ADR's scope.
-  Also deliberately not implemented: letting `TDDCycleRunner._learn()` itself
-  run on a *failed* GREEN, not just a passing one. It's shared infrastructure
-  across every pod (Python/Go/TypeScript too) -- changing its learning gate
-  is a cross-cutting harness decision affecting all of them, not a
-  SimulationPod-scoped change, and deserves its own deliberate discussion
-  rather than being folded in here. (The capability itself -- Reflector/
-  Curator analyzing a failed cycle -- was validated live via a
-  validation-script pattern that calls them directly with `_learn()`'s exact
-  call shape; see "Real validation" above. Only the harness's automatic gate
-  remains untouched.)
+- All three items originally tracked as deferred/follow-up from this ADR's
+  first version are now done, closing the loop: `TDDCycleRunner` reflects
+  on a stagnant GREEN failure natively for every pod, not just SimulationPod
+  (see "Stagnation-driven learning is now native to TDDCycleRunner");
+  `MetricBound` supports `scope="windowed"` for engine-enforced stall
+  detection declared directly in a Gherkin spec; and `SimulationOracle` can
+  run inside the same rootless-Podman sandbox every other pod's generated
+  code already does, via the optional `SimulationPodmanRunner` (bare
+  subprocess remains the default -- no podman/image required unless a
+  caller opts in).
+- `localhost/ace-sim-harness:latest` (built from
+  `docker/harness/Containerfile.simulation` via `build_simulation_image()`,
+  repo root as context) must exist for the containerized path or
+  `tests/test_simulation_podman_runner.py`'s real-container tests -- same
+  precedent as the other three per-language harness images, which have no
+  build-on-missing fallback either.
