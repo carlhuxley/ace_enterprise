@@ -37,6 +37,7 @@ class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum change
     ROUTING_DECISION = "routing_decision"         # AdaptiveBroker picked a model
     BLIND_EVALUATION = "blind_evaluation"         # Candidate scored without attribution
     ENSEMBLE_SELECTION = "ensemble_selection"     # Winning candidate revealed post-scoring
+    ESCALATION_TRIGGERED = "escalation_triggered" # Repair ceiling hit — retried against a stronger/fallback model
 
     # Multi-module project build
     PROJECT_BUILD_COMPLETED = "project_build_completed"  # `ace project` finished a plan

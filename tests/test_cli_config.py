@@ -174,6 +174,42 @@ def test_candidate_models_rejects_non_string_scalar(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# per-role model fields (issue #40): architect_model / worker_model /
+# repair_model / escalation_model
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field_name", ["architect_model", "worker_model", "repair_model", "escalation_model"])
+class TestRoleModelFields:
+    def test_defaults_to_empty_string(self, tmp_path, field_name):
+        config = ProjectConfig.load(_project(tmp_path))
+        assert getattr(config, field_name) == ""
+
+    def test_read_from_config_file(self, tmp_path, field_name):
+        project = _project(tmp_path, config_yaml=f"{field_name}: openrouter/qwen/qwen3-coder:free\n")
+        config = ProjectConfig.load(project)
+        assert getattr(config, field_name) == "openrouter/qwen/qwen3-coder:free"
+
+    def test_accepts_claude_cli_ref(self, tmp_path, field_name):
+        project = _project(tmp_path, config_yaml=f"{field_name}: claude-cli/haiku\n")
+        config = ProjectConfig.load(project)
+        assert getattr(config, field_name) == "claude-cli/haiku"
+
+    def test_rejects_invalid_ref(self, tmp_path, field_name):
+        project = _project(tmp_path, config_yaml=f"{field_name}: justqwen\n")
+        with pytest.raises(ValueError, match="<provider>/<model>"):
+            ProjectConfig.load(project)
+
+
+def test_repair_model_does_not_fall_back_to_worker_model_at_the_config_layer(tmp_path):
+    """ProjectConfig is a literal reflection of the YAML -- the worker_model
+    fallback for an unset repair_model is a wiring-layer concern (cmd_project/
+    ProjectBuilder), not something ProjectConfig itself should resolve."""
+    project = _project(tmp_path, config_yaml="worker_model: openrouter/qwen/qwen3-coder:free\n")
+    config = ProjectConfig.load(project)
+    assert config.repair_model == ""
+
+
+# ---------------------------------------------------------------------------
 # feature file discovery
 # ---------------------------------------------------------------------------
 

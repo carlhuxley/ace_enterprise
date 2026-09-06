@@ -171,6 +171,93 @@ class TestModelOverride:
         assert "<provider>/<model>" in capsys.readouterr().err
 
 
+def _write_config(project_root: Path, yaml_text: str) -> None:
+    ace_dir = project_root / ".ace"
+    ace_dir.mkdir(exist_ok=True)
+    (ace_dir / "config.yaml").write_text(yaml_text)
+
+
+def _fake_from_ref(ref: str):
+    """Stand-in for llm_client_from_ref: derives a distinguishable .model
+    from the ref's second path segment, so different config fields resolve
+    to distinguishable fake clients."""
+    return SimpleNamespace(provider="openrouter", model=ref.split("/", 1)[1])
+
+
+class TestRouting:
+    """Model routing / role-based selection / escalation wiring (issue #40)."""
+
+    def test_routes_via_adaptive_broker_when_two_or_more_candidate_models(self, project):
+        root, spec = project
+        _write_config(root, "candidate_models:\n  - openrouter/qwen/q1\n  - ollama/q2\n")
+        pa, pb, pl, architect, builder = _patch_deps()
+        fake = MagicMock()
+        fake.selected_model = "ollama/q2"
+        fake.to_payload.return_value = {"selected_model": "ollama/q2"}
+        with pa, pb, pl, \
+             patch("src.cli.factory.route_model", return_value=fake) as route, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root))
+        route.assert_called_once()
+
+    def test_model_flag_suppresses_broker_routing(self, project):
+        root, spec = project
+        _write_config(root, "candidate_models:\n  - openrouter/qwen/q1\n  - ollama/q2\n")
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, pl, \
+             patch("src.cli.factory.route_model") as route, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root, model="openrouter/override"))
+        route.assert_not_called()
+
+    def test_distinct_architect_and_worker_models_reach_the_builder(self, project):
+        root, spec = project
+        _write_config(root, "architect_model: openrouter/big\nworker_model: openrouter/small\n")
+        pa, _, pl, architect, builder = _patch_deps()
+        with pa, pl, \
+             patch("src.cli.project_builder.ProjectBuilder", return_value=builder) as PB, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root))
+        args, kwargs = PB.call_args
+        assert args[0].model == "big"          # architect_llm, positional
+        assert kwargs["worker_llm"].model == "small"
+        # repair falls back to worker_model when repair_model is unset
+        assert kwargs["repair_llm"].model == "small"
+
+    def test_model_flag_suppresses_config_architect_and_worker_models(self, project):
+        root, spec = project
+        _write_config(root, "architect_model: openrouter/big\nworker_model: openrouter/small\n")
+        pa, _, pl, architect, builder = _patch_deps()
+        with pa, pl, \
+             patch("src.cli.project_builder.ProjectBuilder", return_value=builder) as PB, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root, model="openrouter/override"))
+        args, kwargs = PB.call_args
+        assert args[0].model == "override"
+        assert kwargs["worker_llm"].model == "override"
+
+    def test_escalation_model_stays_independent_of_model_flag(self, project):
+        root, spec = project
+        _write_config(root, "escalation_model: openrouter/strong\n")
+        pa, _, pl, architect, builder = _patch_deps()
+        with pa, pl, \
+             patch("src.cli.project_builder.ProjectBuilder", return_value=builder) as PB, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root, model="openrouter/override"))
+        _, kwargs = PB.call_args
+        assert kwargs["escalation_llm"].model == "strong"
+
+    def test_no_escalation_model_means_none_reaches_the_builder(self, project):
+        root, spec = project
+        pa, _, pl, architect, builder = _patch_deps()
+        with pa, pl, \
+             patch("src.cli.project_builder.ProjectBuilder", return_value=builder) as PB, \
+             patch("src.cli.factory.llm_client_from_ref", side_effect=_fake_from_ref):
+            cmd_project(_args(spec=spec, project=root))
+        _, kwargs = PB.call_args
+        assert kwargs["escalation_llm"] is None
+
+
 def test_parser_wires_project_subcommand():
     ns = _build_parser().parse_args(
         ["project", "s.spec", "--plan-only", "-y", "--resume", "--model", "ollama/q:7b"]

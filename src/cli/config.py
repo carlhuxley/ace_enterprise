@@ -29,6 +29,18 @@ class ProjectConfig:
     # of them via the AdaptiveBroker (audit-history-driven); with 0 or 1 the
     # single configured model / ACE default is used unchanged.
     candidate_models: list[str] = field(default_factory=list)
+    # Per-role "<provider>/<model>" refs for `ace project` (issue #40). Empty
+    # string means "not configured" -- cmd_project resolves the fallback
+    # chain (architect/worker fall back to the routed/default base model,
+    # repair falls back to worker_model, escalation has no fallback and
+    # simply stays disabled). Deliberately left as plain strings here, not
+    # resolved to a client or defaulted to each other -- this dataclass is a
+    # literal reflection of the YAML; fallback resolution happens once, at
+    # the wiring layer, not duplicated here too.
+    architect_model: str = ""
+    worker_model: str = ""
+    repair_model: str = ""
+    escalation_model: str = ""
 
     def discover_features(self) -> list[Path]:
         """Return all .feature files in <project>/features/, falling back to project root."""
@@ -57,6 +69,11 @@ class ProjectConfig:
         test_dir = _detect_dir(project_root, _TEST_DIR_CANDIDATES, default="tests")
         src_dir = _detect_dir(project_root, _SRC_DIR_CANDIDATES, default="src")
 
+        architect_model = _validate_model_ref("architect_model", raw.get("architect_model", ""))
+        worker_model = _validate_model_ref("worker_model", raw.get("worker_model", ""))
+        repair_model = _validate_model_ref("repair_model", raw.get("repair_model", ""))
+        escalation_model = _validate_model_ref("escalation_model", raw.get("escalation_model", ""))
+
         return cls(
             project_root=project_root,
             test_dir=test_dir,
@@ -67,7 +84,29 @@ class ProjectConfig:
             max_iterations=int(raw.get("max_iterations", 20)),
             team_id=raw.get("team_id"),
             candidate_models=_str_list(raw.get("candidate_models")),
+            architect_model=architect_model,
+            worker_model=worker_model,
+            repair_model=repair_model,
+            escalation_model=escalation_model,
         )
+
+
+def _validate_model_ref(field_name: str, value: object) -> str:
+    """Validate an optional per-role model ref ("<provider>/<model>" or
+    "claude-cli[/<model>]"). Empty/unset means "not configured" and is
+    always valid -- validation only applies once a ref is actually given.
+
+    _split_model_ref is imported locally, not at module scope: factory.py
+    already imports ProjectConfig at module level, so a module-level import
+    the other way would be circular.
+    """
+    ref = str(value).strip() if value else ""
+    if not ref:
+        return ""
+    from src.cli.factory import _split_model_ref
+
+    _split_model_ref(ref)  # raises ValueError with its own message on a bad ref
+    return ref
 
 
 def _str_list(value: object) -> list[str]:

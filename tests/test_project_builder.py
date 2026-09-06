@@ -4,6 +4,7 @@ ModuleArchitect, ModuleTDDBuilder and the Podman assembly run are all injected
 as fakes -- no LLM / container.
 """
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -306,3 +307,66 @@ def test_emits_project_build_completed_audit_event(dirs, tmp_path):
     assert len(events) == 1
     assert events[0].payload["build_order"] == ["db"]
     assert events[0].payload["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Per-role model wiring (#40) — exercises the real _default_architect /
+# _default_builder factories (no architect_factory/builder_factory override).
+# ---------------------------------------------------------------------------
+
+def test_default_builder_uses_the_worker_repair_and_escalation_clients():
+    architect_llm = SimpleNamespace(model="architect")
+    worker_llm = SimpleNamespace(model="worker")
+    repair_llm = SimpleNamespace(model="repair")
+    escalation_llm = SimpleNamespace(model="escalation")
+
+    pb = ProjectBuilder(
+        llm_client=architect_llm, model_id="architect-model",
+        worker_llm=worker_llm, worker_model_id="worker-model",
+        repair_llm=repair_llm, repair_model_id="repair-model",
+        escalation_llm=escalation_llm, escalation_model_id="escalation-model",
+    )
+    with patch("src.contracts.module_tdd_builder.ModuleTDDBuilder") as MockBuilder:
+        pb._default_builder()
+    args, kwargs = MockBuilder.call_args
+    assert args[0] is worker_llm
+    assert args[2] == "worker-model"
+    assert kwargs["repair_llm_client"] is repair_llm
+    assert kwargs["escalation_llm_client"] is escalation_llm
+    assert kwargs["escalation_model_id"] == "escalation-model"
+
+
+def test_default_architect_uses_the_architect_tier_client_not_worker():
+    architect_llm = SimpleNamespace(model="architect")
+    worker_llm = SimpleNamespace(model="worker")
+    pb = ProjectBuilder(
+        llm_client=architect_llm, model_id="architect-model", worker_llm=worker_llm,
+    )
+    with patch("src.contracts.module_architect.ModuleArchitect") as MockArchitect:
+        pb._default_architect()
+    assert MockArchitect.call_args[0][0] is architect_llm
+
+
+def test_repair_client_falls_back_to_worker_when_not_configured():
+    worker_llm = SimpleNamespace(model="worker")
+    pb = ProjectBuilder(llm_client=object(), worker_llm=worker_llm)
+    with patch("src.contracts.module_tdd_builder.ModuleTDDBuilder") as MockBuilder:
+        pb._default_builder()
+    assert MockBuilder.call_args[1]["repair_llm_client"] is worker_llm
+
+
+def test_worker_and_repair_fall_back_to_the_base_llm_when_nothing_is_configured():
+    base_llm = object()
+    pb = ProjectBuilder(llm_client=base_llm, model_id="base-model")
+    with patch("src.contracts.module_tdd_builder.ModuleTDDBuilder") as MockBuilder:
+        pb._default_builder()
+    args, kwargs = MockBuilder.call_args
+    assert args[0] is base_llm
+    assert args[2] == "base-model"
+    assert kwargs["repair_llm_client"] is base_llm
+    assert kwargs["escalation_llm_client"] is None
+
+
+def test_escalation_client_is_disabled_by_default():
+    pb = ProjectBuilder(llm_client=object())
+    assert pb._escalation_llm is None

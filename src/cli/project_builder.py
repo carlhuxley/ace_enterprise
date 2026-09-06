@@ -91,10 +91,30 @@ class ProjectBuilder:
         assembler=None,
         playbook_id: str | None = None,
         skip_learn: bool = False,
+        worker_llm: LLMClient | None = None,
+        worker_model_id: str | None = None,
+        repair_llm: LLMClient | None = None,
+        repair_model_id: str | None = None,
+        escalation_llm: LLMClient | None = None,
+        escalation_model_id: str | None = None,
     ) -> None:
+        """`llm_client`/`model_id` are the architect-tier client (also what LEARN's
+        Reflector/Curator use, per issue #40's scope decision). `worker_llm`,
+        `repair_llm`, `escalation_llm` are per-role overrides for the module
+        build/repair loop (issue #40) — each defaults to `llm_client` (repair
+        further defaults to `worker_llm`) when not given, preserving today's
+        single-model behavior. `escalation_llm` has no fallback: None disables
+        repair-ceiling escalation entirely.
+        """
         self._llm = llm_client
         self._audit = audit_client
         self._model_id = model_id
+        self._worker_llm = worker_llm or llm_client
+        self._worker_model_id = worker_model_id or model_id
+        self._repair_llm = repair_llm or self._worker_llm
+        self._repair_model_id = repair_model_id or self._worker_model_id
+        self._escalation_llm = escalation_llm
+        self._escalation_model_id = escalation_model_id
         # Test seams — default to the real sandboxed components.
         self._make_architect = architect_factory or self._default_architect
         self._make_builder = builder_factory or self._default_builder
@@ -142,11 +162,14 @@ class ProjectBuilder:
         from src.contracts.module_tdd_builder import ModuleTDDBuilder
 
         return ModuleTDDBuilder(
-            self._llm, self._audit, self._model_id,
+            self._worker_llm, self._audit, self._worker_model_id,
             reflector=self._reflector,
             curator=self._curator,
             playbook_manager=self._playbook_manager,
             playbook_id=self._playbook_id,
+            repair_llm_client=self._repair_llm,
+            escalation_llm_client=self._escalation_llm,
+            escalation_model_id=self._escalation_model_id,
         )
 
     # ------------------------------------------------------------------

@@ -117,11 +117,14 @@ class ModuleTDDBuilder:
         curator: Any = None,
         playbook_manager: Any = None,
         playbook_id: str | None = None,
+        repair_llm_client: LLMClient | None = None,
+        escalation_llm_client: LLMClient | None = None,
+        escalation_model_id: str | None = None,
     ):
         """Initialize the module TDD builder.
 
         Args:
-            llm_client: LLM for code generation
+            llm_client: LLM for per-function code generation
             audit_client: Optional audit client for tracking
             model_id: Model identifier for audit
             max_attempts_per_function: Max TDD cycles per function
@@ -131,6 +134,14 @@ class ModuleTDDBuilder:
             reflector, curator, playbook_manager, playbook_id: wire all four to
                 enable the LEARN pass (issue #33) — prior bullets are fed into
                 the build prompts and a delta is written back after each module.
+            repair_llm_client: LLM for the whole-module repair loop (issue #40,
+                role-based selection) — defaults to llm_client when not given,
+                preserving today's single-model behavior.
+            escalation_llm_client, escalation_model_id: when the repair loop
+                exhausts max_repair_attempts still failing, one extra repair
+                attempt is made against this client before giving up (issue
+                #40, repair-ceiling escalation). None (the default) disables
+                escalation entirely — behavior is identical to today.
         """
         self._llm = llm_client
         self._audit = audit_client
@@ -141,6 +152,9 @@ class ModuleTDDBuilder:
         self._curator = curator
         self._playbook_manager = playbook_manager
         self._playbook_id = playbook_id
+        self._repair_llm = repair_llm_client or llm_client
+        self._escalation_llm = escalation_llm_client
+        self._escalation_model_id = escalation_model_id or model_id
 
     _MAX_PRIOR_BULLETS = 12
 
@@ -271,6 +285,33 @@ class ModuleTDDBuilder:
             all_integration_passed = (
                 all(integration_results.values()) if integration_results else False
             )
+
+        if not all_integration_passed and repair >= self._max_repair_attempts and self._escalation_llm is not None:
+            escalated = self._repair_module(
+                contract, module_code, integration_failures,
+                dep_import_lines=dep_import_lines, prior_lessons=prior_lessons,
+                llm_client=self._escalation_llm,
+            )
+            if escalated is not None and escalated.strip() != module_code.strip():
+                module_code = escalated
+                total_cycles += 1
+                integration_results, integration_failures = self._run_integration_tests(
+                    contract=contract, module_code=module_code, dep_modules=dep_modules,
+                )
+                all_integration_passed = all(integration_results.values()) if integration_results else False
+            if self._audit:
+                self._audit.emit_simple(
+                    event_type=AuditEventType.ESCALATION_TRIGGERED,
+                    actor_id=self._escalation_model_id,
+                    payload={
+                        "contract_id": contract.id,
+                        "repair_attempts": self._max_repair_attempts,
+                        "from_model": self._model_id,
+                        "to_model": self._escalation_model_id,
+                        "success": all_integration_passed,
+                    },
+                    session_id=session_id,
+                )
 
         elapsed = time.time() - start_time
 
@@ -550,10 +591,16 @@ Fix the implementation:
         self, contract: ModuleContract, module_code: str, failures: list[str],
         *, dep_import_lines: list[str] | None = None,
         prior_lessons: list[str] | None = None,
+        llm_client: LLMClient | None = None,
     ) -> str | None:
         """Ask the LLM to fix the whole module so the integration tests pass.
 
         Returns the repaired module source, or None on failure.
+
+        llm_client overrides self._repair_llm for this one call -- the
+        repair-ceiling escalation call site (issue #40) uses this to retry
+        against a different, presumably stronger, model without mutating any
+        instance state.
         """
         test_file = render_integration_tests(contract, contract.name)
         lessons_block = ""
@@ -583,7 +630,7 @@ Fix the implementation:
             "Output ONLY the corrected Python module."
         )
         try:
-            response = self._llm.generate(prompt)
+            response = (llm_client or self._repair_llm).generate(prompt)
             code = extract_code(response["content"])
             return code or None
         except Exception as exc:  # noqa: BLE001

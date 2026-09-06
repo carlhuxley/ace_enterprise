@@ -269,6 +269,10 @@ def _build_feature(
     return result.success, result.iterations
 
 
+def _model_id_for(llm) -> str:
+    return f"{llm.provider}/{llm.model}" if getattr(llm, "provider", None) else llm.model
+
+
 _PROJECT_STATUS_GLYPH = {
     "built": "✓",
     "skipped": "•",
@@ -280,7 +284,7 @@ _PROJECT_STATUS_GLYPH = {
 def cmd_project(args: argparse.Namespace) -> int:
     from src.audit.local_client import LocalAuditClient
     from src.cli.config import ProjectConfig
-    from src.cli.factory import default_llm_client, llm_client_from_ref
+    from src.cli.factory import _route_llm, default_llm_client, llm_client_from_ref
     from src.cli.project_builder import ProjectBuilder
     from src.contracts.project_architect import ProjectArchitect
 
@@ -301,11 +305,43 @@ def cmd_project(args: argparse.Namespace) -> int:
     if args.playbook_id:
         config.playbook_id = args.playbook_id
 
-    llm = llm_client_from_ref(args.model) if args.model else default_llm_client()
-    model_id = f"{llm.provider}/{llm.model}" if getattr(llm, "provider", None) else llm.model
     audit = LocalAuditClient()
 
-    architect = ProjectArchitect(llm, audit_client=audit, model_id=model_id)
+    # Model routing / role selection (issue #40). Precedence, highest first:
+    #   1. --model               — overrides architect/worker/repair entirely
+    #   2. config.candidate_models (2+) — AdaptiveBroker routing picks `base`
+    #   3. ACE's settings default (.env)
+    # architect/worker each fall back to `base`; repair falls back to worker;
+    # escalation has no fallback and fires independently of --model — it's an
+    # orthogonal safety net, not part of "which model does the normal work."
+    if args.model:
+        base = llm_client_from_ref(args.model)
+    else:
+        routing = _route_llm(config, audit)
+        base = llm_client_from_ref(routing.selected_model) if routing is not None else default_llm_client()
+
+    architect_llm = (
+        llm_client_from_ref(config.architect_model)
+        if config.architect_model and not args.model else base
+    )
+    worker_llm = (
+        llm_client_from_ref(config.worker_model)
+        if config.worker_model and not args.model else base
+    )
+    repair_llm = (
+        llm_client_from_ref(config.repair_model)
+        if config.repair_model and not args.model else worker_llm
+    )
+    escalation_llm = (
+        llm_client_from_ref(config.escalation_model) if config.escalation_model else None
+    )
+
+    architect_model_id = _model_id_for(architect_llm)
+    worker_model_id = _model_id_for(worker_llm)
+    repair_model_id = _model_id_for(repair_llm)
+    escalation_model_id = _model_id_for(escalation_llm) if escalation_llm is not None else None
+
+    architect = ProjectArchitect(architect_llm, audit_client=audit, model_id=architect_model_id)
     plan_result = architect.plan(spec_path.read_text(encoding="utf-8"))
     if not plan_result.success or plan_result.plan is None:
         print(f"error: could not plan the project — {plan_result.error}", file=sys.stderr)
@@ -327,8 +363,11 @@ def cmd_project(args: argparse.Namespace) -> int:
         return 1
 
     builder = ProjectBuilder(
-        llm, audit_client=audit, model_id=model_id,
+        architect_llm, audit_client=audit, model_id=architect_model_id,
         playbook_id=config.playbook_id, skip_learn=args.no_learn,
+        worker_llm=worker_llm, worker_model_id=worker_model_id,
+        repair_llm=repair_llm, repair_model_id=repair_model_id,
+        escalation_llm=escalation_llm, escalation_model_id=escalation_model_id,
     )
     result = builder.build(
         plan, project_root, config.src_dir, config.test_dir,

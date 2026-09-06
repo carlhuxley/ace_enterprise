@@ -7,6 +7,7 @@ the per-function build, and the sandbox run are all faked here.
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.audit.schemas import AuditEventType
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
 from src.contracts.module_tdd_builder import (
     FunctionBuildResult,
@@ -151,6 +152,122 @@ def test_repair_loop_stops_if_repair_returns_unchanged_code():
     assert result.success is False
     # repair returned the same module -> loop breaks, no 2nd call
     assert repair.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Repair-ceiling escalation (#40)
+# ---------------------------------------------------------------------------
+
+class _FakeAudit:
+    def __init__(self):
+        self.events = []
+
+    def emit_simple(self, **kw):
+        self.events.append(kw)
+
+
+def test_escalation_configured_and_succeeds_reruns_once_more_and_reports_success():
+    escalation_llm = SimpleNamespace(model="strong")
+    audit = _FakeAudit()
+    b = _builder(
+        max_repair_attempts=2, escalation_llm_client=escalation_llm,
+        escalation_model_id="strong-model", audit_client=audit,
+    )
+    runs = [
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": True}, []),
+    ]
+    with patch.object(b, "_run_integration_tests", side_effect=runs), \
+         patch.object(b, "_repair_module", side_effect=["v2\n", "v3\n", "v4-fixed\n"]) as repair:
+        result = b.build_module(_contract())
+    assert repair.call_count == 3   # 2 normal repairs (ceiling) + 1 escalation
+    assert repair.call_args_list[2].kwargs["llm_client"] is escalation_llm
+    assert result.success is True
+    escalation_events = [e for e in audit.events if e["event_type"] == AuditEventType.ESCALATION_TRIGGERED]
+    assert len(escalation_events) == 1
+    assert escalation_events[0]["actor_id"] == "strong-model"
+    assert escalation_events[0]["payload"]["success"] is True
+
+
+def test_escalation_configured_and_still_fails_reports_failure():
+    escalation_llm = SimpleNamespace(model="strong")
+    audit = _FakeAudit()
+    b = _builder(
+        max_repair_attempts=1, escalation_llm_client=escalation_llm,
+        escalation_model_id="strong-model", audit_client=audit,
+    )
+    runs = [
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": False}, ["still broken"]),
+    ]
+    with patch.object(b, "_run_integration_tests", side_effect=runs), \
+         patch.object(b, "_repair_module", side_effect=["v2\n", "v3-escalated\n"]) as repair:
+        result = b.build_module(_contract())
+    assert repair.call_count == 2
+    assert result.success is False
+    escalation_events = [e for e in audit.events if e["event_type"] == AuditEventType.ESCALATION_TRIGGERED]
+    assert len(escalation_events) == 1
+    assert escalation_events[0]["payload"]["success"] is False
+
+
+def test_no_escalation_client_means_no_escalation_attempt_or_event():
+    audit = _FakeAudit()
+    b = _builder(max_repair_attempts=2, audit_client=audit)  # no escalation_llm_client
+    with patch.object(b, "_run_integration_tests",
+                      return_value=({"bumps": False}, ["still broken"])), \
+         patch.object(b, "_repair_module", side_effect=["v2\n", "v3\n"]) as repair:
+        result = b.build_module(_contract())
+    assert repair.call_count == 2   # unchanged from today's behavior
+    assert result.success is False
+    assert not any(e["event_type"] == AuditEventType.ESCALATION_TRIGGERED for e in audit.events)
+
+
+def test_max_repair_attempts_zero_escalation_fires_as_sole_attempt():
+    escalation_llm = SimpleNamespace(model="strong")
+    audit = _FakeAudit()
+    b = _builder(
+        max_repair_attempts=0, escalation_llm_client=escalation_llm,
+        escalation_model_id="strong-model", audit_client=audit,
+    )
+    runs = [
+        ({"bumps": False}, ["still broken"]),
+        ({"bumps": True}, []),
+    ]
+    with patch.object(b, "_run_integration_tests", side_effect=runs), \
+         patch.object(b, "_repair_module", return_value="fixed\n") as repair:
+        result = b.build_module(_contract())
+    repair.assert_called_once()
+    assert repair.call_args.kwargs["llm_client"] is escalation_llm
+    assert result.success is True
+
+
+def test_repair_llm_client_is_used_by_the_real_repair_module_body_not_main_llm():
+    def _fail_llm(*_a, **_k):
+        raise AssertionError("main llm_client must not be used for repair")
+
+    main_llm = SimpleNamespace(model="main", generate=_fail_llm)
+    repair_llm = SimpleNamespace(
+        model="repair",
+        generate=lambda p, **k: {
+            "content": "def bump():\n    global _n\n    _n = 1\n    return _n\n"
+        },
+    )
+    b = ModuleTDDBuilder(llm_client=main_llm, repair_llm_client=repair_llm, max_repair_attempts=1)
+    b._build_function = lambda **_: FunctionBuildResult(
+        function_name="bump",
+        code="def bump():\n    global _n\n    _n += 1\n    return _n\n",
+        tdd_cycles=1, success=True,
+    )
+    with patch.object(b, "_run_integration_tests",
+                       side_effect=[
+                           ({"bumps": False}, ["bumps: assertion failed"]),
+                           ({"bumps": True}, []),
+                       ]):
+        result = b.build_module(_contract())
+    assert result.success is True
 
 
 # ---------------------------------------------------------------------------
