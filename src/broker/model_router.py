@@ -84,6 +84,7 @@ def route_model(
     *,
     fallback_model: str | None = None,
     broker_config: BrokerConfig | None = None,
+    calibrate_cold_start: bool = True,
 ) -> ModelRoutingDecision:
     """Pick the best model among `candidate_models` for a `task_type` task.
 
@@ -94,6 +95,12 @@ def route_model(
         fallback_model: used when no candidate has history; defaults to the
             first candidate.
         broker_config: optional routing-mode / threshold overrides.
+        calibrate_cold_start: when True (default), any candidate with zero
+            audit history gets one throwaway sandboxed TDD cycle before
+            routing (see calibration.py) so it can compete on this very call
+            instead of only ever being picked as the fallback (issue #5).
+            Set False to skip the extra latency/cost and keep today's
+            fallback-only behavior for brand-new candidates.
 
     Never raises on an unreachable or empty audit store -- it degrades to the
     fallback so a routing failure can't block a build.
@@ -119,6 +126,21 @@ def route_model(
 
         store = AuditStore(audit_database_url)
         store.create_tables()
+
+        if calibrate_cold_start:
+            known = set(PerformanceAggregator(store).get_all_agent_metrics().keys())
+            cold = [m for m in candidate_models if m not in known]
+            if cold:
+                from src.broker.calibration import calibrate_cold_start_models
+
+                logger.info(
+                    "route_model: calibrating %d cold-start candidate(s): %s", len(cold), cold
+                )
+                calibrate_cold_start_models(cold, audit_database_url)
+
+        # Fresh instance (not the one used for the cold-start check above) --
+        # PerformanceAggregator caches, so reusing it here would route on
+        # stale pre-calibration data for this very call.
         aggregator = PerformanceAggregator(store)
         broker = AdaptiveBroker(aggregator, broker_config)
         broker.set_fallback_agent(fallback)
