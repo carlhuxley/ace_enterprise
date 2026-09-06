@@ -214,10 +214,10 @@ class LLMClient:
 
         except httpx.TimeoutException as e:
             logger.error(f"vLLM API timeout after {self.timeout}s: {e}")
-            raise RuntimeError(f"vLLM timeout: {e}")
+            raise RuntimeError(f"vLLM timeout: {e}") from e
         except httpx.HTTPError as e:
             logger.error(f"vLLM API error: {e}")
-            raise RuntimeError(f"Failed to generate with vLLM: {e}")
+            raise RuntimeError(f"Failed to generate with vLLM: {e}") from e
 
     def _generate_ollama(
         self,
@@ -257,10 +257,10 @@ class LLMClient:
 
         except httpx.TimeoutException as e:
             logger.error(f"Ollama API timeout after {self.timeout}s: {e}")
-            raise RuntimeError(f"Ollama timeout - model may be too slow on this hardware: {e}")
+            raise RuntimeError(f"Ollama timeout - model may be too slow on this hardware: {e}") from e
         except httpx.HTTPError as e:
             logger.error(f"Ollama API error: {e}")
-            raise RuntimeError(f"Failed to generate with Ollama: {e}")
+            raise RuntimeError(f"Failed to generate with Ollama: {e}") from e
 
     def _generate_openai(
         self,
@@ -310,7 +310,7 @@ class LLMClient:
 
         except httpx.HTTPError as e:
             logger.error(f"OpenAI API error: {e}")
-            raise RuntimeError(f"Failed to generate with OpenAI: {e}")
+            raise RuntimeError(f"Failed to generate with OpenAI: {e}") from e
 
     def _generate_anthropic(
         self,
@@ -355,7 +355,7 @@ class LLMClient:
 
         except httpx.HTTPError as e:
             logger.error(f"Anthropic API error: {e}")
-            raise RuntimeError(f"Failed to generate with Anthropic: {e}")
+            raise RuntimeError(f"Failed to generate with Anthropic: {e}") from e
 
     def _generate_deepseek(
         self,
@@ -405,7 +405,7 @@ class LLMClient:
 
         except httpx.HTTPError as e:
             logger.error(f"DeepSeek API error: {e}")
-            raise RuntimeError(f"Failed to generate with DeepSeek: {e}")
+            raise RuntimeError(f"Failed to generate with DeepSeek: {e}") from e
 
     def _generate_togetherai(
         self,
@@ -455,7 +455,7 @@ class LLMClient:
 
         except httpx.HTTPError as e:
             logger.error(f"Together AI API error: {e}")
-            raise RuntimeError(f"Failed to generate with Together AI: {e}")
+            raise RuntimeError(f"Failed to generate with Together AI: {e}") from e
 
     def _generate_openrouter(
         self,
@@ -528,13 +528,25 @@ class LLMClient:
                     if model != self.model:
                         logger.info(f"OpenRouter: using fallback model {model} (requested: {self.model})")
 
-                    # Extract content, handling potential None
+                    # Extract content, handling potential None or truncation
                     content = data["choices"][0]["message"]["content"]
-                    if content is None:
-                        finish_reason = data["choices"][0].get("finish_reason")
-                        last_error = RuntimeError(
-                            f"{model} returned no content (finish_reason={finish_reason})"
-                        )
+                    finish_reason = data["choices"][0].get("finish_reason")
+                    if content is None or finish_reason == "length":
+                        if content is None:
+                            last_error = RuntimeError(
+                                f"{model} returned no content (finish_reason={finish_reason})"
+                            )
+                        else:
+                            # A non-empty completion that hit max_tokens is not a
+                            # success -- it's a silently truncated document (e.g.
+                            # CONTEXT.md cut off mid-sentence, ace_enterprise#44).
+                            # Never accept it; treat exactly like content=None so
+                            # it retries/falls back instead of being written out.
+                            last_error = RuntimeError(
+                                f"{model} returned truncated content ({len(content)} chars, "
+                                f"finish_reason=length, max_tokens={payload['max_tokens']}) "
+                                "-- refusing to accept a truncated completion as success"
+                            )
                         # Confirmed live at ~18% of calls against
                         # qwen/qwen3-coder-30b-a3b-instruct despite
                         # reasoning:{exclude:true} above -- an empty
@@ -555,7 +567,7 @@ class LLMClient:
                             continue
                         else:
                             logger.warning(
-                                f"OpenRouter: {model} returned no content after "
+                                f"OpenRouter: {model} returned no usable content after "
                                 f"{max_retries} attempts, trying fallback"
                             )
                             break  # Try next model
@@ -570,6 +582,7 @@ class LLMClient:
                         "requested_model": self.model,
                         "provider": data.get("provider", "unknown"),
                         "cost_usd": usage.get("cost"),
+                        "finish_reason": finish_reason,
                     }
 
                 except httpx.HTTPStatusError as e:
@@ -584,7 +597,7 @@ class LLMClient:
                         logger.error(f"OpenRouter quota exhausted for {model}: {e}")
                         raise LLMQuotaExhaustedError(
                             f"OpenRouter quota/credit exhausted (status={status_code}): {e}"
-                        )
+                        ) from e
 
                     # Handle rate limiting with retry
                     if status_code == 429:
@@ -631,7 +644,7 @@ class LLMClient:
                         # Non-retryable HTTP error (4xx except 429 and 404)
                         logger.error(f"OpenRouter API error for {model}: {e}")
                         logger.error(f"Response: {e.response.text}")
-                        raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+                        raise RuntimeError(f"Failed to generate with OpenRouter: {e}") from e
 
                 except httpx.TimeoutException as e:
                     logger.error(f"OpenRouter timeout for {model}: {e}")
@@ -641,11 +654,11 @@ class LLMClient:
                 except httpx.HTTPError as e:
                     logger.error(f"OpenRouter API error for {model}: {e}")
                     last_error = e
-                    raise RuntimeError(f"Failed to generate with OpenRouter: {e}")
+                    raise RuntimeError(f"Failed to generate with OpenRouter: {e}") from e
 
         # All models exhausted
         raise RuntimeError(
-            f"OpenRouter: all models rate limited or unavailable. "
+            f"OpenRouter: all models exhausted without a usable response. "
             f"Last error: {last_error}"
         )
 

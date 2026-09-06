@@ -4,7 +4,6 @@ import pytest
 
 from src.utils.llm_client import LLMClient, LLMQuotaExhaustedError, _is_quota_exhausted
 
-
 # ---------------------------------------------------------------------------
 # Unit: _is_quota_exhausted helper
 # ---------------------------------------------------------------------------
@@ -210,3 +209,90 @@ def test_none_content_then_success_recovers_on_retry(monkeypatch, llm):
 
     assert result["content"] == "hi"
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression: a non-empty completion that hit max_tokens (finish_reason=length)
+# was accepted as a successful result and written out verbatim -- confirmed
+# live: a real CONTEXT.md regen was truncated mid-sentence this way and
+# committed to main (ace_enterprise#44). Must be treated like content=None,
+# never returned as success.
+# ---------------------------------------------------------------------------
+
+def test_truncated_content_reports_finish_reason(monkeypatch, llm):
+    def handler(request):
+        return httpx.Response(200, json={
+            "model": "anthropic/claude-haiku-4-5",
+            "choices": [{"message": {"content": "some partial tex"}, "finish_reason": "length"}],
+            "usage": {},
+        })
+
+    _client_with_mock_transport(monkeypatch, handler)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        llm.generate("hello")
+
+    assert "finish_reason=length" in str(excinfo.value)
+    assert "truncated" in str(excinfo.value)
+
+
+def test_truncated_content_retries_same_model_before_giving_up(monkeypatch, llm):
+    monkeypatch.setattr("src.utils.llm_client.time.sleep", lambda *_: None)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "model": "anthropic/claude-haiku-4-5",
+            "choices": [{"message": {"content": "some partial tex"}, "finish_reason": "length"}],
+            "usage": {},
+        })
+
+    _client_with_mock_transport(monkeypatch, handler)
+
+    with pytest.raises(RuntimeError):
+        llm.generate("hello")
+
+    assert len(calls) == 3, "must exhaust all retries on the same model, not give up after one"
+
+
+def test_truncated_content_then_success_recovers_on_retry(monkeypatch, llm):
+    monkeypatch.setattr("src.utils.llm_client.time.sleep", lambda *_: None)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, json={
+                "model": "anthropic/claude-haiku-4-5",
+                "choices": [{"message": {"content": "some partial tex"}, "finish_reason": "length"}],
+                "usage": {},
+            })
+        return httpx.Response(200, json={
+            "model": "anthropic/claude-haiku-4-5",
+            "choices": [{"message": {"content": "the full completion"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 4, "total_tokens": 5},
+        })
+
+    _client_with_mock_transport(monkeypatch, handler)
+
+    result = llm.generate("hello")
+
+    assert result["content"] == "the full completion"
+    assert len(calls) == 2
+
+
+def test_truncated_content_error_distinguishes_from_no_content(monkeypatch, llm):
+    def handler(request):
+        return httpx.Response(200, json={
+            "model": "anthropic/claude-haiku-4-5",
+            "choices": [{"message": {"content": "some partial tex"}, "finish_reason": "length"}],
+            "usage": {},
+        })
+
+    _client_with_mock_transport(monkeypatch, handler)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        llm.generate("hello")
+
+    assert "no content" not in str(excinfo.value)

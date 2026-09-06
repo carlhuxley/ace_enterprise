@@ -7,7 +7,6 @@ Run: python generate_live_context.py
 """
 import ast
 import sys
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -134,7 +133,9 @@ def main() -> None:
 
     print(f"Calling {PROVIDER}/{MODEL}...")
     client = LLMClient(provider=PROVIDER, model=MODEL)
-    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=8192)
+    # Bump this if generate_live_context.py starts raising truncation errors
+    # again as the source tree keeps growing (ace_enterprise#44).
+    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=16384)
 
     content = result["content"].strip()
     tokens = result.get("tokens_used", "?")

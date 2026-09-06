@@ -150,7 +150,9 @@ def main() -> None:
 
     print(f"Calling {PROVIDER}/{MODEL}...")
     client = LLMClient(provider=PROVIDER, model=MODEL)
-    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=8192)
+    # Bump this if generate_live_docs.py starts raising truncation errors
+    # again as the source tree keeps growing (ace_enterprise#44).
+    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=16384)
 
     content = _strip_outer_fence(result["content"].strip())
     tokens = result.get("tokens_used", "?")
