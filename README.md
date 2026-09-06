@@ -161,9 +161,35 @@ Gherkin → RED → GREEN → REFACTOR
 
 Critically, `TDDCycleRunner` — the orchestrator that drives the whole RED→GREEN→REFACTOR loop — never branches on language or domain itself. Its entire interaction with a pod is `self._pod.run_red(spec)` / `run_green(spec)` / `run_refactor(spec)` / `token_usage()`; all domain-specific behavior lives inside the pod, not the runner. And downstream, `TDDCycleRunner._learn()` builds the Reflector's input (`EnvironmentFeedback`) from `result.green_result.output` / `.error` — it never inspects what produced them. `PythonLanguagePod`, `TypeScriptLanguagePod`, and `GoLanguagePod` are three independent implementations proving the abstraction holds across pytest, vitest, and `go test` — but nothing about the protocol, the spec, or the runner is specific to running code at all. A pod whose `run_green()` validates a data pipeline against a schema, or checks a config file against a security policy, and returns an honest `PhaseResult`, would be a fully valid `LanguagePod` today, with no changes anywhere in the Reflector → Curator → Playbook loop.
 
-**This is an architecturally proven extension point, not a shipped capability.** Three pods exist and all three wrap code-verification test runners; no non-code pod (data-contract validation, config/policy checking, or otherwise) has actually been built — these are illustrations of what the interface permits, not features. The verifiable claim is narrow: `PodSpec`'s types, `PhaseResult`'s shape, and `TDDCycleRunner`'s dispatch impose no domain constraint. Writing a genuinely new pod is real, unstarted work — the same effort `GoLanguagePod` itself required — not a config flag.
+**This isn't just an architecturally proven extension point — one non-code pod has actually been built.** `PythonLanguagePod`, `TypeScriptLanguagePod`, and `GoLanguagePod` wrap code-verification test runners; `SimulationPod` (below) verifies against continuous physics instead, with no changes anywhere in the Reflector → Curator → Playbook loop. Writing a genuinely new pod is still real work — the same effort `GoLanguagePod` itself required — not a config flag, but it's demonstrated, not just claimed.
 
 **Extending it:** a new pod just needs to implement the four `LanguagePod` methods. But `LanguagePod` being a `Protocol` means conformance is structural, not enforced — satisfying the method signatures is all Python checks; nothing requires a new pod to actually use the sandbox. The zero-trust guarantees (`--network none`, `--cap-drop=all`, `--security-opt no-new-privileges`, read-only mounts) aren't inherited automatically — they hold because `PythonLanguagePod`, `TypeScriptLanguagePod`, and `GoLanguagePod` each independently take a `PodmanOrchestrator` in their constructor and route execution through it. A new pod has to deliberately follow that same pattern to keep the same guarantees; nothing stops one from skipping it.
+
+### SimulationPod: The Domain-Extension Claim, Proven
+
+The claim above — that `LanguagePod` imposes no domain constraint — is backed by one pod that verifies against continuous physics instead of a test runner. `SimulationPod` (`src/agents/simulation_pod.py`) replaces pytest/vitest/`go test` with a headless PyBullet simulation: `run_green()` returns `PhaseResult(passed: bool, ...)` exactly like every other pod, but "passed" here means a set of Gherkin-derived `MetricBound` invariants (instantaneous safety limits, final convergence targets, integral energy/effort budgets) held across a physics rollout, not that an exit code was zero.
+
+**Proof, not a toy demo — a blinded, adversarial task.** The benchmark scenario is tactile peg-in-hole insertion, deliberately blinded: the synthesized controller receives no ground-truth (x, y) position, only a wrist force/torque sensor (`f_normal`, `f_lateral_x/y`), depth (`z_position`), and a fixed hole-position *estimate* that's off by 1.5mm against a 0.5mm physical clearance. Peg friction is raised to defeat an accidental self-centering effect, so the only way to succeed is genuine tactile search: retreat clear of contact, reposition, redescend.
+
+Run against Sonnet via the local Claude CLI (`ClaudeCliClient`), no mocking, no hand-authored hints:
+
+| Attempt | Playbook | Result |
+|---|---|---|
+| 1 | 0 bullets | Stalled — spiral search radius grew too slowly to sweep its full extent within the step budget |
+| 2 | 8 bullets (Reflector/Curator, from Attempt 1's real failure) | Fixed that bug, stalled on an unrelated one — hardcoded search speed below the ~0.02–0.03 m/s static-friction threshold needed to move the peg at all |
+| 3 | 13 bullets (5 more, from Attempt 2's real failure) | **Converged autonomously** — 229 steps, `radial_error` 0.000496m against a 0.0005m tolerance (a 4-micron margin), all bounds satisfied. REFACTOR passed too. |
+
+No human diagnosed either bug or edited the scenario between attempts — Reflector read the actual failed code and telemetry, Curator wrote the bullets, the next attempt used them. (One of Reflector's two diagnoses was also partially wrong — it over-generalized a sensor restriction that didn't apply — and was left uncorrected rather than hand-fixed, because the point is what the loop does on its own.) Full telemetry and exact quotes are in [ADR 004](docs/adr/004-simulation-pod.md).
+
+**What this proves:** the RED→GREEN→REFACTOR→Reflector→Curator→Playbook loop has no hidden dependency on code, or on any specific physical task. Peg-in-hole was the vehicle, not the point.
+
+**What this doesn't prove (yet):** it's one scenario type, run manually, not part of the automated `benchmarks/runner.py` suite. Nothing here trains a policy or optimizes a reward — every "attempt" is a fresh LLM-synthesized controller, not a learned weight update.
+
+#### Why this matters beyond this repo (architectural implications, not shipped features)
+
+- **Continuous verification, not just toolchain exit codes.** `MetricBound`'s scopes generalize past PyBullet to any domain with a checkable continuous spec — CFD, kinematics, a data pipeline against a schema — through the same unmodified `LanguagePod` seam.
+- **A deterministic, non-hallucinatory reward source.** A physics oracle returning real pass/fail against explicit invariants — not a learned reward model, not an LLM grading itself — is the shape of verifier reward-from-verification (RLVR-style) training needs. ACE doesn't run that training loop; the oracle built to *test* code is already shaped like what one would need to *train* a policy.
+- **Auditable control, not opaque weights.** Every synthesized controller is inspectable Python with a paper trail — the exact prompt, diagnosis, and playbook bullet that produced it.
 
 ### Contract-Driven Development
 
@@ -298,7 +324,7 @@ ace_enterprise/
 ├── mcp_server/          # MCP protocol server
 └── docs/
     ├── SYSTEM_ARCHITECTURE.md  # auto-generated — do not edit
-    └── adr/                    # ADR-001 through ADR-003
+    └── adr/                    # ADR-001 through ADR-005
 ```
 
 ---
