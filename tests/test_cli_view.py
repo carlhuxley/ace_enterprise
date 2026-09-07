@@ -18,6 +18,7 @@ def _args(**overrides):
         "output": None,
         "scenario": None,
         "max_steps": None,
+        "speed": 1,
         "verbose": False,
     }
     defaults.update(overrides)
@@ -105,3 +106,10 @@ class TestSuccessPath:
              patch("src.agents.simulation_replay.render_attempt_video") as render:
             cmd_view(_args(video=True, max_steps=40))
         assert render.call_args.kwargs["max_steps"] == 40
+
+    def test_speed_is_passed_through_as_frame_stride(self):
+        record = _record()
+        with patch("src.agents.simulation_replay.resolve_attempt", return_value=record), \
+             patch("src.agents.simulation_replay.render_attempt_video") as render:
+            cmd_view(_args(video=True, speed=14))
+        assert render.call_args.kwargs["frame_stride"] == 14

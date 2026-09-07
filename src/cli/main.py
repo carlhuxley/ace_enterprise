@@ -143,6 +143,12 @@ def _build_parser() -> argparse.ArgumentParser:
              "before telemetry persistence shipped)",
     )
     view.add_argument("--max-steps", type=int, default=None, help="Override the video's step budget")
+    view.add_argument(
+        "--speed", type=int, default=1,
+        help="Capture every Nth step instead of every step (renders roughly "
+             "N times faster, accelerated/choppier playback) -- useful for a "
+             "long stalled attempt",
+    )
     view.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
 
     return parser
@@ -445,7 +451,7 @@ def cmd_view(args: argparse.Namespace) -> int:
     if args.video:
         output_path = args.output or attempt.controller_path.with_suffix(".mp4")
         try:
-            render_attempt_video(attempt, output_path, max_steps=args.max_steps)
+            render_attempt_video(attempt, output_path, max_steps=args.max_steps, frame_stride=args.speed)
         except ImportError as exc:
             print(
                 f"error: --video requires the 'simulation' extra "

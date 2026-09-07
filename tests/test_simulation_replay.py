@@ -109,3 +109,19 @@ def test_render_attempt_video_produces_a_nonempty_file(tmp_path):
     assert result == output_path
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_frame_stride_captures_fewer_frames(tmp_path):
+    import imageio.v3 as iio
+
+    from src.agents.simulation_replay import render_attempt_video
+
+    py_path = _write_attempt(tmp_path, with_telemetry=False)
+    attempt = resolve_attempt(py_path)
+
+    full = render_attempt_video(attempt, tmp_path / "full.mp4", max_steps=20, frame_stride=1)
+    strided = render_attempt_video(attempt, tmp_path / "strided.mp4", max_steps=20, frame_stride=5)
+
+    full_frames = iio.imread(full).shape[0]
+    strided_frames = iio.imread(strided).shape[0]
+    assert strided_frames < full_frames

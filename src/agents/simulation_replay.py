@@ -24,9 +24,17 @@ from src.agents.simulation_scenarios.peg_in_hole_tactile import TactilePegInHole
 from src.agents.simulation_scenarios.trajectory_following import TrajectoryFollowingScenario
 
 TIME_STEP_S = 1.0 / 240.0
-VIDEO_WIDTH = 640
-VIDEO_HEIGHT = 480
+VIDEO_WIDTH = 1280
+VIDEO_HEIGHT = 720
 VIDEO_FPS = 30
+
+# ER_TINY_RENDERER's default flat/ambient lighting and PyBullet's default
+# uncolored gray materials wash the whole scene out to near-uniform light
+# gray -- fine for a live debug window, not for a demonstration video. Both
+# are cosmetic, applied only here (never in a scenario's build()), so the
+# live synthesis path's rendering-free execution is untouched.
+_ENVIRONMENT_COLOR = (0.62, 0.60, 0.55, 1.0)  # warm neutral gray -- base/walls/fixtures
+_ACTOR_COLOR = (0.20, 0.45, 0.90, 1.0)        # blue -- the controlled body
 
 
 def peg_controller(observation):
@@ -170,7 +178,26 @@ def resolve_attempt(path: Path, *, scenario_override: str | None = None) -> Atte
     )
 
 
-def render_attempt_video(attempt: AttemptRecord, output_path: Path, max_steps: int | None = None) -> Path:
+def _colorize_bodies(p, client) -> None:
+    """Color the scene for contrast: every scenario (PegInHoleScenario,
+    TrajectoryFollowingScenario, TactilePegInHoleScenario) builds its fixed
+    environment (base/walls/fixtures) first and its one controlled body
+    (peg/actor) last -- so the last body created gets an accent color and
+    everything else gets a single neutral one, without needing to know any
+    scenario-specific attribute name (stays scenario-agnostic). Purely
+    cosmetic (video-rendering only); a scenario's build() is never touched."""
+    num_bodies = p.getNumBodies(physicsClientId=client)
+    for i in range(num_bodies):
+        body_id = p.getBodyUniqueId(i, physicsClientId=client)
+        color = _ACTOR_COLOR if i == num_bodies - 1 else _ENVIRONMENT_COLOR
+        p.changeVisualShape(body_id, -1, rgbaColor=color, physicsClientId=client)
+        for link_index in range(p.getNumJoints(body_id, physicsClientId=client)):
+            p.changeVisualShape(body_id, link_index, rgbaColor=color, physicsClientId=client)
+
+
+def render_attempt_video(
+    attempt: AttemptRecord, output_path: Path, max_steps: int | None = None, frame_stride: int = 1,
+) -> Path:
     """Headless replay of an archived attempt, capturing one frame per
     physics step via PyBullet's CPU software rasterizer (ER_TINY_RENDERER --
     no GPU or display server needed) and muxing them to `output_path`.
@@ -179,6 +206,13 @@ def render_attempt_video(attempt: AttemptRecord, output_path: Path, max_steps: i
     p.DIRECT instead of p.GUI (no window), no time.sleep (renders as fast as
     possible, nothing needs to play back live), and a getCameraImage() call
     per step instead of a debug-visualizer window.
+
+    frame_stride > 1 captures every Nth step instead of every step -- the
+    physics/controller loop still runs every step (so a stalled run's
+    outcome is unaffected), only the expensive getCameraImage() call is
+    skipped on the steps in between. A stalled attempt exhausting a
+    4000-step budget renders roughly frame_stride times faster, at the cost
+    of choppier (effectively accelerated) playback.
     """
     import imageio
     import numpy as np
@@ -198,6 +232,7 @@ def render_attempt_video(attempt: AttemptRecord, output_path: Path, max_steps: i
         p.setTimeStep(TIME_STEP_S, physicsClientId=client)
         scenario.configure(bounds)
         scenario.build(p, client)
+        _colorize_bodies(p, client)
 
         cam = config["camera"]
         view_matrix = p.computeViewMatrixFromYawPitchRoll(
@@ -218,15 +253,21 @@ def render_attempt_video(attempt: AttemptRecord, output_path: Path, max_steps: i
             observation = scenario.observe(p, client, step, steps_budget)
             metric_values = scenario.metrics(observation)
 
-            _, _, rgba, _, _ = p.getCameraImage(
-                VIDEO_WIDTH, VIDEO_HEIGHT,
-                viewMatrix=view_matrix, projectionMatrix=proj_matrix,
-                renderer=p.ER_TINY_RENDERER, physicsClientId=client,
-            )
-            # ER_TINY_RENDERER returns a flat sequence, not a pre-shaped
-            # array -- reshape to (H, W, 4) before dropping the alpha channel.
-            frame = np.asarray(rgba, dtype=np.uint8).reshape(VIDEO_HEIGHT, VIDEO_WIDTH, 4)
-            frames.append(frame[:, :, :3])
+            if step == 1 or step % frame_stride == 0:
+                _, _, rgba, _, _ = p.getCameraImage(
+                    VIDEO_WIDTH, VIDEO_HEIGHT,
+                    viewMatrix=view_matrix, projectionMatrix=proj_matrix,
+                    renderer=p.ER_TINY_RENDERER, physicsClientId=client,
+                    lightDirection=[0.6, -0.8, 1.2],
+                    shadow=1,
+                    lightAmbientCoeff=0.35,
+                    lightDiffuseCoeff=0.75,
+                    lightSpecularCoeff=0.2,
+                )
+                # ER_TINY_RENDERER returns a flat sequence, not a pre-shaped
+                # array -- reshape to (H, W, 4) before dropping the alpha channel.
+                frame = np.asarray(rgba, dtype=np.uint8).reshape(VIDEO_HEIGHT, VIDEO_WIDTH, 4)
+                frames.append(frame[:, :, :3])
 
             if check_instantaneous(metric_values, bounds) is not None:
                 break
