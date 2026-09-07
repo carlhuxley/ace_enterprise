@@ -185,6 +185,8 @@ No human diagnosed either bug or edited the scenario between attempts — Reflec
 
 **What this doesn't prove (yet):** it's one scenario type, run manually, not part of the automated `benchmarks/runner.py` suite. Nothing here trains a policy or optimizes a reward — every "attempt" is a fresh LLM-synthesized controller, not a learned weight update.
 
+**Watch any past attempt, headlessly:** `ace view <path to an archived attempt>` prints that attempt's real telemetry (peak/final metrics, which bound was violated, the same summary Reflector actually saw), and `--video` renders a headless `.mp4` of the physics run — no display server required (PyBullet's CPU software rasterizer, verified working under WSL with no X server). See [ADR 006](docs/adr/006-simulation-attempt-inspection.md).
+
 #### Why this matters beyond this repo (architectural implications, not shipped features)
 
 - **Continuous verification, not just toolchain exit codes.** `MetricBound`'s scopes generalize past PyBullet to any domain with a checkable continuous spec — CFD, kinematics, a data pipeline against a schema — through the same unmodified `LanguagePod` seam.
@@ -324,7 +326,7 @@ ace_enterprise/
 ├── mcp_server/          # MCP protocol server
 └── docs/
     ├── SYSTEM_ARCHITECTURE.md  # auto-generated — do not edit
-    └── adr/                    # ADR-001 through ADR-005
+    └── adr/                    # ADR-001 through ADR-006
 ```
 
 ---

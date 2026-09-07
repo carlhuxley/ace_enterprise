@@ -432,6 +432,78 @@ class TestAttemptArchiving:
 
 
 # ---------------------------------------------------------------------------
+# Telemetry persistence -- a sibling .json next to each archived .py, so a
+# past attempt's outcome can be inspected after the fact (`ace view`).
+# ---------------------------------------------------------------------------
+
+class TestTelemetryArchiving:
+    def test_passing_attempt_writes_a_sibling_telemetry_json(self, tmp_path):
+        import json
+
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        s = spec(tmp_path)
+        pod.run_green(s)
+
+        attempts_dir = s.implementation_file.parent / "attempts"
+        py_files = list(attempts_dir.glob("*.py"))
+        json_files = list(attempts_dir.glob("*.json"))
+        assert len(json_files) == 1
+        assert py_files[0].stem == json_files[0].stem
+
+        payload = json.loads(json_files[0].read_text())
+        assert payload["telemetry"]["success"] is True
+        assert payload["invariants"] == [
+            {"metric": "error", "operator": "<=", "threshold": 0.001, "scope": "final", "within_steps": 500}
+        ]
+
+    def test_failing_attempt_also_writes_telemetry_json(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=False)
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        pod.run_green(spec(tmp_path))
+
+        attempts_dir = tmp_path / "attempts"
+        assert len(list(attempts_dir.glob("*.json"))) == 1
+
+    def test_forbidden_import_writes_no_telemetry_json(self, tmp_path):
+        llm_client = make_llm_client(content="import os\ndef compute_action(observation):\n    return {}\n")
+        pod = make_pod(tmp_path, oracle=MagicMock(), llm_client=llm_client)
+
+        pod.run_green(spec(tmp_path))
+
+        attempts_dir = tmp_path / "attempts"
+        assert list(attempts_dir.glob("*.json")) == []
+
+    def test_environment_error_writes_no_telemetry_json(self, tmp_path):
+        oracle = MagicMock()
+        oracle.run.side_effect = SimulationEnvironmentError("boom")
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        pod.run_green(spec(tmp_path))
+
+        attempts_dir = tmp_path / "attempts"
+        assert list(attempts_dir.glob("*.json")) == []
+
+    def test_telemetry_summary_round_trips_through_summarize_telemetry(self, tmp_path):
+        from src.agents.simulation_runner import summarize_telemetry
+
+        oracle = MagicMock()
+        telemetry = make_telemetry(success=True)
+        oracle.run.return_value = telemetry
+        pod = make_pod(tmp_path, oracle=oracle)
+
+        s = spec(tmp_path)
+        result = pod.run_green(s)
+
+        invariants = make_scenario().default_invariants()
+        assert result.output == summarize_telemetry(telemetry, invariants)
+
+
+# ---------------------------------------------------------------------------
 # Stagnation escalation -- breaks a temperature-0 retry loop stuck
 # reproducing the identical diagnosis (and therefore identical code) forever.
 # ---------------------------------------------------------------------------

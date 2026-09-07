@@ -47,6 +47,12 @@ simulation = [
     # PegInHoleOracle (src/agents/simulation_oracle.py) -- headless physics
     # test oracle for SimulationPod, proving the TDD harness is domain-agnostic.
     "pybullet>=3.2.5",
+    # `ace view --video` (src/agents/simulation_replay.py) -- headless MP4
+    # export of an archived attempt via PyBullet's CPU tiny-renderer.
+    # imageio-ffmpeg bundles a static ffmpeg binary, so no system ffmpeg
+    # install is required.
+    "imageio>=2.34.0",
+    "imageio-ffmpeg>=0.5.1",
 ]
 
 dev = [

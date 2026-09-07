@@ -120,6 +120,31 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     proj.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
 
+    # ace view
+    view = sub.add_parser(
+        "view",
+        help="Inspect an archived SimulationPod attempt (telemetry, optional video export)",
+    )
+    view.add_argument(
+        "attempt", type=Path,
+        help="Path to an archived attempt's .py or .json file (under <src_dir>/attempts/)",
+    )
+    view.add_argument(
+        "--video", action="store_true",
+        help="Render a headless .mp4 of this attempt (requires the 'simulation' extra)",
+    )
+    view.add_argument(
+        "--output", type=Path, default=None,
+        help="Video output path (default: alongside the attempt)",
+    )
+    view.add_argument(
+        "--scenario", default=None,
+        help="Override scenario inference (only needed for attempts archived "
+             "before telemetry persistence shipped)",
+    )
+    view.add_argument("--max-steps", type=int, default=None, help="Override the video's step budget")
+    view.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+
     return parser
 
 
@@ -395,6 +420,44 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def cmd_view(args: argparse.Namespace) -> int:
+    from src.agents.simulation_replay import render_attempt_video, resolve_attempt
+    from src.agents.simulation_runner import summarize_telemetry
+
+    attempt_path = args.attempt.resolve()
+    try:
+        attempt = resolve_attempt(attempt_path, scenario_override=args.scenario)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Attempt:  {attempt.controller_path}")
+    print(f"Scenario: {attempt.scenario_name}")
+    print()
+    if attempt.telemetry is None:
+        print(
+            "No telemetry recorded for this attempt — archived before telemetry "
+            "persistence shipped. Pass --scenario if you want to render a video anyway."
+        )
+    else:
+        print(summarize_telemetry(attempt.telemetry, attempt.invariants))
+
+    if args.video:
+        output_path = args.output or attempt.controller_path.with_suffix(".mp4")
+        try:
+            render_attempt_video(attempt, output_path, max_steps=args.max_steps)
+        except ImportError as exc:
+            print(
+                f"error: --video requires the 'simulation' extra "
+                f"(pip install -e .[simulation]): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"\nVideo:    {output_path}")
+
+    return 0
+
+
 def _confirm(question: str) -> bool:
     try:
         return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
@@ -411,7 +474,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    handlers = {"tdd": cmd_tdd, "project": cmd_project}
+    handlers = {"tdd": cmd_tdd, "project": cmd_project, "view": cmd_view}
     sys.exit(handlers[args.command](args))
 
 

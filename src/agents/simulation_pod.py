@@ -33,7 +33,7 @@ from src.agents.simulation_oracle import (
     SimulationEnvironmentError,
     SimulationOracle,
 )
-from src.agents.simulation_runner import summarize_telemetry
+from src.agents.simulation_runner import SimulationTelemetry, summarize_telemetry
 from src.agents.simulation_scenario import SimulationScenario
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ class SimulationPod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=_sanitize_error(exc))
 
-        self._archive_attempt(spec, "green", controller_code)
+        archive_base = self._archive_attempt(spec, "green", controller_code)
 
         try:
             _import_filter.check(controller_code)
@@ -136,7 +136,7 @@ class SimulationPod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
 
-        result = self._run_oracle(spec, controller_code, invariants)
+        result = self._run_oracle(spec, controller_code, invariants, archive_base)
         if result.passed:
             commit_to_disk(controller_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
@@ -159,7 +159,7 @@ class SimulationPod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=_sanitize_error(exc))
 
-        self._archive_attempt(spec, "refactor", refactored_code)
+        archive_base = self._archive_attempt(spec, "refactor", refactored_code)
 
         try:
             _import_filter.check(refactored_code)
@@ -167,7 +167,7 @@ class SimulationPod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
 
-        result = self._run_oracle(spec, refactored_code, invariants)
+        result = self._run_oracle(spec, refactored_code, invariants, archive_base)
         # A failed refactor must not clobber a working controller on disk.
         if result.passed:
             commit_to_disk(refactored_code, spec.implementation_file)
@@ -183,11 +183,14 @@ class SimulationPod:
         extracted = extract_invariants(spec.gherkin_context or spec.feature_requirement)
         return extracted if extracted else self._scenario.default_invariants()
 
-    def _run_oracle(self, spec: PodSpec, controller_code: str, invariants: list[MetricBound]) -> PhaseResult:
+    def _run_oracle(
+        self, spec: PodSpec, controller_code: str, invariants: list[MetricBound], archive_base: Path,
+    ) -> PhaseResult:
         try:
             telemetry = self._oracle.run(controller_code, invariants)
         except SimulationEnvironmentError as exc:
             return PhaseResult(passed=False, output="", error=_environment_error_message(exc))
+        self._archive_telemetry(archive_base, telemetry, invariants)
         summary = summarize_telemetry(telemetry, invariants)
         if not telemetry.success:
             summary = self._with_stagnation_note(spec.cycle_number, summary)
@@ -197,11 +200,31 @@ class SimulationPod:
             error=None if telemetry.success else telemetry.failure_reason,
         )
 
-    def _archive_attempt(self, spec: PodSpec, phase: str, code: str) -> None:
+    def _archive_attempt(self, spec: PodSpec, phase: str, code: str) -> Path:
+        """Archives the attempt's code and returns its base path (no
+        extension) -- _run_oracle writes a sibling `.json` of raw telemetry
+        at this same base so `ace view` can find both by stem (issue: video
+        export / attempt inspection)."""
         self._attempt_counter += 1
         attempts_dir = spec.implementation_file.parent / "attempts"
-        filename = f"{spec.implementation_file.stem}_cycle{spec.cycle_number}_{phase}_attempt{self._attempt_counter}.py"
-        commit_to_disk(code, attempts_dir / filename)
+        stem = f"{spec.implementation_file.stem}_cycle{spec.cycle_number}_{phase}_attempt{self._attempt_counter}"
+        base = attempts_dir / stem
+        commit_to_disk(code, base.with_suffix(".py"))
+        return base
+
+    def _archive_telemetry(
+        self, base: Path, telemetry: SimulationTelemetry, invariants: list[MetricBound],
+    ) -> None:
+        """Sibling of the archived attempt code -- telemetry was previously
+        produced fresh each run and discarded (only ever reduced to a
+        summary string for the LLM prompt), leaving no way to inspect a past
+        attempt after the fact. Cheap (no rendering/display cost), so this
+        stays unconditional like the code archive above."""
+        payload = {
+            "telemetry": dataclasses.asdict(telemetry),
+            "invariants": [dataclasses.asdict(b) for b in invariants],
+        }
+        commit_to_disk(json.dumps(payload, indent=2), base.with_suffix(".json"))
 
     def _with_stagnation_note(self, cycle_number: int, summary: str) -> str:
         """At temperature 0, an identical diagnosis fed back verbatim

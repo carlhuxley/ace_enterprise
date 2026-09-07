@@ -25,113 +25,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pybullet as p  # noqa: E402
 
+from src.agents.simulation_replay import (  # noqa: E402
+    SCENARIOS,
+    TIME_STEP_S,
+    load_controller_from_file,
+    null_controller,
+)
 from src.agents.simulation_runner import check_final, check_instantaneous  # noqa: E402
-from src.agents.simulation_scenarios.peg_in_hole import PegInHoleScenario  # noqa: E402
-from src.agents.simulation_scenarios.peg_in_hole_tactile import (
-    TactilePegInHoleScenario,  # noqa: E402
-)
-from src.agents.simulation_scenarios.trajectory_following import (  # noqa: E402
-    TrajectoryFollowingScenario,
-)
-
-TIME_STEP_S = 1.0 / 240.0
-
-
-def peg_controller(observation):
-    """The same hand-verified controller used in smoke-testing PegInHoleScenario:
-    align radially to the hole center, then descend."""
-    kp = 2.0
-    x, y = observation["x"], observation["y"]
-    radial = (x**2 + y**2) ** 0.5
-    vz = -0.03 if radial <= 0.001 else -0.005
-    return {"vx": -kp * x, "vy": -kp * y, "vz": vz}
-
-
-def trajectory_controller(observation):
-    """The same hand-verified controller used in smoke-testing
-    TrajectoryFollowingScenario: proportional pursuit of the moving target."""
-    kp = 10.0
-    dx = observation["target_x"] - observation["x"]
-    dy = observation["target_y"] - observation["y"]
-    dz = observation["target_z"] - observation["z"]
-    return {"vx": kp * dx, "vy": kp * dy, "vz": kp * dz}
-
-
-def null_controller(observation):
-    return {"vx": 0.0, "vy": 0.0, "vz": 0.0}
-
-
-_tactile_state = None
-
-
-def tactile_controller(observation):
-    """The same hand-verified "retreat, reposition while airborne, redescend"
-    reference controller used in tests/test_simulation_oracle.py's
-    test_retreat_and_reposition_strategy_converges -- avoids fighting static
-    friction by only repositioning once fully clear of contact."""
-    global _tactile_state
-    if _tactile_state is None:
-        _tactile_state = {"phase": "descend", "angle": 0.0, "radius": 0.0003, "timer": 0}
-    s = _tactile_state
-    f_normal = observation["f_normal"]
-    max_v = 0.4
-    contact = 0.3
-
-    if f_normal > contact:
-        s["phase"] = "retreat"
-        s["timer"] = 0
-        return {"vx": 0.0, "vy": 0.0, "vz": max_v}
-
-    if s["phase"] == "retreat":
-        s["timer"] += 1
-        if s["timer"] < 15:
-            return {"vx": 0.0, "vy": 0.0, "vz": max_v}
-        s["phase"] = "reposition"
-        s["timer"] = 0
-        s["angle"] += 0.7
-        s["radius"] = min(0.0025, s["radius"] + 0.0001)
-
-    if s["phase"] == "reposition":
-        import math
-
-        s["timer"] += 1
-        dx, dy = math.cos(s["angle"]), math.sin(s["angle"])
-        if s["timer"] < 6:
-            return {"vx": dx * max_v * 0.25, "vy": dy * max_v * 0.25, "vz": 0.0}
-        s["phase"] = "descend"
-        s["timer"] = 0
-
-    return {"vx": 0.0, "vy": 0.0, "vz": -0.05}
-
-
-SCENARIOS = {
-    "peg": {
-        "make": PegInHoleScenario,
-        "controller": peg_controller,
-        "camera": {"cameraDistance": 0.25, "cameraYaw": 45, "cameraPitch": -25, "cameraTargetPosition": [0, 0, 0.04]},
-    },
-    "trajectory": {
-        "make": TrajectoryFollowingScenario,
-        "controller": trajectory_controller,
-        "camera": {"cameraDistance": 0.6, "cameraYaw": 45, "cameraPitch": -35, "cameraTargetPosition": [0, 0, 0.1]},
-    },
-    "tactile": {
-        "make": TactilePegInHoleScenario,
-        "controller": tactile_controller,
-        "camera": {"cameraDistance": 0.25, "cameraYaw": 45, "cameraPitch": -25, "cameraTargetPosition": [0, 0, 0.04]},
-    },
-}
-
-
-def _load_controller_from_file(path: Path):
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("loaded_controller", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    if not hasattr(module, "compute_action"):
-        raise SystemExit(f"{path} has no compute_action(observation) function")
-    return module.compute_action
 
 
 def main():
@@ -149,7 +49,7 @@ def main():
     config = SCENARIOS[args.scenario]
     scenario = config["make"]()
     if args.controller_file:
-        controller = _load_controller_from_file(args.controller_file)
+        controller = load_controller_from_file(args.controller_file)
     else:
         controller = null_controller if args.controller == "null" else config["controller"]
     bounds = scenario.default_invariants()
