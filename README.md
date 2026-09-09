@@ -2,9 +2,9 @@
 
 **Hardened Zero-Trust Execution Engine & Double-Blind Agentic Capability Broker**
 
-ACE Enterprise is a production-grade framework for running, evaluating, and learning from autonomous AI coding agents. It treats generated code as untrusted input — executing all tasks inside rootless, air-gapped Podman container pods (`--network none`, `--cap-drop=all`) across Python, TypeScript, and Go.
+ACE Enterprise is an agentic coding harness with an included clean-room synthesis pipeline. It treats generated code as untrusted input, executing tasks inside strictly isolated, zero-trust sandbox pods. When configured with multiple candidate models, ACE routes each task to whichever has historically performed best.
 
-Inspired by research in Agentic Context Engineering ([arXiv:2510.04618](https://arxiv.org/abs/2510.04618)), ACE continuously distills execution feedback into an institutional Playbook, allowing open-source and proprietary models to self-correct without retraining.
+Inspired by Agentic Context Engineering ([arXiv:2510.04618](https://arxiv.org/abs/2510.04618)), it continuously distills runtime feedback into an institutional Playbook — decoupling context from model weights so open-source and frontier models alike can test, learn from failures, and self-correct without retraining.
 
 ---
 
