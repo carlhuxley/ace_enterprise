@@ -181,6 +181,8 @@ Run against Sonnet via the local Claude CLI (`ClaudeCliClient`), no mocking, no 
 
 No human diagnosed either bug or edited the scenario between attempts — Reflector read the actual failed code and telemetry, Curator wrote the bullets, the next attempt used them. (One of Reflector's two diagnoses was also partially wrong — it over-generalized a sensor restriction that didn't apply — and was left uncorrected rather than hand-fixed, because the point is what the loop does on its own.) Full telemetry and exact quotes are in [ADR 004](docs/adr/004-simulation-pod.md).
 
+https://github.com/user-attachments/assets/d7e8596e-ff31-4c16-803f-11f4af48ec5f
+
 **What this proves:** the RED→GREEN→REFACTOR→Reflector→Curator→Playbook loop has no hidden dependency on code, or on any specific physical task. Peg-in-hole was the vehicle, not the point.
 
 **What this doesn't prove (yet):** it's one scenario type, run manually, not part of the automated `benchmarks/runner.py` suite. Nothing here trains a policy or optimizes a reward — every "attempt" is a fresh LLM-synthesized controller, not a learned weight update.
