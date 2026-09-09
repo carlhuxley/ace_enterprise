@@ -171,6 +171,10 @@ The claim above — that `LanguagePod` imposes no domain constraint — is backe
 
 **Proof, not a toy demo — a blinded, adversarial task.** The benchmark scenario is tactile peg-in-hole insertion, deliberately blinded: the synthesized controller receives no ground-truth (x, y) position, only a wrist force/torque sensor (`f_normal`, `f_lateral_x/y`), depth (`z_position`), and a fixed hole-position *estimate* that's off by 1.5mm against a 0.5mm physical clearance. Peg friction is raised to defeat an accidental self-centering effect, so the only way to succeed is genuine tactile search: retreat clear of contact, reposition, redescend.
 
+[![Autonomous Tactile Peg-in-Hole Assembly Benchmark](https://img.youtube.com/vi/QeY70-PUzj8/maxresdefault.jpg)](https://www.youtube.com/watch?v=QeY70-PUzj8)
+
+*Blinded 1.5mm offset tactile insertion evaluated against continuous invariant bounds in headless PyBullet.*
+
 Run against Sonnet via the local Claude CLI (`ClaudeCliClient`), no mocking, no hand-authored hints:
 
 | Attempt | Playbook | Result |
