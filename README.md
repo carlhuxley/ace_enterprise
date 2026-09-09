@@ -350,13 +350,17 @@ ace_enterprise/
 - [x] ContractValidator / validate_module run implementer-submitted code inside the Podman sandbox instead of `exec()`/`eval()`-ing it in-process — same gap, closed for the contract-driven pipeline
 - [x] `scripts/stress_test_coding.py` (model-output validation for local dev benchmarking) sandboxed the same way — no LLM-generated code executes outside Podman anywhere in the repo, `scripts/` included
 - [x] Live adversarial e2e tests proving the sandbox holds against real attacks, not just claimed flags: network egress, host-environment exfiltration, and CAP_SYS_ADMIN/read-only-mount privilege escalation all fail from inside a real container (`tests/e2e/test_enterprise_e2e_showcase.py`)
-- [x] AdaptiveBroker wired into a live routing decision point — `ace tdd` (`.ace/config.yaml` `candidate_models:`) and MCP `build_feature` (`models`) route a build to one of 2+ candidates on audit history, emitting a `ROUTING_DECISION` event
+- [x] AdaptiveBroker wired into a live routing decision point — `ace tdd` / `ace project` (`.ace/config.yaml` `candidate_models:`) and MCP `build_feature` (`models`) route a build to one of 2+ candidates on audit history, emitting a `ROUTING_DECISION` event
 - [x] BlindEvaluator + ConsensusBuilder wired into a live multi-candidate flow — MCP `build_feature_ensemble` builds with N models, scores each implementation blind, commits the winner, emits `BLIND_EVALUATION` / `ENSEMBLE_SELECTION` events
 - [x] Multi-module projects ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)) — `ace tdd` builds every `.feature` in a project in `@depends_on(...)` topological order; `ace project <spec>` / MCP `build_project` decompose a spec into a module DAG (`ProjectArchitect`), print it for approval, then build each module in dependency order via `ModuleArchitect` → `ModuleTDDBuilder`, writing `src/<m>.py` + `tests/test_<m>.py` and running the suite as a cross-module assembly check (`CONTRACT_DECOMPOSED` / `PROJECT_BUILD_COMPLETED` events)
+- [x] Per-role model selection + repair-ceiling escalation for `ace project` ([#40](https://github.com/carlhuxley/ace_enterprise/issues/40)) — `.ace/config.yaml` can set distinct `architect_model` / `worker_model` / `repair_model` / `escalation_model` refs; when the whole-module repair loop exhausts its ceiling still failing, one more attempt runs against `escalation_model` before giving up, emitting an `ESCALATION_TRIGGERED` event
+- [x] Cold-start model calibration ([#5](https://github.com/carlhuxley/ace_enterprise/issues/5), [ADR 005](docs/adr/005-cold-start-model-calibration.md)) — a candidate model with zero audit history gets one throwaway sandboxed TDD cycle before routing, so it can compete on merit immediately instead of only ever being the fallback
+- [x] `LLMClient` never accepts a truncated OpenRouter completion as success — a non-empty response that hit `finish_reason=length` is now retried/failed the same way an empty one already was, instead of silently corrupting output (caught a real truncated `CONTEXT.md` regen on `main`)
+- [x] SimulationPod ([ADR 004](docs/adr/004-simulation-pod.md)) — a fourth `LanguagePod` verifying against headless PyBullet physics instead of a test runner; real autonomous multi-cycle Reflector/Curator recovery confirmed on a blinded tactile peg-in-hole task (see [above](#simulationpod-the-domain-extension-claim-proven))
+- [x] `ace view` ([ADR 006](docs/adr/006-simulation-attempt-inspection.md)) — inspect any archived SimulationPod attempt's real telemetry, or render a headless `.mp4` of the physics run (`--video`, no display server required, `--speed N` for long stalled attempts)
 
 ### Preview (implemented + unit-tested, not yet wired into a live entry point)
-- [ ] CapabilityRegistry — anonymous agent registration with proficiency ratings
-- [ ] BrokerAdvisor
+- [ ] CapabilityRegistry / BrokerAdvisor — anonymous agent registration + capability-fit recommendations; investigated for cold-start model routing ([#5](https://github.com/carlhuxley/ace_enterprise/issues/5)) and deliberately left unwired — see [ADR 005](docs/adr/005-cold-start-model-calibration.md) for why (their real use case, team formation + human-in-the-loop advisory, has no live consumer in this codebase)
 - [ ] CostQualityAnalyzer with Pareto frontier
 - [ ] DistillationRouter
 - [ ] EnsembleLearner cross-model voting (ConsensusBuilder's convergence analysis is live via `build_feature_ensemble`; the LLM-vote path is not)
@@ -364,6 +368,8 @@ ace_enterprise/
 ### Planned
 - [ ] Project Architect follow-ups ([#8](https://github.com/carlhuxley/ace_enterprise/issues/8)): incremental re-planning (re-plan remaining modules after each build), cross-module integration `.feature`s, and container reuse across modules — the v1 flow is one-shot decomposition, per-module containers, assembly via the whole suite.
 - [ ] `build_feature_ensemble` for TypeScript / Go (needs per-language rubrics; `CodeGenerationRubric` is Python-only)
+- [ ] Benchmark `build_feature_ensemble` against single-model builds ([#45](https://github.com/carlhuxley/ace_enterprise/issues/45)) — no evidence yet that the N× cost of blind multi-candidate generation actually beats routing to one good model
+- [ ] Persist Reflector/Curator diagnosis text per attempt, harness-wide ([#46](https://github.com/carlhuxley/ace_enterprise/issues/46)) — `ace view` currently shows an attempt's telemetry but not why Reflector/Curator concluded what they did about it
 - [ ] cost and quality_score telemetry (no pricing table or quality-scoring instrument exists yet — required before AdaptiveBroker's budget/balanced/Pareto routing modes have real data to act on)
 - [ ] A2A Protocol Adapter (expose ACE's capability broker as an HTTP A2A server)
 - [ ] effGen MCP adapter (connect open-source models as broker agents)
