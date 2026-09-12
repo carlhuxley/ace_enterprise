@@ -87,6 +87,10 @@ Thumbs.db
 # TDD cycle output (generated artifacts, not source)
 output/
 
+# Test-run artifacts (e.g. captured LLM prompts dumped by
+# test_clean_room_air_gap.py for post-hoc inspection) -- regenerated per run
+tests/artifacts/
+
 # ACE Runtime Data
 data/playbooks/*.json
 data/playbooks_untracked/*.json
