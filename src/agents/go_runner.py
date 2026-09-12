@@ -1,12 +1,19 @@
 """
 GoRunner — PodmanRunner variant for the Go TDD harness.
 
-Overrides send_pulse() to run `go vet` + `go test` (instead of pytest) and
-gosec (instead of Bandit) for static security scanning, parsing gosec's JSON
-output into the shared PulseResult fields. Also captures `gofmt`'s
+Overrides send_pulse() to run `go vet` + `go test -race` (instead of pytest)
+and gosec (instead of Bandit) for static security scanning, parsing gosec's
+JSON output into the shared PulseResult fields. Also captures `gofmt`'s
 reformatted output (read-only-workspace-safe: gofmt without -w only reads
 the file and prints to stdout) so GoLanguagePod's REFACTOR phase can apply
 real formatting without needing write access inside the container.
+
+`-race` requires cgo (`CGO_ENABLED=1` + a C toolchain), which
+docker/harness/Containerfile.go now installs (gcc + musl-dev) on top of the
+Alpine base image -- without it `go test -race` fails immediately with
+"-race requires cgo" rather than running uninstrumented. Rebuild the image
+after pulling this change: `podman build -f docker/harness/Containerfile.go
+-t localhost/ace-go-harness:latest docker/harness`.
 """
 import json
 import subprocess
@@ -43,6 +50,14 @@ class GoRunner(PodmanRunner):
     session, matching PodmanRunner), so this cold-start cost is paid once
     per session, not once per pulse -- subsequent pulses reuse the warmed
     cache and take well under a second.
+
+    `-race` (see module docstring) adds its own overhead on top of the
+    above: confirmed live at 2 cpus/1g, cold start (cgo + race-instrumented
+    stdlib, empty GOCACHE) rose from ~13s to ~25s, and warm-cache pulses
+    from well under a second to ~2s (the race-instrumented test binary
+    itself runs slower, not just compiles slower). Both stay comfortably
+    inside the existing 60s timeout floor, so no timeout/resource change
+    was needed alongside it.
     """
 
     def __init__(
@@ -86,7 +101,7 @@ class GoRunner(PodmanRunner):
         test_proc = subprocess.run(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
-                _GO_BIN, "test", "./...",
+                _GO_BIN, "test", "-v", "-race", "./...",
             ],
             capture_output=True, text=True, timeout=_timeout,
         )

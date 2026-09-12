@@ -1,7 +1,14 @@
 FROM docker.io/library/golang:1.23-alpine
 
 # git is needed for `go install` to fetch gosec's module graph at build time.
-RUN apk add --no-cache git
+# gcc/musl-dev give `go test -race` a C toolchain — the race detector is
+# built on cgo's runtime instrumentation and refuses to run without it
+# ("−race requires cgo"), which this Alpine base doesn't ship by default.
+RUN apk add --no-cache git gcc musl-dev
+
+# `go build`/`go test` only link the race-detector's cgo shim when
+# CGO_ENABLED=1; Alpine's Go image defaults it to 0 for static-binary builds.
+ENV CGO_ENABLED=1
 
 # gosec — Go security scanner, the Go analog of Bandit (Python) and
 # eslint-plugin-security (TypeScript). Installed at build time (network
