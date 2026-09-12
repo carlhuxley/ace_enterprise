@@ -50,6 +50,11 @@ def test_auto_generated_name_is_unique():
     assert a._name != b._name
 
 
+def test_pids_limit_defaults_and_overrides():
+    assert PodmanRunner()._pids_limit == "100"
+    assert PodmanRunner(pids_limit="250")._pids_limit == "250"
+
+
 # ---------------------------------------------------------------------------
 # Integration: lifecycle (own runner per test — these test start/stop itself)
 # ---------------------------------------------------------------------------
@@ -60,6 +65,24 @@ def test_start_launches_running_container():
     try:
         runner.start()
         assert runner.is_alive() is True
+    finally:
+        runner.stop()
+
+
+@skip_no_podman
+def test_start_applies_pids_limit_and_readonly_rootfs():
+    import json
+    import subprocess
+
+    runner = PodmanRunner(pids_limit="42")
+    try:
+        runner.start()
+        inspected = subprocess.run(
+            ["podman", "inspect", runner._name], capture_output=True, text=True, check=True,
+        )
+        data = json.loads(inspected.stdout)[0]
+        assert data["HostConfig"]["PidsLimit"] == 42
+        assert data["HostConfig"]["ReadonlyRootfs"] is True
     finally:
         runner.stop()
 

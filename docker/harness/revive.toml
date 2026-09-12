@@ -1,0 +1,38 @@
+# revive config for the Go harness pulse gate.
+#
+# revive's own default rule set (used when no config is given) is
+# golint's original 22 rules. Two of those broke our own known-good,
+# already race/vet/gosec-clean migration output on first use as a
+# blocking gate (confirmed live):
+#   - package-comments: requires a doc comment on every package -- a
+#     documentation convention, not a correctness/security concern, and
+#     meaningless for this harness's single-file ephemeral pulses (never
+#     published as a package anyone imports).
+#   - var-declaration: flags a redundant explicit type when it's
+#     inferable from the right-hand side -- a style preference, not a bug.
+# Every other default rule is kept: these are the ones with real
+# correctness/idiom signal (unchecked control flow, exported-but-undocumented
+# API surface elsewhere would still matter in a real package, error handling
+# conventions, unreachable code, shadowed builtins, etc.).
+confidence = 0.8
+
+[rule.blank-imports]
+[rule.context-as-argument]
+[rule.context-keys-type]
+[rule.dot-imports]
+[rule.error-return]
+[rule.error-strings]
+[rule.error-naming]
+[rule.exported]
+[rule.if-return]
+[rule.increment-decrement]
+[rule.indent-error-flow]
+[rule.range]
+[rule.receiver-naming]
+[rule.redefines-builtin-id]
+[rule.superfluous-else]
+[rule.time-naming]
+[rule.unexported-return]
+[rule.unreachable-code]
+[rule.unused-parameter]
+[rule.var-naming]

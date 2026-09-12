@@ -18,6 +18,18 @@ ENV CGO_ENABLED=1
 ENV GOBIN=/usr/local/bin
 RUN go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
 
+# errcheck (unchecked-error gate) and revive (idiomatic-lint gate) -- same
+# install-at-build-time/no-runtime-network pattern as gosec above. Both are
+# wired into GoRunner.send_pulse() as blocking gates alongside gosec/go vet,
+# not advisory-only.
+RUN go install github.com/kisielk/errcheck@v1.7.0
+RUN go install github.com/mgechev/revive@v1.5.1
+
+# revive.toml drops two purely stylistic default rules (package-comments,
+# var-declaration) that have no correctness/security signal and broke known-
+# good, already-verified generated code on first use -- see the file itself.
+COPY revive.toml /etc/revive.toml
+
 # Non-root runner user (matches Containerfile.ts's hardening — the Python
 # harness is the one exception, tracked separately).
 RUN addgroup -S ace && adduser -S ace -G ace

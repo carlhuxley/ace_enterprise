@@ -24,6 +24,8 @@ from src.agents.podman_runner import PodmanRunner
 _GO_BIN = "go"
 _GOFMT_BIN = "gofmt"
 _GOSEC_BIN = "gosec"
+_ERRCHECK_BIN = "errcheck"
+_REVIVE_BIN = "revive"
 _REMOTE_WS = "/workspace"
 
 _WORKSPACE_GO_MOD = "module pulse\n\ngo 1.23\n"
@@ -132,11 +134,38 @@ class GoRunner(PodmanRunner):
         gosec_output = gosec_proc.stdout or gosec_proc.stderr
         high, medium, low = _parse_gosec(gosec_output)
 
-        passed = vet_proc.returncode == 0 and test_proc.returncode == 0
+        # errcheck and revive are blocking gates, same as go vet/go test above --
+        # not advisory-only. errcheck's own exit code is already nonzero when it
+        # finds an unchecked error return; revive needs -set_exit_status or it
+        # always exits 0 regardless of findings.
+        errcheck_proc = subprocess.run(
+            ["podman", "exec", "--workdir", _REMOTE_WS, self._name, _ERRCHECK_BIN, "./..."],
+            capture_output=True, text=True, timeout=_timeout,
+        )
+        revive_proc = subprocess.run(
+            [
+                "podman", "exec", "--workdir", _REMOTE_WS, self._name,
+                _REVIVE_BIN, "-set_exit_status", "-config", "/etc/revive.toml", "./...",
+            ],
+            capture_output=True, text=True, timeout=_timeout,
+        )
+
+        passed = (
+            vet_proc.returncode == 0
+            and test_proc.returncode == 0
+            and errcheck_proc.returncode == 0
+            and revive_proc.returncode == 0
+        )
         stdout = test_proc.stdout
         if vet_proc.returncode != 0:
             stdout = f"go vet failed:\n{vet_proc.stdout}\n\n{stdout}"
-        stderr = "\n".join(s for s in (vet_proc.stderr, test_proc.stderr) if s)
+        if errcheck_proc.returncode != 0:
+            stdout = f"{stdout}\n\nerrcheck failed (unchecked error return):\n{errcheck_proc.stdout or errcheck_proc.stderr}"
+        if revive_proc.returncode != 0:
+            stdout = f"{stdout}\n\nrevive failed (lint):\n{revive_proc.stdout or revive_proc.stderr}"
+        stderr = "\n".join(
+            s for s in (vet_proc.stderr, test_proc.stderr, errcheck_proc.stderr, revive_proc.stderr) if s
+        )
 
         h_executed = self._compute_workspace_hash(list(files.keys()))
 

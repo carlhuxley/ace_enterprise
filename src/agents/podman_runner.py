@@ -35,6 +35,7 @@ class PodmanRunner:
         container_name: str | None = None,
         cpus: str = "0.5",
         memory: str = "256m",
+        pids_limit: str = "100",
         test_timeout: int = 10,
         writable_workdir: bool = False,
     ) -> None:
@@ -42,6 +43,15 @@ class PodmanRunner:
         self._name = container_name or f"harness_{uuid.uuid4().hex[:8]}"
         self._cpus = cpus
         self._memory = memory
+        # Caps total processes/OS threads in the container's PID namespace --
+        # defense against generated code fork-bombing or spawning unbounded
+        # OS threads (goroutines are user-space and multiplexed onto a small
+        # OS thread pool by the Go runtime, so this doesn't cap concurrency
+        # itself, only runaway process/thread creation). 100 is generous
+        # headroom above what a real `go test -race` run needs -- confirmed
+        # live against the full existing pod test suites plus a full
+        # characterization+extraction+Go-synthesis migration run.
+        self._pids_limit = pids_limit
         self._test_timeout = test_timeout
         # RED/GREEN pods keep pytest's cwd on the read-only /workspace mount so
         # generated code can't rewrite its own test file mid-run. Validation
@@ -85,6 +95,11 @@ class PodmanRunner:
                 "--network", "none",
                 "--cpus", self._cpus,
                 "--memory", self._memory,
+                # Belt-and-suspenders alongside --cap-drop/--cpus/--memory: caps
+                # total processes+threads regardless of how they're spawned
+                # (fork bomb, thread-per-connection bug, etc.) rather than
+                # relying on CPU/memory pressure to eventually stop it.
+                "--pids-limit", self._pids_limit,
                 # tini-based init reaps zombie child processes (esbuild, node forks)
                 # so they don't accumulate and saturate the process table.
                 "--init",
@@ -93,6 +108,10 @@ class PodmanRunner:
                 # remount a read-only workspace mount as read-write from inside.
                 "--cap-drop", "all",
                 "--security-opt", "no-new-privileges",
+                # Container's own rootfs read-only too, not just the workspace
+                # bind-mount below -- generated code gets no writable path
+                # anywhere except the explicit tmpfs /tmp mount.
+                "--read-only",
                 # Bind-mount the host tmpfs dir as the container workspace, read-only.
                 # Generated code can read its own test/impl files but can't rewrite
                 # them mid-run to fake a pass; canonical_hash pulse verification
