@@ -42,6 +42,9 @@ class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum change
     # Multi-module project build
     PROJECT_BUILD_COMPLETED = "project_build_completed"  # `ace project` finished a plan
 
+    # Migration events
+    CHARACTERIZATION_TEST_GENERATED = "characterization_test_generated"  # Auto-derived behavioral baseline test (ace migrate pre-pass)
+
     # Agent events
     AGENT_STARTED = "agent_started"               # Agent session began
     AGENT_COMPLETED = "agent_completed"           # Agent session ended

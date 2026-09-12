@@ -100,7 +100,7 @@ class GoLanguagePod:
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
         try:
             bullets = self._get_go_bullets()
-            prompt = self._green_prompt(spec, bullets)
+            prompt = self._green_prompt(spec, bullets, test_code)
             response = self._llm_client.generate(prompt)
             impl_code = _extract_code(response.get("content", ""))
         except Exception as exc:
@@ -164,16 +164,32 @@ class GoLanguagePod:
             f"The file must declare 'package {_PACKAGE_NAME}' as its package."
         )
 
-    def _green_prompt(self, spec: PodSpec, bullets: list[str]) -> str:
+    def _green_prompt(self, spec: PodSpec, bullets: list[str], test_code: str) -> str:
         bullets_section = ""
         if bullets:
             bullets_section = "\n\nGo idioms to apply:\n" + "\n".join(f"- {b}" for b in bullets)
+        # Ground truth the RED phase actually wrote -- without this, GREEN was
+        # guessing function/struct/field names from `feature_requirement`
+        # prose alone, with no way to match whatever RED's own independent
+        # LLM call happened to name things (confirmed live: 5/5 GREEN cycles
+        # failed identically on `undefined: IngestTelemetry` because GREEN
+        # never saw that IngestTelemetry was the name RED had already
+        # committed to).
+        test_section = f"\n\nTest file to satisfy ({spec.test_file.name}):\n```go\n{test_code}\n```" if test_code else ""
+        # Previous cycle's real compiler/test output -- without this, every
+        # GREEN retry resent an identical prompt (worse under temperature=0.0
+        # LLM clients, which can reproduce the exact same failing output every
+        # time), the same "blind retry" failure mode this framework exists to
+        # avoid elsewhere. Mirrors WorkerAgent._impl_prompt's error_output
+        # handling for the Python pod (src/agents/worker_agent.py).
+        error_section = f"\n\nPrevious attempt's build/test failure output:\n{spec.error_output}" if spec.error_output else ""
         return (
             f"Write a minimal Go implementation to make the tests pass.\n"
             f"Feature: {spec.feature_requirement}\n"
-            f"Test file: {spec.test_file.name}\n"
             f"Implementation file: {spec.implementation_file.name}"
-            f"{bullets_section}\n"
+            f"{test_section}"
+            f"{bullets_section}"
+            f"{error_section}\n"
             f"Output only valid Go code. "
             f"The file must declare 'package {_PACKAGE_NAME}' as its package, "
             f"matching the test file."
