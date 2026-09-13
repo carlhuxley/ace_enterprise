@@ -83,14 +83,18 @@ def test_image_missing_raises_a_clear_error():
     """A misconfigured environment (image never built) should fail loudly on
     start(), not hang or silently fall back -- same behavior as the other
     per-language harness images already rely on (see conftest.py's
-    shared_podman_runner, which has no build-on-missing fallback either)."""
-    import subprocess
+    shared_podman_runner, which has no build-on-missing fallback either).
 
+    Raises RuntimeError (not subprocess.CalledProcessError) since
+    PodmanRunner.start() started surfacing podman's actual stdout/stderr
+    instead of a bare exit code -- CalledProcessError's default __str__
+    omits captured output entirely, which is what made this class of
+    failure so hard to diagnose in CI in the first place."""
     from src.agents.simulation_podman_runner import SimulationPodmanRunner
 
     runner = SimulationPodmanRunner(container_name="sim_missing_image_test", cpus="0.1", memory="64m")
     runner._image = "localhost/ace-sim-harness-does-not-exist:latest"
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(RuntimeError, match="podman run failed"):
         runner.start()
 
 

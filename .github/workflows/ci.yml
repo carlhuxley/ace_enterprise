@@ -56,7 +56,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # simulation extra (pybullet) is needed on the runner's own Python
+        # env, not just inside the sim-harness container -- test_simulation_
+        # podman_runner.py's "bare vs containerized" comparison test runs
+        # SimulationOracle directly on the host to compare against the
+        # containerized result.
+        run: pip install -e ".[dev,simulation]"
 
       - name: Build Podman harness images
         # ubuntu-latest ships podman pre-installed, so skip_no_podman-style
