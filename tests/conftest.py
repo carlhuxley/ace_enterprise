@@ -32,3 +32,18 @@ def shared_sim_podman_runner():
     runner.start()
     yield runner
     runner.stop()
+
+
+@pytest.fixture(scope="session")
+def shared_mermaid_runner():
+    """One mermaid-validation-harness container for the whole test session.
+    Assumes localhost/ace-mermaid-harness:latest is already built
+    (build_mermaid_image() in src/agents/mermaid_runner.py) -- same
+    precedent as shared_podman_runner/shared_sim_podman_runner above."""
+    if not podman_available():
+        pytest.skip("podman not in PATH")
+    from src.agents.mermaid_runner import MermaidRunner
+    runner = MermaidRunner(container_name="mermaid_harness_test_session")
+    runner.start()
+    yield runner
+    runner.stop()

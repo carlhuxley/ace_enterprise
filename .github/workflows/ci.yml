@@ -63,25 +63,6 @@ jobs:
         # containerized result.
         run: pip install -e ".[dev,simulation]"
 
-      - name: Set up Node.js
-        # Real mermaid.js parser for test_mermaid_validity.py -- catches
-        # ungrammatical generated diagrams (e.g. the activate/deactivate
-        # mismatch that silently broke docs/SYSTEM_ARCHITECTURE.md's
-        # rendering on GitHub) before they ship, instead of after.
-        #
-        # jsdom 30.0.1 (pinned in tools/mermaid_check/package.json)
-        # declares engines.node = "^22.22.2 || ^24.15.0 || >=26.0.0" --
-        # Node 20 isn't supported at all and fails at import time
-        # ("webidl.util.markAsUncloneable is not a function" inside
-        # undici), confirmed live in CI before this fix. 24.x matches
-        # what was actually verified working locally.
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Install mermaid-check dependencies
-        run: cd tools/mermaid_check && npm install
-
       - name: Build Podman harness images
         # ubuntu-latest ships podman pre-installed, so skip_no_podman-style
         # checks (shutil.which("podman")) never skip the podman-backed
@@ -90,14 +71,23 @@ jobs:
         # tag from a registry at "localhost" and fails (dial tcp connection
         # refused), which is what was actually happening before this step
         # existed (confirmed live via a diagnostic error-surfacing commit).
-        # Containerfile.simulation COPYs src/agents/simulation_*.py with
-        # repo-relative paths, so it alone needs the repo root as context,
-        # not docker/harness/ (see build_simulation_image()'s docstring).
+        # Containerfile.simulation and Containerfile.mermaid both COPY
+        # repo-relative paths (src/agents/simulation_*.py and
+        # tools/mermaid_check/* respectively), so they alone need the repo
+        # root as context, not docker/harness/ (see build_simulation_image()/
+        # build_mermaid_image()'s docstrings).
+        #
+        # No Node.js setup step here on purpose: mermaid + jsdom's ~140
+        # third-party npm packages run *only* inside ace-mermaid-harness
+        # (see MermaidRunner) -- the CI runner itself never runs `npm` or
+        # `node` directly, same supply-chain isolation this project already
+        # applies to the Go and TypeScript toolchains.
         run: |
           podman build -f docker/harness/Containerfile -t localhost/ace-harness:latest docker/harness
           podman build -f docker/harness/Containerfile.go -t localhost/ace-go-harness:latest docker/harness
           podman build -f docker/harness/Containerfile.ts -t localhost/ace-ts-harness:latest docker/harness
           podman build -f docker/harness/Containerfile.simulation -t localhost/ace-sim-harness:latest .
+          podman build -f docker/harness/Containerfile.mermaid -t localhost/ace-mermaid-harness:latest .
 
       - name: Run tests
         run: pytest tests/ -v --tb=short

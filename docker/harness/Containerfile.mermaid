@@ -1,0 +1,33 @@
+FROM node:24-slim
+
+# jsdom 30.0.1's own package.json declares
+# engines.node = "^22.22.2 || ^24.15.0 || >=26.0.0" -- confirmed live that
+# Node 20 fails at import time ("webidl.util.markAsUncloneable is not a
+# function" inside undici, a jsdom dependency). node:24-slim satisfies this.
+
+# Non-root runner user (matches Containerfile.ts's hardening convention --
+# the Python harness is the one exception, tracked separately).
+RUN groupadd -r ace && useradd -r -g ace -m ace
+
+# Pre-install mermaid + jsdom at a fixed location -- node_modules baked
+# into the image, no npm calls at runtime (same "no npm calls at runtime"
+# pattern Containerfile.ts uses for its own toolchain). Exact versions
+# pinned in package.json/package-lock.json (mermaid 10.9.8, jsdom 30.0.1)
+# for the same reproducibility reason gosec/errcheck/revive are pinned
+# elsewhere. Built from the repo root as context (see
+# build_mermaid_image()), not docker/harness/, since these COPY paths are
+# repo-relative -- same convention Containerfile.simulation uses.
+WORKDIR /opt/mermaid_check
+COPY tools/mermaid_check/package.json tools/mermaid_check/package-lock.json ./
+RUN npm ci --ignore-scripts && npm cache clean --force
+COPY tools/mermaid_check/validate.mjs .
+
+# Workspace bind-mounted here by the runner (read-only at runtime) -- only
+# the diagram text to validate arrives per-pulse; validate.mjs above is
+# trusted framework code baked into the image, matching
+# Containerfile.simulation's same "trusted framework code baked in,
+# untrusted content arrives via the read-only workspace" split.
+RUN mkdir -p /workspace && chown ace:ace /workspace
+
+USER ace
+WORKDIR /workspace
