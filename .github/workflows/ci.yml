@@ -63,6 +63,18 @@ jobs:
         # containerized result.
         run: pip install -e ".[dev,simulation]"
 
+      - name: Set up Node.js
+        # Real mermaid.js parser for test_mermaid_validity.py -- catches
+        # ungrammatical generated diagrams (e.g. the activate/deactivate
+        # mismatch that silently broke docs/SYSTEM_ARCHITECTURE.md's
+        # rendering on GitHub) before they ship, instead of after.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install mermaid-check dependencies
+        run: cd tools/mermaid_check && npm install
+
       - name: Build Podman harness images
         # ubuntu-latest ships podman pre-installed, so skip_no_podman-style
         # checks (shutil.which("podman")) never skip the podman-backed

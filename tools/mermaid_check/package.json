@@ -1,0 +1,10 @@
+{
+  "name": "mermaid-check",
+  "private": true,
+  "type": "module",
+  "description": "Real mermaid.js parser (not an approximation) for validating generated mermaid diagrams before they ship -- see tests/test_mermaid_validity.py. Exact versions pinned (not ^) for reproducible CI installs, matching this repo's convention for other pinned tool versions (gosec, errcheck, revive).",
+  "dependencies": {
+    "jsdom": "30.0.1",
+    "mermaid": "10.9.8"
+  }
+}
