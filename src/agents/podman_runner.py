@@ -88,45 +88,51 @@ class PodmanRunner:
             ["podman", "rm", "-f", self._name],
             capture_output=True,
         )
-        subprocess.run(
-            [
-                "podman", "run", "-d",
-                "--name", self._name,
-                "--network", "none",
-                "--cpus", self._cpus,
-                "--memory", self._memory,
-                # Belt-and-suspenders alongside --cap-drop/--cpus/--memory: caps
-                # total processes+threads regardless of how they're spawned
-                # (fork bomb, thread-per-connection bug, etc.) rather than
-                # relying on CPU/memory pressure to eventually stop it.
-                "--pids-limit", self._pids_limit,
-                # tini-based init reaps zombie child processes (esbuild, node forks)
-                # so they don't accumulate and saturate the process table.
-                "--init",
-                # Drop every ambient capability and block acquiring new ones. Without
-                # this, retained caps like CAP_SYS_ADMIN would let generated code
-                # remount a read-only workspace mount as read-write from inside.
-                "--cap-drop", "all",
-                "--security-opt", "no-new-privileges",
-                # Container's own rootfs read-only too, not just the workspace
-                # bind-mount below -- generated code gets no writable path
-                # anywhere except the explicit tmpfs /tmp mount.
-                "--read-only",
-                # Bind-mount the host tmpfs dir as the container workspace, read-only.
-                # Generated code can read its own test/impl files but can't rewrite
-                # them mid-run to fake a pass; canonical_hash pulse verification
-                # (podman_orchestrator.py) is defense-in-depth on top of this, not
-                # the primary control. The host still has full write access to the
-                # same directory outside the container's mount view, so send_pulse()
-                # can keep clearing/repopulating it between pulses as before.
-                "-v", f"{self._host_ws}:{_REMOTE_WS}:z,ro",
-                # Container's own /tmp on RAM too
-                "--mount", "type=tmpfs,dst=/tmp",
-                self._image, "sleep", "infinity",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        run_cmd = [
+            "podman", "run", "-d",
+            "--name", self._name,
+            "--network", "none",
+            "--cpus", self._cpus,
+            "--memory", self._memory,
+            # Belt-and-suspenders alongside --cap-drop/--cpus/--memory: caps
+            # total processes+threads regardless of how they're spawned
+            # (fork bomb, thread-per-connection bug, etc.) rather than
+            # relying on CPU/memory pressure to eventually stop it.
+            "--pids-limit", self._pids_limit,
+            # tini-based init reaps zombie child processes (esbuild, node forks)
+            # so they don't accumulate and saturate the process table.
+            "--init",
+            # Drop every ambient capability and block acquiring new ones. Without
+            # this, retained caps like CAP_SYS_ADMIN would let generated code
+            # remount a read-only workspace mount as read-write from inside.
+            "--cap-drop", "all",
+            "--security-opt", "no-new-privileges",
+            # Container's own rootfs read-only too, not just the workspace
+            # bind-mount below -- generated code gets no writable path
+            # anywhere except the explicit tmpfs /tmp mount.
+            "--read-only",
+            # Bind-mount the host tmpfs dir as the container workspace, read-only.
+            # Generated code can read its own test/impl files but can't rewrite
+            # them mid-run to fake a pass; canonical_hash pulse verification
+            # (podman_orchestrator.py) is defense-in-depth on top of this, not
+            # the primary control. The host still has full write access to the
+            # same directory outside the container's mount view, so send_pulse()
+            # can keep clearing/repopulating it between pulses as before.
+            "-v", f"{self._host_ws}:{_REMOTE_WS}:z,ro",
+            # Container's own /tmp on RAM too
+            "--mount", "type=tmpfs,dst=/tmp",
+            self._image, "sleep", "infinity",
+        ]
+        result = subprocess.run(run_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            # subprocess.CalledProcessError's default __str__ omits captured
+            # output entirely (just cmd + returncode) -- surface the real
+            # podman error instead of leaving callers to guess from a bare
+            # "exit status 125".
+            raise RuntimeError(
+                f"podman run failed (exit {result.returncode}) for {self._name}:\n"
+                f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            )
         self._alive = True
 
     def stop(self) -> None:
