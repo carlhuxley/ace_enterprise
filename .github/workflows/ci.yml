@@ -68,9 +68,16 @@ jobs:
         # ungrammatical generated diagrams (e.g. the activate/deactivate
         # mismatch that silently broke docs/SYSTEM_ARCHITECTURE.md's
         # rendering on GitHub) before they ship, instead of after.
+        #
+        # jsdom 30.0.1 (pinned in tools/mermaid_check/package.json)
+        # declares engines.node = "^22.22.2 || ^24.15.0 || >=26.0.0" --
+        # Node 20 isn't supported at all and fails at import time
+        # ("webidl.util.markAsUncloneable is not a function" inside
+        # undici), confirmed live in CI before this fix. 24.x matches
+        # what was actually verified working locally.
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install mermaid-check dependencies
         run: cd tools/mermaid_check && npm install
