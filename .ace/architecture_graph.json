@@ -123,6 +123,16 @@
         "src/analytics/token_efficiency.py"
       ]
     },
+    "src/agents/mermaid_runner.py": {
+      "provides": [
+        "build_mermaid_image",
+        "MermaidRunner"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py"
+      ]
+    },
     "src/agents/podman_orchestrator.py": {
       "provides": [
         "SecurityBreachError",
@@ -1597,6 +1607,13 @@
       "depends_on": [
         "src/config/settings.py"
       ]
+    },
+    "src/utils/mermaid_validation.py": {
+      "provides": [
+        "extract_mermaid_blocks",
+        "validate_with_runner"
+      ],
+      "depends_on": []
     },
     "src/utils/playbook_enforcer.py": {
       "provides": [

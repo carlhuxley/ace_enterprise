@@ -2,7 +2,7 @@
 
 # Architecture Dependency Graph
 
-158 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
+160 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
 
 Deterministically derived from real `import` statements (AST-parsed), not hand-maintained or LLM-narrated -- see `src/utils/dependency_graph.py`.
 
@@ -20,458 +20,462 @@ flowchart TD
     n9["incremental_planner"]
     n10["iterative_tdd_runner"]
     n11["language_pod"]
-    n12["podman_orchestrator"]
-    n13["podman_runner"]
-    n14["polyglot_pod_builder"]
-    n15["polyglot_tdd_runner"]
-    n16["project_aware_tdd"]
-    n17["python_language_pod"]
-    n18["redundancy_checker"]
-    n19["simulation_invariants"]
-    n20["simulation_oracle"]
-    n21["simulation_pod"]
-    n22["simulation_podman_runner"]
-    n23["simulation_replay"]
-    n24["simulation_runner"]
-    n25["simulation_scenario"]
-    n26["__init__"]
-    n27["peg_in_hole"]
-    n28["peg_in_hole_tactile"]
-    n29["trajectory_following"]
-    n30["tdd_cycle_runner"]
-    n31["tdd_failure_recorder"]
-    n32["tdd_lesson_injector"]
-    n33["tdd_lessons"]
-    n34["test_review_agent"]
-    n35["typescript_language_pod"]
-    n36["typescript_runner"]
-    n37["typescript_worker_agent"]
-    n38["worker_agent"]
-    n39["__init__"]
-    n40["cost_quality_analyzer"]
-    n41["success_rate_calculator"]
-    n42["token_efficiency"]
-    n43["__init__"]
+    n12["mermaid_runner"]
+    n13["podman_orchestrator"]
+    n14["podman_runner"]
+    n15["polyglot_pod_builder"]
+    n16["polyglot_tdd_runner"]
+    n17["project_aware_tdd"]
+    n18["python_language_pod"]
+    n19["redundancy_checker"]
+    n20["simulation_invariants"]
+    n21["simulation_oracle"]
+    n22["simulation_pod"]
+    n23["simulation_podman_runner"]
+    n24["simulation_replay"]
+    n25["simulation_runner"]
+    n26["simulation_scenario"]
+    n27["__init__"]
+    n28["peg_in_hole"]
+    n29["peg_in_hole_tactile"]
+    n30["trajectory_following"]
+    n31["tdd_cycle_runner"]
+    n32["tdd_failure_recorder"]
+    n33["tdd_lesson_injector"]
+    n34["tdd_lessons"]
+    n35["test_review_agent"]
+    n36["typescript_language_pod"]
+    n37["typescript_runner"]
+    n38["typescript_worker_agent"]
+    n39["worker_agent"]
+    n40["__init__"]
+    n41["cost_quality_analyzer"]
+    n42["success_rate_calculator"]
+    n43["token_efficiency"]
     n44["__init__"]
     n45["__init__"]
-    n46["feedback_routes"]
-    n47["__init__"]
-    n48["api"]
-    n49["auth"]
-    n50["checkpoint"]
-    n51["client"]
-    n52["collector"]
-    n53["dashboard"]
-    n54["local_client"]
-    n55["schemas"]
-    n56["store"]
-    n57["__init__"]
-    n58["blind_evaluation"]
-    n59["model_attribution"]
-    n60["production_analyzer"]
-    n61["__init__"]
-    n62["analysis"]
-    n63["base"]
-    n64["code"]
-    n65["docs"]
-    n66["tests"]
-    n67["semantic_analyzer"]
-    n68["__init__"]
-    n69["adaptive_broker"]
-    n70["advisor"]
-    n71["bayesian"]
-    n72["calibration"]
-    n73["capability_registry"]
-    n74["effgen_adapter"]
-    n75["feedback"]
-    n76["human_decision"]
-    n77["model_router"]
-    n78["performance_aggregator"]
-    n79["regression_detector"]
-    n80["__init__"]
-    n81["config"]
-    n82["factory"]
-    n83["main"]
-    n84["project_builder"]
-    n85["__init__"]
-    n86["settings"]
-    n87["__init__"]
-    n88["contract_architect"]
-    n89["contract_decomposer"]
-    n90["contract_driven"]
-    n91["contract_schema"]
-    n92["module_architect"]
-    n93["module_tdd_builder"]
-    n94["project_architect"]
-    n95["__init__"]
+    n46["__init__"]
+    n47["feedback_routes"]
+    n48["__init__"]
+    n49["api"]
+    n50["auth"]
+    n51["checkpoint"]
+    n52["client"]
+    n53["collector"]
+    n54["dashboard"]
+    n55["local_client"]
+    n56["schemas"]
+    n57["store"]
+    n58["__init__"]
+    n59["blind_evaluation"]
+    n60["model_attribution"]
+    n61["production_analyzer"]
+    n62["__init__"]
+    n63["analysis"]
+    n64["base"]
+    n65["code"]
+    n66["docs"]
+    n67["tests"]
+    n68["semantic_analyzer"]
+    n69["__init__"]
+    n70["adaptive_broker"]
+    n71["advisor"]
+    n72["bayesian"]
+    n73["calibration"]
+    n74["capability_registry"]
+    n75["effgen_adapter"]
+    n76["feedback"]
+    n77["human_decision"]
+    n78["model_router"]
+    n79["performance_aggregator"]
+    n80["regression_detector"]
+    n81["__init__"]
+    n82["config"]
+    n83["factory"]
+    n84["main"]
+    n85["project_builder"]
+    n86["__init__"]
+    n87["settings"]
+    n88["__init__"]
+    n89["contract_architect"]
+    n90["contract_decomposer"]
+    n91["contract_driven"]
+    n92["contract_schema"]
+    n93["module_architect"]
+    n94["module_tdd_builder"]
+    n95["project_architect"]
     n96["__init__"]
-    n97["module"]
-    n98["__init__"]
-    n99["module"]
-    n100["__init__"]
-    n101["module"]
-    n102["__init__"]
-    n103["consensus"]
-    n104["learner"]
-    n105["models"]
-    n106["voting"]
-    n107["main"]
-    n108["__init__"]
-    n109["experiment_knowledge"]
-    n110["mlflow_callback"]
-    n111["postgres_mlflow_callback"]
-    n112["query_interface"]
-    n113["__init__"]
-    n114["clustering"]
-    n115["content_safety"]
-    n116["deduplication"]
-    n117["distillation_router"]
-    n118["learn_cli"]
-    n119["maintenance"]
-    n120["manager"]
-    n121["markdown_importer"]
-    n122["postgres_adapter"]
-    n123["postgres_retriever"]
-    n124["qa"]
-    n125["retrieval"]
-    n126["__init__"]
-    n127["config"]
-    n128["decision_record"]
-    n129["detector"]
-    n130["__init__"]
-    n131["playbook_analyzer"]
-    n132["tdd_cycle_analyzer"]
-    n133["__init__"]
-    n134["cgr3_retriever"]
-    n135["context_scorer"]
-    n136["schemas"]
-    n137["service"]
-    n138["__init__"]
-    n139["database"]
-    n140["experiment_logger"]
-    n141["models"]
-    n142["repository"]
-    n143["schemas"]
-    n144["__init__"]
-    n145["claude_cli_client"]
-    n146["code_extraction"]
-    n147["context_map"]
-    n148["dependency_graph"]
-    n149["effgen_client"]
-    n150["embedding"]
-    n151["file_lock"]
-    n152["id_generator"]
-    n153["import_validator"]
-    n154["llm_client"]
-    n155["playbook_enforcer"]
-    n156["session_log"]
-    n157["topo"]
-    n1 --> n55
-    n2 --> n14
+    n97["__init__"]
+    n98["module"]
+    n99["__init__"]
+    n100["module"]
+    n101["__init__"]
+    n102["module"]
+    n103["__init__"]
+    n104["consensus"]
+    n105["learner"]
+    n106["models"]
+    n107["voting"]
+    n108["main"]
+    n109["__init__"]
+    n110["experiment_knowledge"]
+    n111["mlflow_callback"]
+    n112["postgres_mlflow_callback"]
+    n113["query_interface"]
+    n114["__init__"]
+    n115["clustering"]
+    n116["content_safety"]
+    n117["deduplication"]
+    n118["distillation_router"]
+    n119["learn_cli"]
+    n120["maintenance"]
+    n121["manager"]
+    n122["markdown_importer"]
+    n123["postgres_adapter"]
+    n124["postgres_retriever"]
+    n125["qa"]
+    n126["retrieval"]
+    n127["__init__"]
+    n128["config"]
+    n129["decision_record"]
+    n130["detector"]
+    n131["__init__"]
+    n132["playbook_analyzer"]
+    n133["tdd_cycle_analyzer"]
+    n134["__init__"]
+    n135["cgr3_retriever"]
+    n136["context_scorer"]
+    n137["schemas"]
+    n138["service"]
+    n139["__init__"]
+    n140["database"]
+    n141["experiment_logger"]
+    n142["models"]
+    n143["repository"]
+    n144["schemas"]
+    n145["__init__"]
+    n146["claude_cli_client"]
+    n147["code_extraction"]
+    n148["context_map"]
+    n149["dependency_graph"]
+    n150["effgen_client"]
+    n151["embedding"]
+    n152["file_lock"]
+    n153["id_generator"]
+    n154["import_validator"]
+    n155["llm_client"]
+    n156["mermaid_validation"]
+    n157["playbook_enforcer"]
+    n158["session_log"]
+    n159["topo"]
+    n1 --> n56
     n2 --> n15
-    n2 --> n18
-    n2 --> n55
-    n2 --> n58
-    n2 --> n103
-    n2 --> n105
-    n2 --> n154
+    n2 --> n16
+    n2 --> n19
+    n2 --> n56
+    n2 --> n59
+    n2 --> n104
+    n2 --> n106
+    n2 --> n155
     n5 --> n11
-    n5 --> n12
-    n6 --> n12
+    n5 --> n13
     n6 --> n13
+    n6 --> n14
     n10 --> n4
     n10 --> n9
     n10 --> n11
-    n10 --> n18
-    n10 --> n30
-    n11 --> n42
-    n12 --> n11
-    n13 --> n12
-    n14 --> n6
-    n14 --> n12
+    n10 --> n19
+    n10 --> n31
+    n11 --> n43
+    n12 --> n13
+    n12 --> n14
+    n13 --> n11
     n14 --> n13
-    n14 --> n36
-    n14 --> n37
-    n14 --> n38
-    n14 --> n147
-    n15 --> n4
-    n15 --> n5
-    n15 --> n11
-    n15 --> n17
-    n15 --> n18
-    n15 --> n30
-    n15 --> n35
-    n15 --> n42
-    n17 --> n8
-    n17 --> n11
-    n17 --> n12
-    n20 --> n19
-    n20 --> n24
-    n20 --> n25
-    n21 --> n8
-    n21 --> n11
-    n21 --> n19
+    n15 --> n6
+    n15 --> n13
+    n15 --> n14
+    n15 --> n37
+    n15 --> n38
+    n15 --> n39
+    n15 --> n148
+    n16 --> n4
+    n16 --> n5
+    n16 --> n11
+    n16 --> n18
+    n16 --> n19
+    n16 --> n31
+    n16 --> n36
+    n16 --> n43
+    n18 --> n8
+    n18 --> n11
+    n18 --> n13
     n21 --> n20
-    n21 --> n24
     n21 --> n25
-    n22 --> n12
-    n22 --> n13
-    n23 --> n19
-    n23 --> n24
-    n23 --> n27
-    n23 --> n28
-    n23 --> n29
-    n24 --> n19
+    n21 --> n26
+    n22 --> n8
+    n22 --> n11
+    n22 --> n20
+    n22 --> n21
+    n22 --> n25
+    n22 --> n26
+    n23 --> n13
+    n23 --> n14
+    n24 --> n20
     n24 --> n25
-    n25 --> n19
-    n27 --> n19
-    n28 --> n19
-    n29 --> n19
-    n30 --> n11
-    n30 --> n55
-    n30 --> n143
-    n31 --> n120
-    n31 --> n140
-    n31 --> n143
-    n34 --> n154
-    n35 --> n11
-    n35 --> n12
-    n36 --> n12
+    n24 --> n28
+    n24 --> n29
+    n24 --> n30
+    n25 --> n20
+    n25 --> n26
+    n26 --> n20
+    n28 --> n20
+    n29 --> n20
+    n30 --> n20
+    n31 --> n11
+    n31 --> n56
+    n31 --> n144
+    n32 --> n121
+    n32 --> n141
+    n32 --> n144
+    n35 --> n155
+    n36 --> n11
     n36 --> n13
-    n37 --> n11
-    n38 --> n8
+    n37 --> n13
+    n37 --> n14
     n38 --> n11
-    n39 --> n40
-    n39 --> n41
-    n41 --> n140
-    n46 --> n75
-    n47 --> n51
-    n47 --> n53
-    n47 --> n55
-    n47 --> n56
-    n48 --> n49
-    n48 --> n50
-    n48 --> n55
+    n39 --> n8
+    n39 --> n11
+    n40 --> n41
+    n40 --> n42
+    n42 --> n141
+    n47 --> n76
+    n48 --> n52
+    n48 --> n54
     n48 --> n56
-    n50 --> n56
-    n51 --> n55
-    n52 --> n49
-    n52 --> n55
+    n48 --> n57
+    n49 --> n50
+    n49 --> n51
+    n49 --> n56
+    n49 --> n57
+    n51 --> n57
     n52 --> n56
-    n54 --> n55
-    n54 --> n56
-    n56 --> n55
-    n58 --> n12
-    n58 --> n13
-    n58 --> n61
-    n60 --> n58
-    n60 --> n59
-    n60 --> n141
-    n60 --> n142
-    n61 --> n62
-    n61 --> n63
-    n61 --> n64
-    n61 --> n65
-    n61 --> n66
+    n53 --> n50
+    n53 --> n56
+    n53 --> n57
+    n55 --> n56
+    n55 --> n57
+    n57 --> n56
+    n59 --> n13
+    n59 --> n14
+    n59 --> n62
+    n61 --> n59
+    n61 --> n60
+    n61 --> n142
+    n61 --> n143
     n62 --> n63
-    n64 --> n12
-    n64 --> n13
-    n64 --> n63
-    n65 --> n63
-    n66 --> n63
-    n68 --> n70
-    n68 --> n73
-    n68 --> n74
-    n68 --> n76
-    n69 --> n78
-    n70 --> n73
-    n72 --> n14
-    n72 --> n15
-    n72 --> n54
-    n72 --> n154
-    n74 --> n73
-    n76 --> n70
-    n77 --> n56
-    n77 --> n69
-    n77 --> n72
-    n77 --> n78
-    n78 --> n55
-    n78 --> n56
-    n78 --> n71
+    n62 --> n64
+    n62 --> n65
+    n62 --> n66
+    n62 --> n67
+    n63 --> n64
+    n65 --> n13
+    n65 --> n14
+    n65 --> n64
+    n66 --> n64
+    n67 --> n64
+    n69 --> n71
+    n69 --> n74
+    n69 --> n75
+    n69 --> n77
+    n70 --> n79
+    n71 --> n74
+    n73 --> n15
+    n73 --> n16
+    n73 --> n55
+    n73 --> n155
+    n75 --> n74
+    n77 --> n71
+    n78 --> n57
+    n78 --> n70
+    n78 --> n73
     n78 --> n79
-    n81 --> n82
-    n82 --> n4
-    n82 --> n9
-    n82 --> n10
-    n82 --> n12
-    n82 --> n13
-    n82 --> n17
-    n82 --> n18
-    n82 --> n38
-    n82 --> n54
-    n82 --> n55
-    n82 --> n77
-    n82 --> n81
-    n82 --> n86
-    n82 --> n97
-    n82 --> n101
-    n82 --> n120
-    n82 --> n145
-    n82 --> n147
-    n82 --> n154
+    n79 --> n56
+    n79 --> n57
+    n79 --> n72
+    n79 --> n80
+    n82 --> n83
     n83 --> n4
-    n83 --> n23
-    n83 --> n24
-    n83 --> n54
-    n83 --> n81
+    n83 --> n9
+    n83 --> n10
+    n83 --> n13
+    n83 --> n14
+    n83 --> n18
+    n83 --> n19
+    n83 --> n39
+    n83 --> n55
+    n83 --> n56
+    n83 --> n78
     n83 --> n82
-    n83 --> n84
-    n83 --> n94
-    n83 --> n157
-    n84 --> n12
-    n84 --> n13
-    n84 --> n54
+    n83 --> n87
+    n83 --> n98
+    n83 --> n102
+    n83 --> n121
+    n83 --> n146
+    n83 --> n148
+    n83 --> n155
+    n84 --> n4
+    n84 --> n24
+    n84 --> n25
     n84 --> n55
-    n84 --> n92
-    n84 --> n93
-    n84 --> n94
-    n84 --> n97
-    n84 --> n101
-    n84 --> n120
-    n84 --> n154
-    n87 --> n88
-    n87 --> n89
-    n87 --> n90
-    n87 --> n91
-    n87 --> n92
-    n87 --> n93
-    n88 --> n54
-    n88 --> n55
+    n84 --> n82
+    n84 --> n83
+    n84 --> n85
+    n84 --> n95
+    n84 --> n159
+    n85 --> n13
+    n85 --> n14
+    n85 --> n55
+    n85 --> n56
+    n85 --> n93
+    n85 --> n94
+    n85 --> n95
+    n85 --> n98
+    n85 --> n102
+    n85 --> n121
+    n85 --> n155
+    n88 --> n89
+    n88 --> n90
     n88 --> n91
-    n88 --> n154
-    n89 --> n91
-    n89 --> n149
-    n90 --> n12
-    n90 --> n13
-    n91 --> n90
-    n92 --> n12
-    n92 --> n13
-    n92 --> n54
-    n92 --> n55
-    n92 --> n93
-    n92 --> n154
-    n93 --> n54
+    n88 --> n92
+    n88 --> n93
+    n88 --> n94
+    n89 --> n55
+    n89 --> n56
+    n89 --> n92
+    n89 --> n155
+    n90 --> n92
+    n90 --> n150
+    n91 --> n13
+    n91 --> n14
+    n92 --> n91
+    n93 --> n13
+    n93 --> n14
     n93 --> n55
-    n93 --> n92
-    n93 --> n143
-    n93 --> n146
-    n93 --> n154
-    n94 --> n54
+    n93 --> n56
+    n93 --> n94
+    n93 --> n155
     n94 --> n55
-    n94 --> n154
-    n94 --> n157
-    n95 --> n97
-    n95 --> n99
-    n95 --> n101
-    n97 --> n86
-    n97 --> n120
-    n97 --> n143
-    n97 --> n154
-    n99 --> n86
-    n99 --> n120
-    n99 --> n125
-    n99 --> n143
-    n99 --> n154
-    n101 --> n86
-    n101 --> n143
-    n101 --> n154
-    n102 --> n105
-    n103 --> n105
-    n103 --> n150
-    n104 --> n97
-    n104 --> n99
-    n104 --> n101
-    n104 --> n103
-    n104 --> n105
+    n94 --> n56
+    n94 --> n93
+    n94 --> n144
+    n94 --> n147
+    n94 --> n155
+    n95 --> n55
+    n95 --> n56
+    n95 --> n155
+    n95 --> n159
+    n96 --> n98
+    n96 --> n100
+    n96 --> n102
+    n98 --> n87
+    n98 --> n121
+    n98 --> n144
+    n98 --> n155
+    n100 --> n87
+    n100 --> n121
+    n100 --> n126
+    n100 --> n144
+    n100 --> n155
+    n102 --> n87
+    n102 --> n144
+    n102 --> n155
+    n103 --> n106
     n104 --> n106
-    n104 --> n120
-    n104 --> n143
-    n104 --> n154
-    n106 --> n105
-    n107 --> n86
-    n108 --> n109
-    n108 --> n110
-    n108 --> n112
-    n110 --> n109
-    n111 --> n122
-    n111 --> n140
-    n111 --> n143
-    n112 --> n109
-    n113 --> n120
-    n113 --> n122
-    n113 --> n125
-    n114 --> n143
-    n116 --> n86
-    n116 --> n143
-    n117 --> n114
-    n117 --> n120
-    n117 --> n143
-    n117 --> n150
-    n118 --> n54
-    n118 --> n55
-    n118 --> n120
+    n104 --> n151
+    n105 --> n98
+    n105 --> n100
+    n105 --> n102
+    n105 --> n104
+    n105 --> n106
+    n105 --> n107
+    n105 --> n121
+    n105 --> n144
+    n105 --> n155
+    n107 --> n106
+    n108 --> n87
+    n109 --> n110
+    n109 --> n111
+    n109 --> n113
+    n111 --> n110
+    n112 --> n123
+    n112 --> n141
+    n112 --> n144
+    n113 --> n110
+    n114 --> n121
+    n114 --> n123
+    n114 --> n126
+    n115 --> n144
+    n117 --> n87
+    n117 --> n144
+    n118 --> n115
     n118 --> n121
-    n118 --> n143
-    n119 --> n120
-    n120 --> n86
-    n120 --> n115
-    n120 --> n116
-    n120 --> n143
-    n120 --> n150
-    n120 --> n152
-    n122 --> n86
-    n122 --> n141
-    n122 --> n142
-    n122 --> n143
-    n122 --> n150
-    n122 --> n152
-    n123 --> n86
-    n123 --> n122
+    n118 --> n144
+    n118 --> n151
+    n119 --> n55
+    n119 --> n56
+    n119 --> n121
+    n119 --> n122
+    n119 --> n144
+    n120 --> n121
+    n121 --> n87
+    n121 --> n116
+    n121 --> n117
+    n121 --> n144
+    n121 --> n151
+    n121 --> n153
+    n123 --> n87
+    n123 --> n142
     n123 --> n143
-    n124 --> n120
-    n124 --> n125
-    n124 --> n143
-    n124 --> n154
-    n125 --> n86
-    n125 --> n143
-    n126 --> n127
-    n126 --> n129
-    n130 --> n131
-    n130 --> n132
-    n131 --> n120
-    n131 --> n140
-    n132 --> n140
-    n133 --> n134
-    n133 --> n136
-    n133 --> n137
-    n134 --> n125
+    n123 --> n144
+    n123 --> n151
+    n123 --> n153
+    n124 --> n87
+    n124 --> n123
+    n124 --> n144
+    n125 --> n121
+    n125 --> n126
+    n125 --> n144
+    n125 --> n155
+    n126 --> n87
+    n126 --> n144
+    n127 --> n128
+    n127 --> n130
+    n131 --> n132
+    n131 --> n133
+    n132 --> n121
+    n132 --> n141
+    n133 --> n141
     n134 --> n135
-    n134 --> n136
-    n134 --> n143
+    n134 --> n137
+    n134 --> n138
+    n135 --> n126
     n135 --> n136
-    n135 --> n143
-    n136 --> n143
-    n137 --> n134
-    n137 --> n136
-    n137 --> n143
-    n139 --> n86
-    n139 --> n141
-    n140 --> n141
+    n135 --> n137
+    n135 --> n144
+    n136 --> n137
+    n136 --> n144
+    n137 --> n144
+    n138 --> n135
+    n138 --> n137
+    n138 --> n144
+    n140 --> n87
     n140 --> n142
-    n142 --> n86
-    n142 --> n141
-    n142 --> n150
-    n150 --> n86
-    n154 --> n86
-    n155 --> n156
+    n141 --> n142
+    n141 --> n143
+    n143 --> n87
+    n143 --> n142
+    n143 --> n151
+    n151 --> n87
+    n155 --> n87
+    n157 --> n158
 ```

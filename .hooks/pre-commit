@@ -64,6 +64,37 @@ else
   fi
 fi
 
+# --- mermaid validity: BLOCKS the commit, unlike the two steps above -------
+# Both docs above can carry a generated mermaid diagram (SYSTEM_ARCHITECTURE
+# LLM-narrated, ARCHITECTURE_GRAPH deterministic). This is the bug class
+# that shipped silently to GitHub earlier: a diagram that looks fine by
+# inspection but is ungrammatical (mismatched activate/deactivate pairing,
+# in that case) and fails to render. Unlike the LLM-doc-gen step, there's
+# no "the LLM might be wrong, don't block on it" argument here -- it's a
+# deterministic pass/fail against the real mermaid.js parser (sandboxed,
+# see MermaidRunner/Containerfile.mermaid: mermaid+jsdom's ~140 third-party
+# npm packages never touch the host), same certainty ruff's check has.
+# Only runs when a doc's inputs actually changed this commit (same
+# DOC_INPUTS gate) -- that's the only time either doc could have just been
+# rewritten.
+MERMAID_SCRIPT="$REPO_ROOT/validate_docs_mermaid.py"
+if [[ -n "$DOC_INPUTS" ]]; then
+  if [[ ! -f "$MERMAID_SCRIPT" ]]; then
+    echo "pre-commit: validate_docs_mermaid.py not found, skipping mermaid check" >&2
+  elif ! command -v podman >/dev/null 2>&1; then
+    echo "pre-commit: podman not found, skipping mermaid check" >&2
+  else
+    echo "pre-commit: validating generated diagrams against the real mermaid parser..."
+    if "$PYTHON" "$MERMAID_SCRIPT"; then
+      echo "pre-commit: mermaid diagrams valid"
+    else
+      echo "pre-commit: mermaid validation failed -- commit blocked." >&2
+      echo "pre-commit: fix the diagram, or use 'git commit --no-verify' to bypass." >&2
+      exit 1
+    fi
+  fi
+fi
+
 # --- ruff: lint the .py files in this commit --------------------------------
 # Unlike docs generation above, this CAN block the commit. Checks the full
 # current content of each staged file (not just the diff), matching how the
