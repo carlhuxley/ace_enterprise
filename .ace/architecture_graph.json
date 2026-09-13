@@ -1,0 +1,1624 @@
+{
+  "modules": {
+    "src/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/agents/characterization_test_generator.py": {
+      "provides": [
+        "LLMClient",
+        "ContainerRunner",
+        "CharacterizationError",
+        "CharacterizationResult",
+        "CharacterizationTestGenerator"
+      ],
+      "depends_on": [
+        "src/audit/schemas.py"
+      ]
+    },
+    "src/agents/ensemble_build.py": {
+      "provides": [
+        "EnsembleCandidate",
+        "ConsensusReport",
+        "EnsembleBuildResult",
+        "EnsembleBuildRunner"
+      ],
+      "depends_on": [
+        "src/agents/polyglot_pod_builder.py",
+        "src/agents/polyglot_tdd_runner.py",
+        "src/agents/redundancy_checker.py",
+        "src/audit/schemas.py",
+        "src/benchmark/blind_evaluation.py",
+        "src/ensemble/consensus.py",
+        "src/ensemble/models.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/agents/gherkin_extraction_agent.py": {
+      "provides": [
+        "MethodSignature",
+        "ClassAnalysis",
+        "CodeAnalysis",
+        "TestAssertion",
+        "TestScenario",
+        "TestAnalysis",
+        "GherkinScenario",
+        "GherkinFeature",
+        "StepDefinition",
+        "ExtractionResult",
+        "CodeAnalyzer",
+        "TestAnalyzer",
+        "GherkinExtractionAgent"
+      ],
+      "depends_on": []
+    },
+    "src/agents/gherkin_feature_bridge.py": {
+      "provides": [
+        "ScenarioSpec",
+        "FeatureSpec",
+        "parse_depends_on",
+        "GherkinFeatureBridge"
+      ],
+      "depends_on": []
+    },
+    "src/agents/go_language_pod.py": {
+      "provides": [
+        "commit_to_disk",
+        "GoLanguagePod"
+      ],
+      "depends_on": [
+        "src/agents/language_pod.py",
+        "src/agents/podman_orchestrator.py"
+      ]
+    },
+    "src/agents/go_runner.py": {
+      "provides": [
+        "GoRunner"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py"
+      ]
+    },
+    "src/agents/go_step_generator.py": {
+      "provides": [
+        "GoStepGenerator"
+      ],
+      "depends_on": []
+    },
+    "src/agents/import_filter.py": {
+      "provides": [
+        "ForbiddenImportError",
+        "ImportFilter"
+      ],
+      "depends_on": []
+    },
+    "src/agents/incremental_planner.py": {
+      "provides": [
+        "TestIncrement",
+        "IncrementalPlanner"
+      ],
+      "depends_on": []
+    },
+    "src/agents/iterative_tdd_runner.py": {
+      "provides": [
+        "IterativeResult",
+        "IterativeTDDRunner"
+      ],
+      "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/agents/incremental_planner.py",
+        "src/agents/language_pod.py",
+        "src/agents/redundancy_checker.py",
+        "src/agents/tdd_cycle_runner.py"
+      ]
+    },
+    "src/agents/language_pod.py": {
+      "provides": [
+        "PodSpec",
+        "PhaseResult",
+        "LanguagePod"
+      ],
+      "depends_on": [
+        "src/analytics/token_efficiency.py"
+      ]
+    },
+    "src/agents/podman_orchestrator.py": {
+      "provides": [
+        "SecurityBreachError",
+        "PulseResult",
+        "canonical_hash",
+        "ContainerRunner",
+        "PodmanOrchestrator"
+      ],
+      "depends_on": [
+        "src/agents/language_pod.py"
+      ]
+    },
+    "src/agents/podman_runner.py": {
+      "provides": [
+        "PodmanRunner"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py"
+      ]
+    },
+    "src/agents/polyglot_pod_builder.py": {
+      "provides": [
+        "build_pod_kwargs",
+        "build_all_pod_kwargs"
+      ],
+      "depends_on": [
+        "src/agents/go_runner.py",
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/agents/typescript_runner.py",
+        "src/agents/typescript_worker_agent.py",
+        "src/agents/worker_agent.py",
+        "src/utils/context_map.py"
+      ]
+    },
+    "src/agents/polyglot_tdd_runner.py": {
+      "provides": [
+        "LanguageRunResult",
+        "PolyglotRunResult",
+        "PodFactory",
+        "PolyglotTDDRunner"
+      ],
+      "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/agents/go_language_pod.py",
+        "src/agents/language_pod.py",
+        "src/agents/python_language_pod.py",
+        "src/agents/redundancy_checker.py",
+        "src/agents/tdd_cycle_runner.py",
+        "src/agents/typescript_language_pod.py",
+        "src/analytics/token_efficiency.py"
+      ]
+    },
+    "src/agents/project_aware_tdd.py": {
+      "provides": [
+        "FolderInfo",
+        "ProjectStructure",
+        "ProjectArchitecture",
+        "CodeReuseDetector",
+        "extract_explicit_constraints"
+      ],
+      "depends_on": []
+    },
+    "src/agents/python_language_pod.py": {
+      "provides": [
+        "commit_to_disk",
+        "PythonLanguagePod"
+      ],
+      "depends_on": [
+        "src/agents/import_filter.py",
+        "src/agents/language_pod.py",
+        "src/agents/podman_orchestrator.py"
+      ]
+    },
+    "src/agents/redundancy_checker.py": {
+      "provides": [
+        "ExistingTest",
+        "ProposedTest",
+        "RedundancyResult",
+        "RedundancyPreChecker",
+        "existing_tests_from_file"
+      ],
+      "depends_on": []
+    },
+    "src/agents/simulation_invariants.py": {
+      "provides": [
+        "MetricBound",
+        "extract_invariants"
+      ],
+      "depends_on": []
+    },
+    "src/agents/simulation_oracle.py": {
+      "provides": [
+        "SimulationEnvironmentError",
+        "SimulationOracle"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py",
+        "src/agents/simulation_runner.py",
+        "src/agents/simulation_scenario.py"
+      ]
+    },
+    "src/agents/simulation_pod.py": {
+      "provides": [
+        "commit_to_disk",
+        "SimulationPod"
+      ],
+      "depends_on": [
+        "src/agents/import_filter.py",
+        "src/agents/language_pod.py",
+        "src/agents/simulation_invariants.py",
+        "src/agents/simulation_oracle.py",
+        "src/agents/simulation_runner.py",
+        "src/agents/simulation_scenario.py"
+      ]
+    },
+    "src/agents/simulation_podman_runner.py": {
+      "provides": [
+        "build_simulation_image",
+        "SimulationPodmanRunner"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py"
+      ]
+    },
+    "src/agents/simulation_replay.py": {
+      "provides": [
+        "peg_controller",
+        "trajectory_controller",
+        "null_controller",
+        "tactile_controller",
+        "load_controller_from_file",
+        "AttemptRecord",
+        "resolve_attempt",
+        "render_attempt_video"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py",
+        "src/agents/simulation_runner.py",
+        "src/agents/simulation_scenarios/peg_in_hole.py",
+        "src/agents/simulation_scenarios/peg_in_hole_tactile.py",
+        "src/agents/simulation_scenarios/trajectory_following.py"
+      ]
+    },
+    "src/agents/simulation_runner.py": {
+      "provides": [
+        "SimulationTelemetry",
+        "compare",
+        "infer_max_steps",
+        "check_instantaneous",
+        "check_final",
+        "check_integral",
+        "check_windowed",
+        "summarize_telemetry",
+        "run_simulation",
+        "main"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py",
+        "src/agents/simulation_scenario.py"
+      ]
+    },
+    "src/agents/simulation_scenario.py": {
+      "provides": [
+        "SimulationScenario",
+        "load_scenario",
+        "scenario_path"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py"
+      ]
+    },
+    "src/agents/simulation_scenarios/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/agents/simulation_scenarios/peg_in_hole.py": {
+      "provides": [
+        "PegInHoleScenario"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py"
+      ]
+    },
+    "src/agents/simulation_scenarios/peg_in_hole_tactile.py": {
+      "provides": [
+        "TactilePegInHoleScenario"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py"
+      ]
+    },
+    "src/agents/simulation_scenarios/trajectory_following.py": {
+      "provides": [
+        "TrajectoryFollowingScenario"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py"
+      ]
+    },
+    "src/agents/tdd_cycle_runner.py": {
+      "provides": [
+        "CycleResult",
+        "TDDCycleRunner"
+      ],
+      "depends_on": [
+        "src/agents/language_pod.py",
+        "src/audit/schemas.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/agents/tdd_failure_recorder.py": {
+      "provides": [
+        "FailureContext",
+        "InterventionRecord",
+        "TDDFailureRecorder"
+      ],
+      "depends_on": [
+        "src/playbook/manager.py",
+        "src/storage/experiment_logger.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/agents/tdd_lesson_injector.py": {
+      "provides": [
+        "TDDLessonInjector"
+      ],
+      "depends_on": []
+    },
+    "src/agents/tdd_lessons.py": {
+      "provides": [
+        "TDDFailureCategory",
+        "TDDLesson",
+        "get_lessons_for_prompt",
+        "categorize_failure",
+        "LessonExtractor",
+        "get_all_lessons_for_prompt"
+      ],
+      "depends_on": []
+    },
+    "src/agents/test_review_agent.py": {
+      "provides": [
+        "TestQualityIssue",
+        "TestReviewResult",
+        "TestReviewAgent"
+      ],
+      "depends_on": [
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/agents/typescript_language_pod.py": {
+      "provides": [
+        "commit_to_disk",
+        "TypeScriptLanguagePod"
+      ],
+      "depends_on": [
+        "src/agents/language_pod.py",
+        "src/agents/podman_orchestrator.py"
+      ]
+    },
+    "src/agents/typescript_runner.py": {
+      "provides": [
+        "build_ts_image",
+        "TypeScriptRunner"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py"
+      ]
+    },
+    "src/agents/typescript_worker_agent.py": {
+      "provides": [
+        "TypeScriptWorkerAgent"
+      ],
+      "depends_on": [
+        "src/agents/language_pod.py"
+      ]
+    },
+    "src/agents/worker_agent.py": {
+      "provides": [
+        "WorkerAgent"
+      ],
+      "depends_on": [
+        "src/agents/import_filter.py",
+        "src/agents/language_pod.py"
+      ]
+    },
+    "src/analytics/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/analytics/cost_quality_analyzer.py",
+        "src/analytics/success_rate_calculator.py"
+      ]
+    },
+    "src/analytics/cost_quality_analyzer.py": {
+      "provides": [
+        "CostQualityAnalyzer"
+      ],
+      "depends_on": []
+    },
+    "src/analytics/success_rate_calculator.py": {
+      "provides": [
+        "RatePeriod",
+        "VersionRate",
+        "SuccessRateCalculator"
+      ],
+      "depends_on": [
+        "src/storage/experiment_logger.py"
+      ]
+    },
+    "src/analytics/token_efficiency.py": {
+      "provides": [
+        "TokenUsage",
+        "PodRun",
+        "LanguageScore",
+        "CrossLanguageComparison",
+        "EfficiencyReport",
+        "TokenEfficiencyReporter"
+      ],
+      "depends_on": []
+    },
+    "src/api/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/api/middleware/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/api/routes/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/api/routes/feedback_routes.py": {
+      "provides": [
+        "SubmitFeedbackRequest",
+        "FeedbackResponse",
+        "FeedbackListResponse",
+        "DriftResponse",
+        "create_feedback_router"
+      ],
+      "depends_on": [
+        "src/broker/feedback.py"
+      ]
+    },
+    "src/audit/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/audit/client.py",
+        "src/audit/dashboard.py",
+        "src/audit/schemas.py",
+        "src/audit/store.py"
+      ]
+    },
+    "src/audit/api.py": {
+      "provides": [
+        "create_api_app",
+        "create_app"
+      ],
+      "depends_on": [
+        "src/audit/auth.py",
+        "src/audit/checkpoint.py",
+        "src/audit/schemas.py",
+        "src/audit/store.py"
+      ]
+    },
+    "src/audit/auth.py": {
+      "provides": [
+        "require_api_key"
+      ],
+      "depends_on": []
+    },
+    "src/audit/checkpoint.py": {
+      "provides": [
+        "checkpoints_path_from_env",
+        "AuditCheckpoint",
+        "CheckpointFailure",
+        "CheckpointVerificationResult",
+        "create_checkpoint",
+        "write_checkpoint",
+        "read_checkpoints",
+        "verify_checkpoints"
+      ],
+      "depends_on": [
+        "src/audit/store.py"
+      ]
+    },
+    "src/audit/client.py": {
+      "provides": [
+        "AuditClient",
+        "NoOpAuditClient",
+        "get_audit_client"
+      ],
+      "depends_on": [
+        "src/audit/schemas.py"
+      ]
+    },
+    "src/audit/collector.py": {
+      "provides": [
+        "create_collector_app",
+        "create_app"
+      ],
+      "depends_on": [
+        "src/audit/auth.py",
+        "src/audit/schemas.py",
+        "src/audit/store.py"
+      ]
+    },
+    "src/audit/dashboard.py": {
+      "provides": [
+        "AgentPerformance",
+        "AgentIdentity",
+        "AuditDashboard"
+      ],
+      "depends_on": []
+    },
+    "src/audit/local_client.py": {
+      "provides": [
+        "default_local_audit_url",
+        "LocalAuditClient",
+        "get_local_audit_client"
+      ],
+      "depends_on": [
+        "src/audit/schemas.py",
+        "src/audit/store.py"
+      ]
+    },
+    "src/audit/schemas.py": {
+      "provides": [
+        "AuditEventType",
+        "AuditEvent",
+        "AuditEventCreate",
+        "AuditQuery",
+        "AuditResult"
+      ],
+      "depends_on": []
+    },
+    "src/audit/store.py": {
+      "provides": [
+        "AuditEventModel",
+        "AuditStore"
+      ],
+      "depends_on": [
+        "src/audit/schemas.py"
+      ]
+    },
+    "src/benchmark/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/benchmark/blind_evaluation.py": {
+      "provides": [
+        "Submission",
+        "EvaluationResult",
+        "MultiRunResult",
+        "BlindEvaluator"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/benchmark/rubrics/__init__.py"
+      ]
+    },
+    "src/benchmark/model_attribution.py": {
+      "provides": [
+        "TaskCompletion",
+        "ModelMetrics",
+        "ModelFamilyMetrics",
+        "DailyMetrics",
+        "ModelAttributionTracker"
+      ],
+      "depends_on": []
+    },
+    "src/benchmark/production_analyzer.py": {
+      "provides": [
+        "ModelPerformance",
+        "ProductionReport",
+        "ProductionDataAnalyzer"
+      ],
+      "depends_on": [
+        "src/benchmark/blind_evaluation.py",
+        "src/benchmark/model_attribution.py",
+        "src/storage/models.py",
+        "src/storage/repository.py"
+      ]
+    },
+    "src/benchmark/rubrics/__init__.py": {
+      "provides": [
+        "get_rubric"
+      ],
+      "depends_on": [
+        "src/benchmark/rubrics/analysis.py",
+        "src/benchmark/rubrics/base.py",
+        "src/benchmark/rubrics/code.py",
+        "src/benchmark/rubrics/docs.py",
+        "src/benchmark/rubrics/tests.py"
+      ]
+    },
+    "src/benchmark/rubrics/analysis.py": {
+      "provides": [
+        "AnalysisRubric"
+      ],
+      "depends_on": [
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
+    "src/benchmark/rubrics/base.py": {
+      "provides": [
+        "ScoringDimension",
+        "DimensionScore",
+        "RubricResult",
+        "EvaluationRubric"
+      ],
+      "depends_on": []
+    },
+    "src/benchmark/rubrics/code.py": {
+      "provides": [
+        "CodeGenerationRubric"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
+    "src/benchmark/rubrics/docs.py": {
+      "provides": [
+        "DocumentationRubric"
+      ],
+      "depends_on": [
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
+    "src/benchmark/rubrics/tests.py": {
+      "provides": [
+        "TestWritingRubric"
+      ],
+      "depends_on": [
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
+    "src/benchmark/semantic_analyzer.py": {
+      "provides": [
+        "SemanticCodeAnalyzer",
+        "SQLAnalyzer",
+        "EvalAnalyzer",
+        "ExecAnalyzer",
+        "SecretAnalyzer"
+      ],
+      "depends_on": []
+    },
+    "src/broker/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/broker/advisor.py",
+        "src/broker/capability_registry.py",
+        "src/broker/effgen_adapter.py",
+        "src/broker/human_decision.py"
+      ]
+    },
+    "src/broker/adaptive_broker.py": {
+      "provides": [
+        "RoutingResult",
+        "BrokerConfig",
+        "AdaptiveBroker"
+      ],
+      "depends_on": [
+        "src/broker/performance_aggregator.py"
+      ]
+    },
+    "src/broker/advisor.py": {
+      "provides": [
+        "TaskRequirements",
+        "Recommendation",
+        "BrokerAdvisor"
+      ],
+      "depends_on": [
+        "src/broker/capability_registry.py"
+      ]
+    },
+    "src/broker/bayesian.py": {
+      "provides": [
+        "BayesianEstimate",
+        "estimate_success_rate"
+      ],
+      "depends_on": []
+    },
+    "src/broker/calibration.py": {
+      "provides": [
+        "calibrate_cold_start_models"
+      ],
+      "depends_on": [
+        "src/agents/polyglot_pod_builder.py",
+        "src/agents/polyglot_tdd_runner.py",
+        "src/audit/local_client.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/broker/capability_registry.py": {
+      "provides": [
+        "AgentCapabilities",
+        "CapabilityRegistry"
+      ],
+      "depends_on": []
+    },
+    "src/broker/effgen_adapter.py": {
+      "provides": [
+        "EffGenAgentConfig",
+        "TaskRequest",
+        "TaskResponse",
+        "HealthStatus",
+        "EffGenAdapter"
+      ],
+      "depends_on": [
+        "src/broker/capability_registry.py"
+      ]
+    },
+    "src/broker/feedback.py": {
+      "provides": [
+        "HumanFeedback",
+        "FeedbackCollector"
+      ],
+      "depends_on": []
+    },
+    "src/broker/human_decision.py": {
+      "provides": [
+        "DecisionContext",
+        "HumanDecision",
+        "DecisionResult",
+        "HumanDecisionInterface"
+      ],
+      "depends_on": [
+        "src/broker/advisor.py"
+      ]
+    },
+    "src/broker/model_router.py": {
+      "provides": [
+        "ModelRoutingDecision",
+        "route_model"
+      ],
+      "depends_on": [
+        "src/audit/store.py",
+        "src/broker/adaptive_broker.py",
+        "src/broker/calibration.py",
+        "src/broker/performance_aggregator.py"
+      ]
+    },
+    "src/broker/performance_aggregator.py": {
+      "provides": [
+        "ModelProfile",
+        "LatencyQualityReport",
+        "AgentPerformanceMetrics",
+        "PerformanceAggregator"
+      ],
+      "depends_on": [
+        "src/audit/schemas.py",
+        "src/audit/store.py",
+        "src/broker/bayesian.py",
+        "src/broker/regression_detector.py"
+      ]
+    },
+    "src/broker/regression_detector.py": {
+      "provides": [
+        "QualityBaseline",
+        "RegressionAlert",
+        "RegressionDetector"
+      ],
+      "depends_on": []
+    },
+    "src/cli/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/cli/config.py": {
+      "provides": [
+        "ProjectConfig"
+      ],
+      "depends_on": [
+        "src/cli/factory.py"
+      ]
+    },
+    "src/cli/factory.py": {
+      "provides": [
+        "TDDRunHandle",
+        "build_agent",
+        "llm_client_from_ref",
+        "default_llm_client"
+      ],
+      "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/agents/incremental_planner.py",
+        "src/agents/iterative_tdd_runner.py",
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/agents/python_language_pod.py",
+        "src/agents/redundancy_checker.py",
+        "src/agents/worker_agent.py",
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/broker/model_router.py",
+        "src/cli/config.py",
+        "src/config/settings.py",
+        "src/core/curator/module.py",
+        "src/core/reflector/module.py",
+        "src/playbook/manager.py",
+        "src/utils/claude_cli_client.py",
+        "src/utils/context_map.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/cli/main.py": {
+      "provides": [
+        "cmd_tdd",
+        "cmd_project",
+        "cmd_view",
+        "main"
+      ],
+      "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/agents/simulation_replay.py",
+        "src/agents/simulation_runner.py",
+        "src/audit/local_client.py",
+        "src/cli/config.py",
+        "src/cli/factory.py",
+        "src/cli/project_builder.py",
+        "src/contracts/project_architect.py",
+        "src/utils/topo.py"
+      ]
+    },
+    "src/cli/project_builder.py": {
+      "provides": [
+        "ModuleStatus",
+        "ModuleOutcome",
+        "ProjectBuildResult",
+        "ProjectBuilder"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/contracts/module_architect.py",
+        "src/contracts/module_tdd_builder.py",
+        "src/contracts/project_architect.py",
+        "src/core/curator/module.py",
+        "src/core/reflector/module.py",
+        "src/playbook/manager.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/config/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/config/settings.py": {
+      "provides": [
+        "Settings",
+        "get_settings"
+      ],
+      "depends_on": []
+    },
+    "src/contracts/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/contracts/contract_architect.py",
+        "src/contracts/contract_decomposer.py",
+        "src/contracts/contract_driven.py",
+        "src/contracts/contract_schema.py",
+        "src/contracts/module_architect.py",
+        "src/contracts/module_tdd_builder.py"
+      ]
+    },
+    "src/contracts/contract_architect.py": {
+      "provides": [
+        "ArchitectResult",
+        "ContractArchitect",
+        "create_architect_from_config"
+      ],
+      "depends_on": [
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/contracts/contract_schema.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/contracts/contract_decomposer.py": {
+      "provides": [
+        "DecompositionError",
+        "DecomposerConfig",
+        "ContractDecomposer"
+      ],
+      "depends_on": [
+        "src/contracts/contract_schema.py",
+        "src/utils/effgen_client.py"
+      ]
+    },
+    "src/contracts/contract_driven.py": {
+      "provides": [
+        "ContractStatus",
+        "TestCase",
+        "Fixtures",
+        "InterfaceContract",
+        "Implementation",
+        "ContractValidator",
+        "ContractOrchestrator"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py"
+      ]
+    },
+    "src/contracts/contract_schema.py": {
+      "provides": [
+        "TestCaseSpec",
+        "FixtureSpec",
+        "ContractSpec",
+        "load_contracts",
+        "load_contracts_from_file",
+        "save_contracts"
+      ],
+      "depends_on": [
+        "src/contracts/contract_driven.py"
+      ]
+    },
+    "src/contracts/module_architect.py": {
+      "provides": [
+        "ExistingFunction",
+        "SchemaTable",
+        "CodebaseContext",
+        "ModuleDependencies",
+        "FunctionSpec",
+        "IntegrationTest",
+        "ModuleContract",
+        "ModuleArchitectResult",
+        "check_contract_consistency",
+        "ModuleArchitect",
+        "generate_module_prompt",
+        "extract_context_from_file",
+        "extract_context_from_directory",
+        "validate_module"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/podman_runner.py",
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/contracts/module_tdd_builder.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/contracts/module_tdd_builder.py": {
+      "provides": [
+        "FunctionBuildResult",
+        "ModuleBuildResult",
+        "function_spec_to_requirement",
+        "ModuleTDDBuilder",
+        "create_tdd_builder_from_config",
+        "render_integration_tests"
+      ],
+      "depends_on": [
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/contracts/module_architect.py",
+        "src/storage/schemas.py",
+        "src/utils/code_extraction.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/contracts/project_architect.py": {
+      "provides": [
+        "ProjectPlanError",
+        "ModuleSpec",
+        "ProjectPlan",
+        "ProjectPlanResult",
+        "ProjectArchitect"
+      ],
+      "depends_on": [
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/utils/llm_client.py",
+        "src/utils/topo.py"
+      ]
+    },
+    "src/core/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/core/curator/module.py",
+        "src/core/generator/module.py",
+        "src/core/reflector/module.py"
+      ]
+    },
+    "src/core/curator/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/core/curator/module.py": {
+      "provides": [
+        "Curator"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/playbook/manager.py",
+        "src/storage/schemas.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/core/generator/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/core/generator/module.py": {
+      "provides": [
+        "Generator"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/playbook/manager.py",
+        "src/playbook/retrieval.py",
+        "src/storage/schemas.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/core/reflector/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/core/reflector/module.py": {
+      "provides": [
+        "Reflector"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/schemas.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/ensemble/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/ensemble/models.py"
+      ]
+    },
+    "src/ensemble/consensus.py": {
+      "provides": [
+        "ConsensusBuilder"
+      ],
+      "depends_on": [
+        "src/ensemble/models.py",
+        "src/utils/embedding.py"
+      ]
+    },
+    "src/ensemble/learner.py": {
+      "provides": [
+        "EnsembleLearner"
+      ],
+      "depends_on": [
+        "src/core/curator/module.py",
+        "src/core/generator/module.py",
+        "src/core/reflector/module.py",
+        "src/ensemble/consensus.py",
+        "src/ensemble/models.py",
+        "src/ensemble/voting.py",
+        "src/playbook/manager.py",
+        "src/storage/schemas.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/ensemble/models.py": {
+      "provides": [
+        "VoteType",
+        "BulletSection",
+        "Vote",
+        "ConsensusBullet",
+        "VoteResults",
+        "ModelPerformance",
+        "EnsembleResult"
+      ],
+      "depends_on": []
+    },
+    "src/ensemble/voting.py": {
+      "provides": [
+        "VotingStrategy",
+        "MajorityVoting",
+        "SupermajorityVoting",
+        "WeightedVoting",
+        "UnanimousVoting",
+        "EscalatingVoting",
+        "VotingSystem"
+      ],
+      "depends_on": [
+        "src/ensemble/models.py"
+      ]
+    },
+    "src/main.py": {
+      "provides": [
+        "lifespan",
+        "health_check",
+        "root"
+      ],
+      "depends_on": [
+        "src/config/settings.py"
+      ]
+    },
+    "src/ml/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/ml/experiment_knowledge.py",
+        "src/ml/mlflow_callback.py",
+        "src/ml/query_interface.py"
+      ]
+    },
+    "src/ml/experiment_knowledge.py": {
+      "provides": [
+        "ExperimentDecision",
+        "ExperimentPattern",
+        "MLExperimentKnowledge"
+      ],
+      "depends_on": []
+    },
+    "src/ml/mlflow_callback.py": {
+      "provides": [
+        "ACEMLflowCallback"
+      ],
+      "depends_on": [
+        "src/ml/experiment_knowledge.py"
+      ]
+    },
+    "src/ml/postgres_mlflow_callback.py": {
+      "provides": [
+        "PostgresACEMLflowCallback"
+      ],
+      "depends_on": [
+        "src/playbook/postgres_adapter.py",
+        "src/storage/experiment_logger.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/ml/query_interface.py": {
+      "provides": [
+        "EnrichedRun",
+        "MLflowKnowledgeQuery"
+      ],
+      "depends_on": [
+        "src/ml/experiment_knowledge.py"
+      ]
+    },
+    "src/playbook/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/playbook/manager.py",
+        "src/playbook/postgres_adapter.py",
+        "src/playbook/retrieval.py"
+      ]
+    },
+    "src/playbook/clustering.py": {
+      "provides": [
+        "RepresentativeStrategy",
+        "BulletCluster",
+        "ClusteringResult",
+        "BulletClusterer",
+        "build_distillation_playbook"
+      ],
+      "depends_on": [
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/playbook/content_safety.py": {
+      "provides": [
+        "Verdict",
+        "ScreenResult",
+        "screen_bullet_content",
+        "ContentRejectedError"
+      ],
+      "depends_on": []
+    },
+    "src/playbook/deduplication.py": {
+      "provides": [
+        "BulletDeduplicator"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/playbook/distillation_router.py": {
+      "provides": [
+        "RoutingVerdict",
+        "LicenseCategory",
+        "Supplier",
+        "detect_supplier",
+        "classify_license",
+        "Provenance",
+        "filter_bullets_by_provenance",
+        "DomainMatch",
+        "RoutingResult",
+        "RouterConfig",
+        "DomainRegistry",
+        "DistillationRouter",
+        "create_router"
+      ],
+      "depends_on": [
+        "src/playbook/clustering.py",
+        "src/playbook/manager.py",
+        "src/storage/schemas.py",
+        "src/utils/embedding.py"
+      ]
+    },
+    "src/playbook/learn_cli.py": {
+      "provides": [
+        "learn_with_audit",
+        "learn_from_file"
+      ],
+      "depends_on": [
+        "src/audit/local_client.py",
+        "src/audit/schemas.py",
+        "src/playbook/manager.py",
+        "src/playbook/markdown_importer.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/playbook/maintenance.py": {
+      "provides": [
+        "decay_stale_bullets",
+        "prune_low_confidence_bullets",
+        "run_maintenance"
+      ],
+      "depends_on": [
+        "src/playbook/manager.py"
+      ]
+    },
+    "src/playbook/manager.py": {
+      "provides": [
+        "PlaybookManager"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/playbook/content_safety.py",
+        "src/playbook/deduplication.py",
+        "src/storage/schemas.py",
+        "src/utils/embedding.py",
+        "src/utils/id_generator.py"
+      ]
+    },
+    "src/playbook/markdown_importer.py": {
+      "provides": [
+        "ParsedBullet",
+        "MarkdownImporter"
+      ],
+      "depends_on": []
+    },
+    "src/playbook/postgres_adapter.py": {
+      "provides": [
+        "PostgresPlaybookAdapter"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/models.py",
+        "src/storage/repository.py",
+        "src/storage/schemas.py",
+        "src/utils/embedding.py",
+        "src/utils/id_generator.py"
+      ]
+    },
+    "src/playbook/postgres_retriever.py": {
+      "provides": [
+        "PostgresBulletRetriever"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/playbook/postgres_adapter.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/playbook/qa.py": {
+      "provides": [
+        "QAAnswer",
+        "PlaybookQA"
+      ],
+      "depends_on": [
+        "src/playbook/manager.py",
+        "src/playbook/retrieval.py",
+        "src/storage/schemas.py",
+        "src/utils/llm_client.py"
+      ]
+    },
+    "src/playbook/retrieval.py": {
+      "provides": [
+        "BulletRetriever"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/project/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/project/config.py",
+        "src/project/detector.py"
+      ]
+    },
+    "src/project/config.py": {
+      "provides": [
+        "ACEConfig",
+        "ProjectConfig"
+      ],
+      "depends_on": []
+    },
+    "src/project/decision_record.py": {
+      "provides": [
+        "DecisionRecord",
+        "generate_adr_from_tdd_result"
+      ],
+      "depends_on": []
+    },
+    "src/project/detector.py": {
+      "provides": [
+        "ProjectInfo",
+        "ProjectDetector"
+      ],
+      "depends_on": []
+    },
+    "src/reliability/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/reliability/playbook_analyzer.py",
+        "src/reliability/tdd_cycle_analyzer.py"
+      ]
+    },
+    "src/reliability/playbook_analyzer.py": {
+      "provides": [
+        "BulletReliability",
+        "PlaybookReliabilityAnalyzer"
+      ],
+      "depends_on": [
+        "src/playbook/manager.py",
+        "src/storage/experiment_logger.py"
+      ]
+    },
+    "src/reliability/tdd_cycle_analyzer.py": {
+      "provides": [
+        "CyclePeriod",
+        "TDDCycleAnalyzer"
+      ],
+      "depends_on": [
+        "src/storage/experiment_logger.py"
+      ]
+    },
+    "src/retrieval/__init__.py": {
+      "provides": [],
+      "depends_on": [
+        "src/retrieval/cgr3_retriever.py",
+        "src/retrieval/schemas.py",
+        "src/retrieval/service.py"
+      ]
+    },
+    "src/retrieval/cgr3_retriever.py": {
+      "provides": [
+        "ContextGraphRetriever"
+      ],
+      "depends_on": [
+        "src/playbook/retrieval.py",
+        "src/retrieval/context_scorer.py",
+        "src/retrieval/schemas.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/retrieval/context_scorer.py": {
+      "provides": [
+        "ContextScorer"
+      ],
+      "depends_on": [
+        "src/retrieval/schemas.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/retrieval/schemas.py": {
+      "provides": [
+        "ReasoningVerdict",
+        "RetrievalContext",
+        "ContextGap",
+        "RankedBullet",
+        "KnowledgeResponse"
+      ],
+      "depends_on": [
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/retrieval/service.py": {
+      "provides": [
+        "InstitutionalKnowledgeService",
+        "get_knowledge_service"
+      ],
+      "depends_on": [
+        "src/retrieval/cgr3_retriever.py",
+        "src/retrieval/schemas.py",
+        "src/storage/schemas.py"
+      ]
+    },
+    "src/storage/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/storage/database.py": {
+      "provides": [
+        "get_db",
+        "init_db",
+        "drop_db",
+        "close_db"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/models.py"
+      ]
+    },
+    "src/storage/experiment_logger.py": {
+      "provides": [
+        "ExperimentLogger"
+      ],
+      "depends_on": [
+        "src/storage/models.py",
+        "src/storage/repository.py"
+      ]
+    },
+    "src/storage/models.py": {
+      "provides": [
+        "PlaybookModel",
+        "BulletModel",
+        "BulletLineageModel",
+        "ExperimentLogModel",
+        "CheckpointModel",
+        "PerformanceMetricModel",
+        "RegressionAlertModel",
+        "RollbackHistoryModel"
+      ],
+      "depends_on": []
+    },
+    "src/storage/repository.py": {
+      "provides": [
+        "PlaybookRepository",
+        "get_repository"
+      ],
+      "depends_on": [
+        "src/config/settings.py",
+        "src/storage/models.py",
+        "src/utils/embedding.py"
+      ]
+    },
+    "src/storage/schemas.py": {
+      "provides": [
+        "BulletBase",
+        "BulletCreate",
+        "Bullet",
+        "BulletLineage",
+        "BulletFeedback",
+        "PlaybookMetadata",
+        "PlaybookSections",
+        "PlaybookBase",
+        "PlaybookCreate",
+        "Playbook",
+        "TaskInput",
+        "EnvironmentFeedback",
+        "GeneratorOutput",
+        "DeltaBullet",
+        "ReflectorOutput",
+        "CuratorOutput",
+        "ExperimentOutcome",
+        "ExperimentLogBase",
+        "ExperimentLogCreate",
+        "ExperimentLog",
+        "CheckpointMetrics",
+        "CheckpointMetadata",
+        "CheckpointCreate",
+        "Checkpoint",
+        "RollbackRequest",
+        "RollbackResult",
+        "PerformanceMetrics",
+        "RegressionAlert"
+      ],
+      "depends_on": []
+    },
+    "src/utils/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/utils/claude_cli_client.py": {
+      "provides": [
+        "ClaudeCliClient"
+      ],
+      "depends_on": []
+    },
+    "src/utils/code_extraction.py": {
+      "provides": [
+        "extract_code"
+      ],
+      "depends_on": []
+    },
+    "src/utils/context_map.py": {
+      "provides": [
+        "ASTSignature",
+        "FileSignatures",
+        "ContextMap",
+        "ContextMapBuilder"
+      ],
+      "depends_on": []
+    },
+    "src/utils/dependency_graph.py": {
+      "provides": [
+        "ModuleNode",
+        "DependencyGraph",
+        "save",
+        "load",
+        "scan",
+        "has_cycle",
+        "build_order",
+        "blast_radius",
+        "to_mermaid_flowchart"
+      ],
+      "depends_on": []
+    },
+    "src/utils/effgen_client.py": {
+      "provides": [
+        "EffGenClient",
+        "get_effgen_client"
+      ],
+      "depends_on": []
+    },
+    "src/utils/embedding.py": {
+      "provides": [
+        "EmbeddingService",
+        "get_embedding_service"
+      ],
+      "depends_on": [
+        "src/config/settings.py"
+      ]
+    },
+    "src/utils/file_lock.py": {
+      "provides": [
+        "FileDrift",
+        "DriftReport",
+        "InadvertentDriftError",
+        "FileLockContext",
+        "DriftDetector"
+      ],
+      "depends_on": []
+    },
+    "src/utils/id_generator.py": {
+      "provides": [
+        "generate_playbook_id",
+        "generate_bullet_id",
+        "generate_experiment_id",
+        "generate_checkpoint_id",
+        "generate_task_id",
+        "generate_confirmation_token"
+      ],
+      "depends_on": []
+    },
+    "src/utils/import_validator.py": {
+      "provides": [
+        "ImportValidationError",
+        "ImportValidator"
+      ],
+      "depends_on": []
+    },
+    "src/utils/llm_client.py": {
+      "provides": [
+        "LLMQuotaExhaustedError",
+        "LLMClient",
+        "extract_model_version"
+      ],
+      "depends_on": [
+        "src/config/settings.py"
+      ]
+    },
+    "src/utils/playbook_enforcer.py": {
+      "provides": [
+        "EditCheckResult",
+        "PlaybookEnforcer"
+      ],
+      "depends_on": [
+        "src/utils/session_log.py"
+      ]
+    },
+    "src/utils/session_log.py": {
+      "provides": [
+        "SessionLog"
+      ],
+      "depends_on": []
+    },
+    "src/utils/topo.py": {
+      "provides": [
+        "DependencyError",
+        "topo_order"
+      ],
+      "depends_on": []
+    }
+  }
+}
