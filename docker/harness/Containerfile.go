@@ -1,7 +1,14 @@
 FROM docker.io/library/golang:1.23-alpine
 
 # git is needed for `go install` to fetch gosec's module graph at build time.
-RUN apk add --no-cache git
+# gcc/musl-dev give `go test -race` a C toolchain — the race detector is
+# built on cgo's runtime instrumentation and refuses to run without it
+# ("−race requires cgo"), which this Alpine base doesn't ship by default.
+RUN apk add --no-cache git gcc musl-dev
+
+# `go build`/`go test` only link the race-detector's cgo shim when
+# CGO_ENABLED=1; Alpine's Go image defaults it to 0 for static-binary builds.
+ENV CGO_ENABLED=1
 
 # gosec — Go security scanner, the Go analog of Bandit (Python) and
 # eslint-plugin-security (TypeScript). Installed at build time (network
@@ -10,6 +17,18 @@ RUN apk add --no-cache git
 # GOBIN pinned to a location on PATH regardless of which user runs it.
 ENV GOBIN=/usr/local/bin
 RUN go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+
+# errcheck (unchecked-error gate) and revive (idiomatic-lint gate) -- same
+# install-at-build-time/no-runtime-network pattern as gosec above. Both are
+# wired into GoRunner.send_pulse() as blocking gates alongside gosec/go vet,
+# not advisory-only.
+RUN go install github.com/kisielk/errcheck@v1.7.0
+RUN go install github.com/mgechev/revive@v1.5.1
+
+# revive.toml drops two purely stylistic default rules (package-comments,
+# var-declaration) that have no correctness/security signal and broke known-
+# good, already-verified generated code on first use -- see the file itself.
+COPY revive.toml /etc/revive.toml
 
 # Non-root runner user (matches Containerfile.ts's hardening — the Python
 # harness is the one exception, tracked separately).

@@ -5,12 +5,14 @@ previously ran go/gofmt/go vet directly on the host via subprocess with no
 isolation at all; it now routes through PodmanOrchestrator + GoRunner the
 same way PythonLanguagePod and TypeScriptLanguagePod do.
 """
+import shutil
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
 from src.agents.go_language_pod import GoLanguagePod
+from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
+from src.agents.podman_orchestrator import PodmanOrchestrator
 
 
 def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
@@ -273,10 +275,6 @@ class TestTokenUsage:
 # Integration: real Podman container, real Go toolchain, real gosec
 # ---------------------------------------------------------------------------
 
-import shutil
-
-from src.agents.podman_orchestrator import PodmanOrchestrator
-
 skip_no_podman = pytest.mark.skipif(
     shutil.which("podman") is None, reason="podman not in PATH"
 )
@@ -302,7 +300,7 @@ _SAFE_GO_TEST = (
     "\t}\n"
     "}\n"
 )
-_SAFE_GO_IMPL = "package pulse\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+_SAFE_GO_IMPL = "package pulse\n\n// Add returns the sum of a and b.\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
 
 _VULN_GO_IMPL = (
     "package pulse\n\n"
@@ -354,10 +352,14 @@ class TestGoIntegration:
         pod = GoLanguagePod(llm_client=make_llm_client(), project_root=tmp_path, orchestrator=orchestrator)
         s = spec(tmp_path)
         s.test_file.write_text(_SAFE_GO_TEST)
-        s.implementation_file.write_text("package pulse\n\nfunc Add(a, b int) int {\nreturn a+b\n}\n")
+        s.implementation_file.write_text(
+            "package pulse\n\n// Add returns the sum of a and b.\nfunc Add(a, b int) int {\nreturn a+b\n}\n"
+        )
 
         result = pod.run_refactor(s)
 
         assert result.passed is True
         reformatted = s.implementation_file.read_text()
-        assert reformatted == "package pulse\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+        assert reformatted == (
+            "package pulse\n\n// Add returns the sum of a and b.\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+        )

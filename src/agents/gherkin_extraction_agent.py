@@ -99,6 +99,9 @@ class TestScenario:
     assertions: list[TestAssertion]  # Then: What's verified
     docstring: str | None
     line_number: int
+    # Gherkin tags (e.g. "@auto-characterized"), read from @pytest.mark.<name>
+    # decorators on the test function -- see _decorator_to_tag().
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +120,8 @@ class GherkinScenario:
     when_steps: list[str]
     then_steps: list[str]
     background_context: str | None = None
+    # Gherkin tags carried from the source test's tags (see TestScenario.tags).
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -251,6 +256,24 @@ class CodeAnalyzer:
         return False
 
 
+def _decorator_to_tag(dec: ast.expr) -> str | None:
+    """Recognize a `@pytest.mark.<name>` decorator and turn it into a Gherkin
+    tag, e.g. `@pytest.mark.auto_characterized` -> "@auto-characterized".
+    Any other decorator shape (custom fixtures, `@pytest.mark.parametrize(...)`
+    calls, etc.) is ignored -- this only exists to carry markers meant as
+    Gherkin tags, not to model pytest's marker system generally."""
+    node = dec.func if isinstance(dec, ast.Call) else dec
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+        and node.value.attr == "mark"
+    ):
+        return f"@{node.attr.replace('_', '-')}"
+    return None
+
+
 class TestAnalyzer:
     """Analyzes test code to extract test scenarios."""
 
@@ -309,13 +332,16 @@ class TestAnalyzer:
                 assertions.extend(self._extract_assertions_from_stmt(stmt))
                 in_setup = False
 
+        tags = [t for dec in node.decorator_list if (t := _decorator_to_tag(dec)) is not None]
+
         return TestScenario(
             test_name=node.name,
             setup_actions=setup_actions,
             action=action,
             assertions=assertions,
             docstring=ast.get_docstring(node),
-            line_number=node.lineno
+            line_number=node.lineno,
+            tags=tags,
         )
 
     def _is_assertion(self, call: ast.Call) -> bool:
@@ -357,7 +383,7 @@ class TestAnalyzer:
             test_expr = stmt.test
 
             if isinstance(test_expr, ast.Compare):
-                for op, comparator in zip(test_expr.ops, test_expr.comparators):
+                for op, comparator in zip(test_expr.ops, test_expr.comparators, strict=True):
                     assertion_type = self._map_compare_op(op)
                     assertions.append(TestAssertion(
                         assertion_type=assertion_type,
@@ -595,7 +621,8 @@ class GherkinExtractionAgent:
             name=scenario_name,
             given_steps=given_steps,
             when_steps=when_steps,
-            then_steps=then_steps
+            then_steps=then_steps,
+            tags=test_scenario.tags,
         )
 
     def _setup_to_given(self, setup: str) -> str | None:
@@ -780,6 +807,8 @@ class GherkinExtractionAgent:
         lines.append("")
 
         for scenario in feature.scenarios:
+            if scenario.tags:
+                lines.append(f"  {' '.join(scenario.tags)}")
             lines.append(f"  Scenario: {scenario.name}")
             for given_step in scenario.given_steps:
                 lines.append(f"    Given {given_step}")

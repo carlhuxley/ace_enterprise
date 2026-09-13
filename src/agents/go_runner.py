@@ -1,12 +1,19 @@
 """
 GoRunner — PodmanRunner variant for the Go TDD harness.
 
-Overrides send_pulse() to run `go vet` + `go test` (instead of pytest) and
-gosec (instead of Bandit) for static security scanning, parsing gosec's JSON
-output into the shared PulseResult fields. Also captures `gofmt`'s
+Overrides send_pulse() to run `go vet` + `go test -race` (instead of pytest)
+and gosec (instead of Bandit) for static security scanning, parsing gosec's
+JSON output into the shared PulseResult fields. Also captures `gofmt`'s
 reformatted output (read-only-workspace-safe: gofmt without -w only reads
 the file and prints to stdout) so GoLanguagePod's REFACTOR phase can apply
 real formatting without needing write access inside the container.
+
+`-race` requires cgo (`CGO_ENABLED=1` + a C toolchain), which
+docker/harness/Containerfile.go now installs (gcc + musl-dev) on top of the
+Alpine base image -- without it `go test -race` fails immediately with
+"-race requires cgo" rather than running uninstrumented. Rebuild the image
+after pulling this change: `podman build -f docker/harness/Containerfile.go
+-t localhost/ace-go-harness:latest docker/harness`.
 """
 import json
 import subprocess
@@ -17,6 +24,8 @@ from src.agents.podman_runner import PodmanRunner
 _GO_BIN = "go"
 _GOFMT_BIN = "gofmt"
 _GOSEC_BIN = "gosec"
+_ERRCHECK_BIN = "errcheck"
+_REVIVE_BIN = "revive"
 _REMOTE_WS = "/workspace"
 
 _WORKSPACE_GO_MOD = "module pulse\n\ngo 1.23\n"
@@ -43,6 +52,14 @@ class GoRunner(PodmanRunner):
     session, matching PodmanRunner), so this cold-start cost is paid once
     per session, not once per pulse -- subsequent pulses reuse the warmed
     cache and take well under a second.
+
+    `-race` (see module docstring) adds its own overhead on top of the
+    above: confirmed live at 2 cpus/1g, cold start (cgo + race-instrumented
+    stdlib, empty GOCACHE) rose from ~13s to ~25s, and warm-cache pulses
+    from well under a second to ~2s (the race-instrumented test binary
+    itself runs slower, not just compiles slower). Both stay comfortably
+    inside the existing 60s timeout floor, so no timeout/resource change
+    was needed alongside it.
     """
 
     def __init__(
@@ -86,7 +103,7 @@ class GoRunner(PodmanRunner):
         test_proc = subprocess.run(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
-                _GO_BIN, "test", "./...",
+                _GO_BIN, "test", "-v", "-race", "./...",
             ],
             capture_output=True, text=True, timeout=_timeout,
         )
@@ -117,11 +134,38 @@ class GoRunner(PodmanRunner):
         gosec_output = gosec_proc.stdout or gosec_proc.stderr
         high, medium, low = _parse_gosec(gosec_output)
 
-        passed = vet_proc.returncode == 0 and test_proc.returncode == 0
+        # errcheck and revive are blocking gates, same as go vet/go test above --
+        # not advisory-only. errcheck's own exit code is already nonzero when it
+        # finds an unchecked error return; revive needs -set_exit_status or it
+        # always exits 0 regardless of findings.
+        errcheck_proc = subprocess.run(
+            ["podman", "exec", "--workdir", _REMOTE_WS, self._name, _ERRCHECK_BIN, "./..."],
+            capture_output=True, text=True, timeout=_timeout,
+        )
+        revive_proc = subprocess.run(
+            [
+                "podman", "exec", "--workdir", _REMOTE_WS, self._name,
+                _REVIVE_BIN, "-set_exit_status", "-config", "/etc/revive.toml", "./...",
+            ],
+            capture_output=True, text=True, timeout=_timeout,
+        )
+
+        passed = (
+            vet_proc.returncode == 0
+            and test_proc.returncode == 0
+            and errcheck_proc.returncode == 0
+            and revive_proc.returncode == 0
+        )
         stdout = test_proc.stdout
         if vet_proc.returncode != 0:
             stdout = f"go vet failed:\n{vet_proc.stdout}\n\n{stdout}"
-        stderr = "\n".join(s for s in (vet_proc.stderr, test_proc.stderr) if s)
+        if errcheck_proc.returncode != 0:
+            stdout = f"{stdout}\n\nerrcheck failed (unchecked error return):\n{errcheck_proc.stdout or errcheck_proc.stderr}"
+        if revive_proc.returncode != 0:
+            stdout = f"{stdout}\n\nrevive failed (lint):\n{revive_proc.stdout or revive_proc.stderr}"
+        stderr = "\n".join(
+            s for s in (vet_proc.stderr, test_proc.stderr, errcheck_proc.stderr, revive_proc.stderr) if s
+        )
 
         h_executed = self._compute_workspace_hash(list(files.keys()))
 
