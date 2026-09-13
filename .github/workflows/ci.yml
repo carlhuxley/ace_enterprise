@@ -58,5 +58,22 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Build Podman harness images
+        # ubuntu-latest ships podman pre-installed, so skip_no_podman-style
+        # checks (shutil.which("podman")) never skip the podman-backed
+        # integration tests here -- but without these images built first,
+        # `podman run localhost/ace-*-harness:latest` tries to *pull* that
+        # tag from a registry at "localhost" and fails (dial tcp connection
+        # refused), which is what was actually happening before this step
+        # existed (confirmed live via a diagnostic error-surfacing commit).
+        # Containerfile.simulation COPYs src/agents/simulation_*.py with
+        # repo-relative paths, so it alone needs the repo root as context,
+        # not docker/harness/ (see build_simulation_image()'s docstring).
+        run: |
+          podman build -f docker/harness/Containerfile -t localhost/ace-harness:latest docker/harness
+          podman build -f docker/harness/Containerfile.go -t localhost/ace-go-harness:latest docker/harness
+          podman build -f docker/harness/Containerfile.ts -t localhost/ace-ts-harness:latest docker/harness
+          podman build -f docker/harness/Containerfile.simulation -t localhost/ace-sim-harness:latest .
+
       - name: Run tests
         run: pytest tests/ -v --tb=short
