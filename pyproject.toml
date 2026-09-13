@@ -84,6 +84,14 @@ python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --cov=src --cov-report=html --cov-report=term-missing"
 asyncio_mode = "auto"
+# benchmarks/ and bootstrap/ are real packages (both have __init__.py) but
+# deliberately excluded from [tool.setuptools.packages.find] -- internal
+# dev/benchmark tooling, not part of the distributable ace_enterprise
+# package. `python -m pytest` masks this locally (the -m flag puts the CWD
+# on sys.path), but CI's plain `pytest tests/` invocation doesn't get that
+# for free -- confirmed live: `.venv/bin/pytest` reproduces CI's exact
+# ModuleNotFoundError: No module named 'bootstrap'/'benchmarks'.
+pythonpath = ["."]
 
 [tool.black]
 line-length = 100
