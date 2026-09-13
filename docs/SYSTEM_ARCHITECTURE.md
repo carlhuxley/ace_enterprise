@@ -59,7 +59,6 @@ sequenceDiagram
     end
     loop Each TDD cycle
         Runner->>Cycle: run(spec)
-        activate Cycle
         Cycle->>Pod: run_red(spec)
         Pod->>Worker: generate_test(spec)
         Worker-->>Pod: test_code
@@ -68,12 +67,10 @@ sequenceDiagram
         alt Security/policy abort
             Pod-->>Cycle: PhaseResult(error="SecurityBreach: ...")
             Cycle-->>Runner: CycleResult(success=False)
-            deactivate Cycle
             Note right of Cycle: RED aborted, no retry
         else RED failed (no test file)
             Pod-->>Cycle: PhaseResult(error="RED did not write test")
             Cycle-->>Runner: CycleResult(success=False)
-            deactivate Cycle
             Note right of Cycle: RED never pulsed
         else RED passed (test fails correctly)
             Pod-->>Cycle: PhaseResult(passed=False)
@@ -129,7 +126,6 @@ sequenceDiagram
                 Cycle-->>Runner: CycleResult(success=False)
             end
         end
-        deactivate Cycle
         alt Runner decides to continue
             Runner->>Planner: next_increment(...)
             Planner-->>Runner: next PodSpec
