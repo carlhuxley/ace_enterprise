@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PYTHON="$REPO_ROOT/.venv/bin/python"
 SCRIPT="$REPO_ROOT/generate_live_docs.py"
+GRAPH_SCRIPT="$REPO_ROOT/generate_dependency_graph.py"
 RUFF="$REPO_ROOT/.venv/bin/ruff"
 
 if [[ ! -x "$PYTHON" ]]; then
@@ -16,6 +17,34 @@ if [[ ! -f "$SCRIPT" ]]; then
   exit 0
 fi
 
+# --- inputs shared by the graph regen and the live docs regen below --------
+# Both read (a subset of) the same src/**/*.py tree, so both gate on the same
+# check: if nothing under src/ or run_cycle.py is staged, neither's inputs
+# changed and both are left alone.
+DOC_INPUTS=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -E '^(src/.*\.py|run_cycle\.py)$' || true)
+
+# --- dependency graph: deterministic, so no gate beyond "did src/ change" --
+# Unlike the LLM call below, this is a plain AST walk -- fast (a fraction of
+# a second for the whole src/ tree) and byte-for-byte reproducible for the
+# same input, so there's no "noisy diff on every commit" reason to throttle
+# it further the way the non-deterministic LLM call is throttled. Runs
+# first so a future docs-prompt change can feed its output in as verified
+# ground truth rather than reordering this later.
+if [[ -z "$DOC_INPUTS" ]]; then
+  echo "pre-commit: no src/ changes staged — skipping dependency graph regen"
+elif [[ ! -f "$GRAPH_SCRIPT" ]]; then
+  echo "pre-commit: generate_dependency_graph.py not found, skipping" >&2
+else
+  echo "pre-commit: regenerating dependency graph..."
+  if "$PYTHON" "$GRAPH_SCRIPT" >/dev/null; then
+    git add "$REPO_ROOT/.ace/architecture_graph.json" "$REPO_ROOT/docs/ARCHITECTURE_GRAPH.md"
+    echo "pre-commit: dependency graph staged"
+  else
+    echo "pre-commit: WARNING — dependency graph generation failed, committing without update" >&2
+  fi
+fi
+
 # --- live docs: only regenerate when this commit changes an input ----------
 # generate_live_docs.py reads run_cycle.py + everything under src/**/*.py and
 # feeds it to an LLM. The LLM is non-deterministic even at temperature 0, so
@@ -23,9 +52,6 @@ fi
 # multi-hundred-line diff) even when no source changed. Gate on the actual
 # inputs: if nothing under src/ or run_cycle.py is staged, the doc's inputs
 # are unchanged and it's left alone.
-DOC_INPUTS=$(git diff --cached --name-only --diff-filter=ACMR \
-  | grep -E '^(src/.*\.py|run_cycle\.py)$' || true)
-
 if [[ -z "$DOC_INPUTS" ]]; then
   echo "pre-commit: no src/ changes staged — skipping SYSTEM_ARCHITECTURE.md regen"
 else
