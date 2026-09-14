@@ -51,7 +51,7 @@ Private Python src/
 | Contract interface | IO modules: spec drives LLM directly, same gates after | `CONTRACT_SYNTH_FAIL` on chain |
 | Apache-2.0 stamp | SPDX header present on every `.ts` file | Stamped before commit |
 
-**Status:** The clean-room TypeScript pipeline is an included demonstration workload, used to validate AST-gated clean-room synthesis against this codebase. It's provided as an optional tool in `bootstrap/` and isn't required for core Python/TypeScript/Go execution.
+**Status:** The clean-room TypeScript pipeline is a second proof-of-use-case for the core zero-trust sandbox (alongside SimulationPod), validating AST-gated clean-room synthesis against this codebase. It's provided as an optional tool in `bootstrap/`, built on the same sandbox primitives (`PodmanOrchestrator`, `TypeScriptRunner`) but with its own synthesis and clean-room-gate orchestration rather than the core TDD loop, and isn't required for core Python/TypeScript/Go execution.
 
 ### Run it
 
@@ -358,6 +358,8 @@ ace_enterprise/
 - [x] `LLMClient` never accepts a truncated OpenRouter completion as success — a non-empty response that hit `finish_reason=length` is now retried/failed the same way an empty one already was, instead of silently corrupting output (caught a real truncated `CONTEXT.md` regen on `main`)
 - [x] SimulationPod ([ADR 004](docs/adr/004-simulation-pod.md)) — a fourth `LanguagePod` verifying against headless PyBullet physics instead of a test runner; real autonomous multi-cycle Reflector/Curator recovery confirmed on a blinded tactile peg-in-hole task (see [above](#simulationpod-the-domain-extension-claim-proven))
 - [x] `ace view` ([ADR 006](docs/adr/006-simulation-attempt-inspection.md)) — inspect any archived SimulationPod attempt's real telemetry, or render a headless `.mp4` of the physics run (`--video`, no display server required, `--speed N` for long stalled attempts)
+- [x] Deterministic, AST-derived dependency graph (`src/utils/dependency_graph.py`), scan-target-agnostic by design: `generate_dependency_graph.py` regenerates ace_enterprise's own `src/**/*.py` graph on demand (wired into the pre-commit hook alongside the LLM-narrated `SYSTEM_ARCHITECTURE.md`), and `ace project` persists the *observed* graph of the code it just built into the target project itself — `<project_root>/.ace/architecture_graph.json` + `docs/ARCHITECTURE_GRAPH.md`, from real `import` statements in the generated code, not the pre-build plan
+- [x] Sandboxed Mermaid validation (`MermaidRunner`, `docker/harness/Containerfile.mermaid`) — every generated diagram is parsed by real mermaid.js + jsdom inside a `--network none` Podman container before it's allowed to land, with GREEN-retry-style feedback (`generate_live_docs.py` feeds the real parser error back to the LLM, up to 3 attempts) instead of blindly re-rolling; blocks the pre-commit hook on failure
 
 ### Preview (implemented + unit-tested, not yet wired into a live entry point)
 - [ ] CapabilityRegistry / BrokerAdvisor — anonymous agent registration + capability-fit recommendations; investigated for cold-start model routing ([#5](https://github.com/carlhuxley/ace_enterprise/issues/5)) and deliberately left unwired — see [ADR 005](docs/adr/005-cold-start-model-calibration.md) for why (their real use case, team formation + human-in-the-loop advisory, has no live consumer in this codebase)

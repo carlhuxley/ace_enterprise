@@ -419,6 +419,9 @@ def cmd_project(args: argparse.Namespace) -> int:
         for failure in result.assembly_failures:
             print(f"  {failure}")
 
+    if result.dependency_graph_path:
+        print(f"\nDependency graph: {project_root / result.dependency_graph_path}")
+
     total_learned = sum(getattr(o, "learned", 0) for o in result.outcomes)
     if total_learned:
         print(f"\nLearned {total_learned} bullet(s) → playbook '{config.playbook_id}'")

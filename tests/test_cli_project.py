@@ -64,6 +64,7 @@ def _patch_deps(plan=None, plan_ok=True, build_result=None):
         ],
         assembly_passed=True,
         assembly_failures=[],
+        dependency_graph_path=None,
         success=True,
     )
     return (
@@ -144,9 +145,26 @@ class TestBuild:
         builder.build.assert_not_called()
         assert "aborted" in capsys.readouterr().out
 
+    def test_reports_dependency_graph_path_when_set(self, project, capsys):
+        root, spec = project
+        good = SimpleNamespace(
+            outcomes=[SimpleNamespace(name="store", status=_S("built"), cycles=1, error=None)],
+            assembly_passed=True, assembly_failures=[],
+            dependency_graph_path=".ace/architecture_graph.json", success=True,
+        )
+        pa, pb, pl, architect, builder = _patch_deps(build_result=good)
+        with pa, pb, pl:
+            rc = cmd_project(_args(spec=spec, project=root))
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert f"Dependency graph: {root / '.ace/architecture_graph.json'}" in out
+
     def test_unsuccessful_build_returns_1(self, project):
         root, spec = project
-        bad = SimpleNamespace(outcomes=[], assembly_passed=False, assembly_failures=["x"], success=False)
+        bad = SimpleNamespace(
+            outcomes=[], assembly_passed=False, assembly_failures=["x"],
+            dependency_graph_path=None, success=False,
+        )
         pa, pb, pl, architect, builder = _patch_deps(build_result=bad)
         with pa, pb, pl:
             rc = cmd_project(_args(spec=spec, project=root))

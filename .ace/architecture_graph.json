@@ -881,6 +881,7 @@
         "src/core/curator/module.py",
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
+        "src/utils/dependency_graph.py",
         "src/utils/llm_client.py"
       ]
     },

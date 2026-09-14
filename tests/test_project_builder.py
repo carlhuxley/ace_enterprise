@@ -256,6 +256,57 @@ def test_assembly_failure_makes_the_result_unsuccessful(dirs):
     assert result.success is False
 
 
+def test_dependency_graph_is_persisted_into_the_target_project(dirs):
+    """Task B: the graph of the code this run built is a deliverable of the
+    *target* project (root), not ace_enterprise's own .ace/ directory."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("api", "the api module", depends_on=("db",)),
+        ModuleSpec("db", "the db module"),
+    )
+    pb = _builder(dirs, architect=FakeArchitect(), builder=FakeBuilder())
+    result = pb.build(plan, root, src, tests)
+
+    manifest_path = root / ".ace" / "architecture_graph.json"
+    doc_path = root / "docs" / "ARCHITECTURE_GRAPH.md"
+    assert manifest_path.exists()
+    assert doc_path.exists()
+    assert result.dependency_graph_path == ".ace/architecture_graph.json"
+    assert result.to_payload()["dependency_graph_path"] == ".ace/architecture_graph.json"
+
+    import json
+
+    data = json.loads(manifest_path.read_text())
+    assert set(data["modules"]) == {"src/api.py", "src/db.py"}
+    assert "api_fn" in data["modules"]["src/api.py"]["provides"]
+    assert "```mermaid" in doc_path.read_text()
+
+
+def test_dependency_graph_is_not_persisted_when_nothing_built(dirs):
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("api", "the api module", depends_on=("db",)),
+        ModuleSpec("db", "the db module"),
+    )
+    pb = _builder(dirs, architect=FakeArchitect(), builder=FakeBuilder(fail={"db"}))
+    result = pb.build(plan, root, src, tests, stop_on_failure=True)
+
+    assert result.dependency_graph_path is None
+    assert not (root / ".ace" / "architecture_graph.json").exists()
+
+
+def test_dependency_graph_persistence_failure_does_not_fail_the_build(dirs):
+    root, src, tests = dirs
+    plan = _plan(ModuleSpec("db", "the db module"))
+    pb = _builder(dirs, architect=FakeArchitect(), builder=FakeBuilder())
+
+    with patch("src.utils.dependency_graph.scan", side_effect=RuntimeError("boom")):
+        result = pb.build(plan, root, src, tests)
+
+    assert result.outcomes[0].status is ModuleStatus.BUILT
+    assert result.dependency_graph_path is None
+
+
 def test_module_outcome_records_learned_bullet_count(dirs):
     root, src, tests = dirs
     plan = _plan(ModuleSpec("db", "the db module"))
