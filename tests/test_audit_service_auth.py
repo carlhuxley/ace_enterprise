@@ -71,6 +71,16 @@ class TestQueryApiAuth:
         resp = client.get("/events", headers=_auth_headers("anything"))
         assert resp.status_code == 503
 
+    def test_spoofed_host_header_does_not_bypass_auth(self, api_client):
+        """Regression check for the closed Starlette Host-header advisories
+        (ace_enterprise#48) -- a poisoned request.url.hostname/.path must
+        never let an unauthenticated/wrong-key request through."""
+        resp = api_client.get(
+            "/events",
+            headers={**_auth_headers("wrong-key"), "Host": "evil.internal../../admin"},
+        )
+        assert resp.status_code == 401
+
 
 # ---------------------------------------------------------------------------
 # Collector (src/audit/collector.py) — write side
@@ -111,4 +121,15 @@ class TestCollectorAuth:
     def test_unauthenticated_request_never_reaches_the_store(self, collector_client, mock_store):
         """A rejected request must not append a forged event to the audit log."""
         collector_client.post("/events", json=_EVENT_PAYLOAD)
+        mock_store.append.assert_not_called()
+
+    def test_spoofed_host_header_does_not_bypass_auth(self, collector_client, mock_store):
+        """Regression check for the closed Starlette Host-header advisories
+        (ace_enterprise#48) -- a poisoned request.url.hostname/.path must
+        never let an unauthenticated/wrong-key request through."""
+        resp = collector_client.post(
+            "/events", json=_EVENT_PAYLOAD,
+            headers={**_auth_headers("wrong-key"), "Host": "evil.internal../../admin"},
+        )
+        assert resp.status_code == 401
         mock_store.append.assert_not_called()
