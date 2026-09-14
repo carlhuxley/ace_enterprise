@@ -28,6 +28,17 @@ OUTPUT = ROOT / "docs" / "SYSTEM_ARCHITECTURE.md"
 MODEL = "deepseek/deepseek-v4-flash"
 PROVIDER = "openrouter"
 
+# The prompt's own "STRICT MERMAID RULES" section is not sufficient on its
+# own -- confirmed live: three consecutive real generations each produced a
+# different invalid diagram (a forbidden `break` inside `alt`, a literal
+# `partcipant` typo, an orphan `deactivate` with no matching `activate`)
+# despite that section already telling the model not to. Retrying with the
+# real mermaid.js parser's own error fed back (same pattern GoLanguagePod's
+# GREEN retry uses) converges far faster than blindly re-rolling the whole
+# response and hoping, which is what happened three times in a row at the
+# pre-commit hook layer before this fix.
+_MAX_MERMAID_ATTEMPTS = 3
+
 
 def _first_line(text: str, limit: int, fallback: str = "") -> str:
     lines = text.splitlines()
@@ -135,6 +146,49 @@ def _strip_outer_fence(content: str) -> str:
     return content
 
 
+def _generate_once(client, prompt: str) -> tuple[str, str | int]:
+    """One LLM call. Returns (content with fences stripped, tokens_used)."""
+    # Bump max_tokens if generate_live_docs.py starts raising truncation
+    # errors again as the source tree keeps growing (ace_enterprise#44).
+    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=16384)
+    content = _strip_outer_fence(result["content"].strip())
+    return content, result.get("tokens_used", "?")
+
+
+def _validate_mermaid(content: str, runner) -> str | None:
+    """None if every mermaid block in `content` parses; otherwise the real
+    parser's error message for the first one that doesn't."""
+    from src.utils.mermaid_validation import (  # noqa: PLC0415
+        extract_mermaid_blocks,
+        validate_with_runner,
+    )
+
+    blocks = extract_mermaid_blocks(content)
+    if not blocks:
+        return "no ```mermaid block found in the response"
+    for block in blocks:
+        ok, message = validate_with_runner(runner, block)
+        if not ok:
+            return message
+    return None
+
+
+def _make_mermaid_runner():
+    """A started MermaidRunner, or None if podman / the harness image isn't
+    available -- degrades to "generate without validation" (the old
+    behavior) rather than making live-docs generation hard-depend on podman
+    being set up, since generate_live_docs.py long predates that harness."""
+    from src.agents.mermaid_runner import MermaidRunner  # noqa: PLC0415
+
+    runner = MermaidRunner(container_name="mermaid_docgen_check")
+    try:
+        runner.start()
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"  WARNING: mermaid sandbox unavailable ({exc}) -- skipping diagram validation", file=sys.stderr)
+        return None
+    return runner
+
+
 def main() -> None:
     sys.path.insert(0, str(ROOT))
     from src.utils.llm_client import LLMClient  # noqa: PLC0415
@@ -143,19 +197,49 @@ def main() -> None:
     context = build_context()
     print(f"  {len(context):,} chars of source context")
 
-    prompt = (
+    base_prompt = (
         "Review this Python codebase and produce the two architecture sections.\n\n"
         f"SOURCE CODE:\n{context}"
     )
 
     print(f"Calling {PROVIDER}/{MODEL}...")
     client = LLMClient(provider=PROVIDER, model=MODEL)
-    # Bump this if generate_live_docs.py starts raising truncation errors
-    # again as the source tree keeps growing (ace_enterprise#44).
-    result = client.generate(prompt, system_prompt=SYSTEM_PROMPT, temperature=0, max_tokens=16384)
 
-    content = _strip_outer_fence(result["content"].strip())
-    tokens = result.get("tokens_used", "?")
+    mermaid_runner = _make_mermaid_runner()
+    try:
+        prompt = base_prompt
+        content = tokens = None
+        for attempt in range(1, _MAX_MERMAID_ATTEMPTS + 1):
+            content, tokens = _generate_once(client, prompt)
+
+            if mermaid_runner is None:
+                break  # no sandbox available -- accept the first response, as before
+
+            error = _validate_mermaid(content, mermaid_runner)
+            if error is None:
+                if attempt > 1:
+                    print(f"  mermaid diagram valid on attempt {attempt}")
+                break
+
+            print(f"  attempt {attempt}: mermaid diagram invalid ({error})", file=sys.stderr)
+            if attempt == _MAX_MERMAID_ATTEMPTS:
+                print(
+                    f"ERROR: mermaid diagram still invalid after {_MAX_MERMAID_ATTEMPTS} attempts "
+                    f"-- leaving {OUTPUT.relative_to(ROOT)} unchanged.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            prompt = (
+                base_prompt
+                + "\n\nYour previous response's mermaid diagram failed to parse with this "
+                f"exact error from the real mermaid.js parser:\n{error}\n\n"
+                "Fix the mermaid diagram so it parses correctly -- preserve the same "
+                "content and flow. Output both sections again, in the same format."
+            )
+    finally:
+        if mermaid_runner is not None:
+            mermaid_runner.stop()
 
     header = (
         f"<!-- Generated by generate_live_docs.py on {datetime.now().strftime('%Y-%m-%d %H:%M')} "
