@@ -6,7 +6,6 @@ import pytest
 from src.playbook.manager import PlaybookManager
 from src.storage.schemas import BulletCreate, DeltaBullet, PlaybookCreate
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -630,7 +629,8 @@ class TestPersistence:
         _save_playbook (never written to the JSON) and _load_playbook (never
         read back even when present) -- team_id/project_ids/applicable_domains
         already round-tripped correctly, these didn't."""
-        from datetime import UTC, datetime as dt
+        from datetime import UTC
+        from datetime import datetime as dt
 
         storage = str(tmp_path / "playbooks")
         pm1 = PlaybookManager(storage_path=storage)

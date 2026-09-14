@@ -20,7 +20,6 @@ from src.contracts.module_architect import ModuleArchitect
 from src.contracts.module_tdd_builder import ModuleTDDBuilder
 from src.utils.llm_client import LLMClient
 
-
 AUDIT_DB_URL = "sqlite:///.local/audit.db"
 
 
@@ -103,13 +102,13 @@ def run_module_tdd_flow(requirement: str):
 
         build_result = builder.build_module(contract, session_id=session_id)
 
-        print(f"\nFunction build results:")
+        print("\nFunction build results:")
         for fr in build_result.function_results:
             status = "PASS" if fr.success else "FAIL"
             print(f"  {fr.function_name}: {status} ({fr.tdd_cycles} cycles)")
 
         if build_result.success:
-            print(f"\nIntegration test results:")
+            print("\nIntegration test results:")
             for test_name, passed in build_result.integration_test_results.items():
                 status = "PASS" if passed else "FAIL"
                 print(f"  {test_name}: {status}")

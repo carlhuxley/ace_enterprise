@@ -15,8 +15,9 @@ Tests:
 7. Validates decomposed contracts
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestDecomposerBasics:
@@ -304,10 +305,11 @@ class TestDecomposerToYAML:
 
     def test_converts_to_yaml_format(self):
         """Should convert contracts to YAML-compatible format."""
-        from src.contracts.contract_decomposer import ContractDecomposer
-        from src.contracts.contract_schema import save_contracts
         import tempfile
         from pathlib import Path
+
+        from src.contracts.contract_decomposer import ContractDecomposer
+        from src.contracts.contract_schema import save_contracts
 
         decomposer = ContractDecomposer()
 

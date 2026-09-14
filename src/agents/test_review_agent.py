@@ -197,7 +197,7 @@ class TestReviewAgent:
                 continue
 
             # Check for visual structure (blank lines or length)
-            line_count = len([l for l in test_body.split('\n') if l.strip()])
+            line_count = len([ln for ln in test_body.split('\n') if ln.strip()])
             has_blank_lines = "\n\n" in test_body
 
             # For complex tests (>10 lines), suggest structure (but not critical)

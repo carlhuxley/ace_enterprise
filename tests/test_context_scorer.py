@@ -9,8 +9,9 @@ TestScoreAggregate / TestVersionComparison for the regression tests):
 - _version_compatible() did lexicographic STRING comparison, not numeric --
   "3.11" >= "3.8" was False as strings. Fixed via _parse_version().
 """
-import pytest
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from src.retrieval.context_scorer import ContextScorer
 from src.retrieval.schemas import RetrievalContext
@@ -20,7 +21,7 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _bullet(**kw):
-    defaults = dict(id="ctx-00001", content="x", section="strategies_and_hard_rules", created_at=_NOW)
+    defaults = {"id": "ctx-00001", "content": "x", "section": "strategies_and_hard_rules", "created_at": _NOW}
     defaults.update(kw)
     return Bullet(**defaults)
 

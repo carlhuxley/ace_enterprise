@@ -25,7 +25,7 @@ class ParsedBullet:
 class MarkdownImporter:
     """
     Import knowledge from markdown files into playbook bullets.
-    
+
     Supports:
     - ## headings as separate bullets
     - YAML frontmatter for tags/type metadata
@@ -39,11 +39,11 @@ class MarkdownImporter:
     def parse(self, markdown_content: str, source_file: str | None = None) -> list[dict]:
         """
         Parse markdown content into bullet dictionaries.
-        
+
         Args:
             markdown_content: Raw markdown text
             source_file: Optional source filename for metadata
-            
+
         Returns:
             List of bullet dictionaries with title, content, tags, type, etc.
         """
@@ -117,10 +117,10 @@ class MarkdownImporter:
     def parse_file(self, file_path: Path | str) -> list[dict]:
         """
         Parse a markdown file into bullets.
-        
+
         Args:
             file_path: Path to the markdown file
-            
+
         Returns:
             List of bullet dictionaries
         """

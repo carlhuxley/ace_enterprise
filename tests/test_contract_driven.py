@@ -28,16 +28,16 @@ skip_no_podman = pytest.mark.skipif(
 
 
 def _contract(**overrides) -> InterfaceContract:
-    defaults = dict(
-        contract_id="c1",
-        function_name="add",
-        signature="(a: int, b: int) -> int",
-        docstring="Add two integers.",
-        test_cases=[
+    defaults = {
+        "contract_id": "c1",
+        "function_name": "add",
+        "signature": "(a: int, b: int) -> int",
+        "docstring": "Add two integers.",
+        "test_cases": [
             TestCase(name="basic", input_expr="(1, 2)", expected_expr="3"),
             TestCase(name="negative", input_expr="(-1, 1)", expected_expr="0"),
         ],
-    )
+    }
     defaults.update(overrides)
     return InterfaceContract(**defaults)
 

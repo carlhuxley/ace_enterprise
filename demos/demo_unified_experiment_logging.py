@@ -9,8 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.storage.experiment_logger import ExperimentLogger
 from src.playbook.postgres_adapter import PostgresPlaybookAdapter
+from src.storage.experiment_logger import ExperimentLogger
 from src.storage.schemas import PlaybookCreate
 
 print("\n" + "="*80)
@@ -167,8 +167,8 @@ print("="*80)
 
 print("\nTDD Experiment Structure:")
 print(f"   Task: {tdd_experiment.task_data}")
-print(f"   Generator: test_code + implementation_code")
-print(f"   Environment: red_phase + green_phase outputs")
+print("   Generator: test_code + implementation_code")
+print("   Environment: red_phase + green_phase outputs")
 print(f"   Reflector: {tdd_experiment.reflector_data}")
 print(f"   Curator: {tdd_experiment.curator_data}")
 

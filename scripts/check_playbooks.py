@@ -32,7 +32,7 @@ else:
         print(f"   Total Bullets: {playbook.metadata.total_bullets}")
 
         if playbook.metadata.total_bullets > 0:
-            print(f"\n   Knowledge accumulated:")
+            print("\n   Knowledge accumulated:")
 
             for section_name, bullets in playbook.sections.items():
                 if bullets:

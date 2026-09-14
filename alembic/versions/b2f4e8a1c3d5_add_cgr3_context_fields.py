@@ -11,9 +11,10 @@ Adds context graph fields for CGR³ (Context Graph Retrieve-Rank-Reason):
 - BulletLineage table for knowledge relationships
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'b2f4e8a1c3d5'

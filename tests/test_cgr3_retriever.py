@@ -14,7 +14,7 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _bullet(id="ctx-1", content="always validate input", **kw):
-    defaults = dict(id=id, content=content, section="strategies_and_hard_rules", created_at=_NOW)
+    defaults = {"id": id, "content": content, "section": "strategies_and_hard_rules", "created_at": _NOW}
     defaults.update(kw)
     return Bullet(**defaults)
 

@@ -54,8 +54,6 @@ class DecisionRecord:
 
     def to_markdown(self) -> str:
         """Generate ADR in markdown format."""
-        # Create slug from feature name
-        slug = self.feature_name.lower().replace(' ', '-').replace('_', '-')
         date_str = self.date.strftime('%Y-%m-%d')
 
         md = []

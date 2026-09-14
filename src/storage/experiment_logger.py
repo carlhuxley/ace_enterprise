@@ -382,7 +382,7 @@ class ExperimentLogger:
 
                 playbook_updates = session.query(
                     func.count(ExperimentLogModel.id)
-                ).filter(ExperimentLogModel.playbook_updated == True).scalar()
+                ).filter(ExperimentLogModel.playbook_updated == True).scalar()  # noqa: E712 -- SQLAlchemy filter predicate, not a Python bool check; `== True` builds the SQL comparison
 
                 return {
                     "total_experiments": total,

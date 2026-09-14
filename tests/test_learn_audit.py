@@ -12,8 +12,8 @@ class TestLearnWithAudit:
 
     def test_emits_knowledge_added_event(self):
         """Should emit KNOWLEDGE_ADDED when adding knowledge."""
-        from src.playbook.learn_cli import learn_with_audit
         from src.audit.schemas import AuditEventType
+        from src.playbook.learn_cli import learn_with_audit
 
         mock_audit = MagicMock()
         mock_manager = MagicMock()

@@ -1,7 +1,6 @@
 # Test file for semantic_analyzer
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from src.benchmark.semantic_analyzer import *
+from src.benchmark.semantic_analyzer import SemanticCodeAnalyzer
+
 
 def test_detect_sql_concatenation():
     analyzer = SemanticCodeAnalyzer()

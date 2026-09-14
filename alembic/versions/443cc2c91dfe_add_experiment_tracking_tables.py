@@ -1,22 +1,23 @@
 """Add experiment tracking tables
 
 Revision ID: 443cc2c91dfe
-Revises: 
+Revises:
 Create Date: 2025-12-07 12:18:27.506986
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
+import pgvector.sqlalchemy
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
-import pgvector.sqlalchemy
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '443cc2c91dfe'
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

@@ -8,7 +8,7 @@ class CostQualityAnalyzer:
 
     def __init__(self, performance_data: dict):
         """Initialize with model performance data.
-        
+
         Args:
             performance_data: Dictionary containing model metrics including:
                 - model_name: Name of the model
@@ -31,7 +31,7 @@ class CostQualityAnalyzer:
 
     def calculate_cost_efficiency_metrics(self) -> dict:
         """Calculate cost efficiency metrics from the stored performance data.
-        
+
         Returns:
             Dictionary containing:
                 - cost_per_quality_point: Cost spent per unit of quality (accuracy), rounded to 6 decimal places
@@ -85,12 +85,12 @@ class CostQualityAnalyzer:
     @staticmethod
     def rank_models_by_quality_per_dollar(models_data: list) -> list:
         """Rank multiple models by their quality per dollar metric.
-        
+
         Args:
             models_data: List of dictionaries containing model performance data,
-                        each with at least 'model_name', 'accuracy', and 
+                        each with at least 'model_name', 'accuracy', and
                         'cost_per_prediction' fields.
-        
+
         Returns:
             List of model dictionaries sorted by quality_per_dollar in descending order
             (highest value first).
@@ -104,16 +104,16 @@ class CostQualityAnalyzer:
     @staticmethod
     def compute_pareto_frontier(models_data: list) -> list:
         """Compute the Pareto frontier of models based on cost and quality.
-        
+
         A model is on the Pareto frontier if no other model has both:
         - Lower cost (cost_per_prediction)
         - Higher quality (accuracy)
-        
+
         Args:
             models_data: List of dictionaries containing model performance data,
-                        each with at least 'model_name', 'accuracy', and 
+                        each with at least 'model_name', 'accuracy', and
                         'cost_per_prediction' fields.
-        
+
         Returns:
             List of model dictionaries that are on the Pareto frontier.
         """
@@ -139,15 +139,15 @@ class CostQualityAnalyzer:
     @staticmethod
     def calculate_quality_delta_percentage(higher_quality_model: dict, lower_quality_model: dict) -> float:
         """Calculate the percentage improvement in quality between two models.
-        
+
         Args:
             higher_quality_model: Model dictionary with higher accuracy (contains 'accuracy' field)
             lower_quality_model: Model dictionary with lower accuracy (contains 'accuracy' field)
-        
+
         Returns:
-            Float representing the percentage improvement from lower_quality_model 
+            Float representing the percentage improvement from lower_quality_model
             to higher_quality_model.
-            
+
         Formula: ((higher_accuracy - lower_accuracy) / lower_accuracy) * 100
         """
         higher_accuracy = higher_quality_model["accuracy"]

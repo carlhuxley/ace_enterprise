@@ -166,12 +166,12 @@ print("TOKENS:" + str(tokens_count))
                 "model": self.model,
             }
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             logger.error(f"effGen timeout after {self.timeout}s")
-            raise RuntimeError(f"effGen timeout after {self.timeout}s")
+            raise RuntimeError(f"effGen timeout after {self.timeout}s") from e
         except Exception as e:
             logger.error(f"effGen error: {e}")
-            raise RuntimeError(f"Failed to generate with effGen: {e}")
+            raise RuntimeError(f"Failed to generate with effGen: {e}") from e
 
     def generate_with_agent(
         self,
@@ -270,10 +270,10 @@ print(f"SUCCESS:{{success}}")
                 "agent_mode": True,
             }
 
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"effGen agent timeout after {self.timeout}s")
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"effGen agent timeout after {self.timeout}s") from e
         except Exception as e:
-            raise RuntimeError(f"Failed to generate with effGen agent: {e}")
+            raise RuntimeError(f"Failed to generate with effGen agent: {e}") from e
 
     def check_availability(self) -> bool:
         """Check if effGen is available and model can be loaded."""

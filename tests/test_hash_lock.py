@@ -1,5 +1,4 @@
 """Tests for Hash-Lock protocol in PodmanOrchestrator (ace_enterprise-2dx)."""
-import hashlib
 import subprocess
 import sys
 import tempfile

@@ -9,9 +9,9 @@ The extracted Gherkin can then be used for:
 - Legacy system understanding
 """
 
+import logging
 import sys
 from pathlib import Path
-import logging
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -258,7 +258,7 @@ def demonstrate_extraction():
     print("\n" + "="*80)
     print("EXTRACTED GHERKIN FEATURE")
     print("="*80)
-    with open(feature_file, 'r') as f:
+    with open(feature_file) as f:
         print(f.read())
 
     # Show what can be done next
@@ -305,21 +305,21 @@ def demonstrate_extraction():
     print("ANALYSIS DETAILS")
     print("="*80)
 
-    print(f"\nCode Structure:")
+    print("\nCode Structure:")
     for cls in result.code_analysis.classes:
         print(f"  Class: {cls.name}")
         for method in cls.methods:
             params = ", ".join(p[0] for p in method.parameters)
             print(f"    - {method.name}({params}) -> {method.return_type}")
 
-    print(f"\nTest Scenarios Analyzed:")
+    print("\nTest Scenarios Analyzed:")
     for scenario in result.test_analysis.scenarios:
         print(f"  {scenario.test_name}")
         print(f"    Setup: {len(scenario.setup_actions)} actions")
         print(f"    Action: {scenario.action or 'None'}")
         print(f"    Assertions: {len(scenario.assertions)}")
 
-    print(f"\nGenerated Gherkin Scenarios:")
+    print("\nGenerated Gherkin Scenarios:")
     for scenario in result.feature.scenarios:
         print(f"  {scenario.name}")
         print(f"    Given: {len(scenario.given_steps)} steps")
@@ -327,7 +327,7 @@ def demonstrate_extraction():
         print(f"    Then: {len(scenario.then_steps)} steps")
 
     print("\n✅ Demo complete!")
-    print(f"\nExtracted files:")
+    print("\nExtracted files:")
     print(f"  - {feature_file}")
     print(f"  - {steps_file}")
 

@@ -10,7 +10,6 @@ get_guidance() no matter what min_confidence the caller passed.
 
 No live LLM or podman needed -- pure playbook/retrieval plumbing.
 """
-from pathlib import Path
 
 import pytest
 

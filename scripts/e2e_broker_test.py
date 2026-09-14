@@ -20,13 +20,13 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.broker.capability_registry import CapabilityRegistry
-from src.broker.advisor import BrokerAdvisor, TaskRequirements
-from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
-from src.broker.human_decision import HumanDecisionInterface, HumanDecision
+from src.audit.dashboard import AgentIdentity, AuditDashboard
 from src.audit.local_client import LocalAuditClient
-from src.audit.dashboard import AuditDashboard, AgentIdentity
 from src.audit.schemas import AuditEventType
+from src.broker.advisor import BrokerAdvisor, TaskRequirements
+from src.broker.capability_registry import CapabilityRegistry
+from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
+from src.broker.human_decision import HumanDecision, HumanDecisionInterface
 
 
 def run_calculator_task(prompt: str) -> dict:
@@ -252,7 +252,7 @@ def main():
 
         # Human sees full context
         context = decision_interface.get_context(task)
-        print(f"\nHuman sees costs: ", end="")
+        print("\nHuman sees costs: ", end="")
         for agent_ref in [r.agent_ref for r in recommendations]:
             if agent_ref in context.audit_data:
                 cost = context.audit_data[agent_ref].get("cost_per_task", "?")
@@ -372,7 +372,7 @@ def main():
     total_success = sum(1 for r in task_results if r["success"])
     print(f"Tasks completed: {len(task_results)}")
     print(f"Success rate: {total_success}/{len(task_results)} ({100*total_success/len(task_results):.0f}%)")
-    print(f"Routing: math→calculator, qa→search")
+    print("Routing: math→calculator, qa→search")
 
 
 if __name__ == "__main__":

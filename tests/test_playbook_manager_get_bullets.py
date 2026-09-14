@@ -1,5 +1,4 @@
 """Tests for PlaybookManager.get_bullets(section) (ace_enterprise-7eo)."""
-import pytest
 
 from src.playbook.manager import PlaybookManager
 from src.storage.schemas import BulletCreate
@@ -86,9 +85,11 @@ class TestGetBulletsAcrossPlaybooks:
 
     def test_skips_playbooks_missing_the_section(self, tmp_path):
         pm = _manager(tmp_path)
-        # Create a playbook without global-go-bullets by using raw create
+        # Create a playbook without global-go-bullets by using raw create --
+        # its mere existence in the DB is the point of this test, not the
+        # variable itself.
         from src.storage.schemas import PlaybookCreate
-        pb2 = pm.create_playbook(PlaybookCreate(domain="test", base_model="gpt-4o"))
+        _pb2 = pm.create_playbook(PlaybookCreate(domain="test", base_model="gpt-4o"))
         pm.get_or_create_playbook("pb1")
         _add(pm, "pb1", "global-go-bullets", "only bullet")
         result = pm.get_bullets("global-go-bullets")
@@ -102,6 +103,7 @@ class TestGetBulletsAcrossPlaybooks:
 class TestGoLanguagePodWithRealPlaybook:
     def test_pod_uses_playbook_bullets_not_defaults(self, tmp_path):
         from unittest.mock import MagicMock
+
         from src.agents.go_language_pod import GoLanguagePod
         from src.agents.language_pod import PhaseResult, PodSpec
 

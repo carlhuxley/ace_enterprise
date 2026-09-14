@@ -128,7 +128,7 @@ func (ctx *{self._to_camel_case(feature_name)}Context) InitializeScenario(sc *go
 '''
 
         # Add step registrations
-        for step_type, step_text in steps:
+        for _step_type, step_text in steps:
             func_name = self._step_to_function_name(step_text)
             pattern = self._step_to_regex_pattern(step_text)
 

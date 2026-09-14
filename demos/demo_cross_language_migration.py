@@ -8,9 +8,9 @@ This demonstrates the complete workflow:
 4. Both Python and Go pass same Gherkin specs = behavior preserved
 """
 
+import logging
 import sys
 from pathlib import Path
-import logging
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -42,14 +42,14 @@ def demonstrate_cross_language_migration():
     python_tests = Path("examples/oauth_legacy/test_oauth.py")
 
     if not python_code.exists():
-        print(f"\n⚠️  Sample Python code not found. Run demo_gherkin_extraction.py first.")
+        print("\n⚠️  Sample Python code not found. Run demo_gherkin_extraction.py first.")
         return
 
-    print(f"\n📂 Source:")
+    print("\n📂 Source:")
     print(f"   Python code: {python_code}")
     print(f"   Python tests: {python_tests}")
 
-    print(f"\n🔍 Extracting Gherkin...")
+    print("\n🔍 Extracting Gherkin...")
     agent = GherkinExtractionAgent()
     result = agent.extract_from_codebase(
         code_path=python_code,
@@ -72,7 +72,7 @@ def demonstrate_cross_language_migration():
     go_output_dir = Path("go_oauth_implementation")
     go_steps_dir = go_output_dir / "steps"
 
-    print(f"\n📝 Generating Go code...")
+    print("\n📝 Generating Go code...")
     go_generator = GoStepGenerator(package_name="steps")
 
     # Generate step definitions
@@ -117,7 +117,7 @@ def demonstrate_cross_language_migration():
     print("GENERATED GO STEP DEFINITIONS (Sample)")
     print("="*80)
 
-    with open(steps_file, 'r') as f:
+    with open(steps_file) as f:
         go_code_lines = f.readlines()
         # Show first 40 lines
         print("".join(go_code_lines[:40]))

@@ -1,7 +1,5 @@
 # Test file for tdd_lesson_injector
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from src.agents.tdd_lesson_injector import *
+from src.agents.tdd_lesson_injector import TDDLessonInjector
 
 
 def test_default_beads_path():

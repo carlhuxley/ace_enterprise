@@ -1,6 +1,6 @@
 import pytest
-from src.analytics.cost_quality_analyzer import CostQualityAnalyzer
 
+from src.analytics.cost_quality_analyzer import CostQualityAnalyzer
 
 # ---------------------------------------------------------------------------
 # calculate_cost_efficiency_metrics

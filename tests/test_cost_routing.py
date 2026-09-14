@@ -19,7 +19,6 @@ from src.broker.performance_aggregator import (
     PerformanceAggregator,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -256,7 +255,7 @@ class TestBalancedMode:
         candidates = [("m1", 0.9), ("m2", 0.5)]
         result = broker._apply_balanced_mode(candidates, {"m1": m1, "m2": m2})
         # cost_score = 1.0 for both (max_cost=0), q_weight=0 → both score 1.0
-        scores = {ref: score for ref, score in result}
+        scores = dict(result)
         assert scores["m1"] == pytest.approx(1.0)
         assert scores["m2"] == pytest.approx(1.0)
 

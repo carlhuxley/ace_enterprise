@@ -27,10 +27,10 @@ class _StubRetriever:
         self.last_call = None
 
     def retrieve(self, query, bullets, context=None, top_k=10, min_confidence=0.5):
-        self.last_call = dict(
-            query=query, bullets=bullets, context=context,
-            top_k=top_k, min_confidence=min_confidence,
-        )
+        self.last_call = {
+            "query": query, "bullets": bullets, "context": context,
+            "top_k": top_k, "min_confidence": min_confidence,
+        }
         apply = [
             RankedBullet(bullet=b, semantic_score=1.0, context_score=1.0, combined_score=1.0)
             for b in bullets

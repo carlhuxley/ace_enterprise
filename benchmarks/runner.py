@@ -57,7 +57,7 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from benchmarks.sandbox import LocalSubprocessRunner, build_podman_runner
@@ -398,7 +398,7 @@ def _failure_signature(failure_text: str | None) -> str | None:
         return "TIMEOUT"
     if "Security gate:" in failure_text:
         line = next(
-            (l for l in failure_text.splitlines() if l.startswith("Security gate:")),
+            (ln for ln in failure_text.splitlines() if ln.startswith("Security gate:")),
             "Security gate",
         )
         return line.strip()
@@ -410,32 +410,32 @@ def _failure_signature(failure_text: str | None) -> str | None:
     # already pytest-truncated to a sane length, and there's one per test
     # if several failed, which a single "last E line" wouldn't capture.
     try:
-        start = next(i for i, l in enumerate(lines) if "short test summary info" in l)
+        start = next(i for i, ln in enumerate(lines) if "short test summary info" in ln)
     except StopIteration:
         start = None
     if start is not None:
         summary_lines = []
-        for l in lines[start + 1:]:
-            if l.strip().startswith("="):
+        for ln in lines[start + 1:]:
+            if ln.strip().startswith("="):
                 break
-            if l.strip():
-                summary_lines.append(l.strip())
+            if ln.strip():
+                summary_lines.append(ln.strip())
         if summary_lines:
             return " | ".join(summary_lines)
 
     # Fall back to pytest's "E   ..." traceback line(s) -- more detail than
     # the summary section alone, when present without one (e.g. a single
     # assertion with a long diff pytest didn't compress into the summary).
-    e_lines = [l.strip()[2:].strip() for l in lines if l.strip().startswith("E ")]
+    e_lines = [ln.strip()[2:].strip() for ln in lines if ln.strip().startswith("E ")]
     if e_lines:
         return e_lines[-1]
 
     # Last resort: no recognizable pytest structure at all (e.g. a
     # collection-time crash, or pure incidental warning noise) -- the first
     # non-empty line is still more useful than nothing.
-    for l in lines:
-        if l.strip():
-            return l.strip()[:200]
+    for ln in lines:
+        if ln.strip():
+            return ln.strip()[:200]
     return "UNKNOWN"
 
 
@@ -472,7 +472,7 @@ def run_benchmark(
         runner = LocalSubprocessRunner()
     orchestrator = PodmanOrchestrator(runner=runner, started=False)
 
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
     results: list[TaskRunResult] = []
 
     try:
@@ -617,7 +617,7 @@ def run_benchmark(
     finally:
         orchestrator.stop()
 
-    finished_at = datetime.now(timezone.utc).isoformat()
+    finished_at = datetime.now(UTC).isoformat()
     return BenchmarkReport(
         model=model, provider=provider, sandbox=sandbox, playbook_id=playbook_id,
         started_at=started_at, finished_at=finished_at, temperature=temperature,
@@ -828,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     safe_model = args.model.replace("/", "_").replace(":", "_")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     if args.runs > 1:
         multi = run_multi_benchmark(

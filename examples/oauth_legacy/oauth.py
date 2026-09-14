@@ -5,7 +5,6 @@ This is an existing codebase that we want to refactor or migrate to another lang
 """
 
 from urllib.parse import urlencode
-from typing import Optional
 
 
 class OAuthClient:
@@ -28,7 +27,7 @@ class OAuthClient:
         self,
         redirect_uri: str,
         scope: str,
-        state: Optional[str] = None
+        state: str | None = None
     ) -> str:
         """
         Generate OAuth authorization URL.

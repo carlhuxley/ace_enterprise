@@ -4,10 +4,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from src.agents.language_pod import PhaseResult
-from src.agents.podman_orchestrator import ContainerRunner, PodmanOrchestrator, PulseResult
+from src.agents.podman_orchestrator import PodmanOrchestrator, PulseResult
 
 
 class BanditSubprocessRunner:

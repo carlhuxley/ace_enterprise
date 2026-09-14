@@ -3,8 +3,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from src.agents.tdd_lessons import (
     KNOWN_TDD_LESSONS,
     LessonExtractor,

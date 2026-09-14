@@ -39,7 +39,7 @@ from src.utils.embedding import get_embedding_service
 logger = logging.getLogger(__name__)
 
 
-class RoutingVerdict(str, Enum):
+class RoutingVerdict(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Verdict for routing decision."""
 
     USE_DISTILLATION = "use_distillation"  # Use weak model + PLD context
@@ -47,7 +47,7 @@ class RoutingVerdict(str, Enum):
     ASK_FIRST = "ask_first"  # Low confidence, confirm with user
 
 
-class LicenseCategory(str, Enum):
+class LicenseCategory(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """License category for provenance tracking."""
 
     OPEN_SOURCE = "open_source"
@@ -55,7 +55,7 @@ class LicenseCategory(str, Enum):
     UNKNOWN = "unknown"
 
 
-class Supplier(str, Enum):
+class Supplier(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Model supplier/owner for provenance matching.
 
     Same supplier can mix proprietary teachers with open students

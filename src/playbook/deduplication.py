@@ -135,7 +135,7 @@ class BulletDeduplicator:
         to_remove = set()
 
         # Process each duplicate pair
-        for i, j, similarity in duplicates:
+        for i, j, _similarity in duplicates:
             # Skip if already marked for removal
             if i in to_remove or j in to_remove:
                 continue

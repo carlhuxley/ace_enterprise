@@ -10,8 +10,6 @@ run against a real model are complementary, not replaced by this.
 """
 from unittest.mock import patch
 
-from src.agents.language_pod import PhaseResult
-
 from benchmarks.runner import (
     BenchmarkReport,
     MultiRunReport,
@@ -22,6 +20,7 @@ from benchmarks.runner import (
     run_multi_benchmark,
 )
 from benchmarks.tasks import get_tasks
+from src.agents.language_pod import PhaseResult
 
 _BUGGY_DIV_ZERO = '''```python
 def safe_divide(a, b):

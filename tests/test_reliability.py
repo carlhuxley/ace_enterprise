@@ -1,10 +1,10 @@
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
-from src.reliability.tdd_cycle_analyzer import TDDCycleAnalyzer, CyclePeriod
-from src.reliability.playbook_analyzer import PlaybookReliabilityAnalyzer, BulletReliability
+import pytest
 
+from src.reliability.playbook_analyzer import BulletReliability, PlaybookReliabilityAnalyzer
+from src.reliability.tdd_cycle_analyzer import CyclePeriod, TDDCycleAnalyzer
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -36,10 +36,10 @@ def print_section(title: str):
 def print_answer(answer, show_sources: bool = True):
     """Print formatted answer."""
     print(f"\n📝 Question: {answer.question}")
-    print(f"\n💡 Answer:")
+    print("\n💡 Answer:")
     print(f"{answer.answer}")
 
-    print(f"\n📊 Metadata:")
+    print("\n📊 Metadata:")
     print(f"   Confidence: {answer.confidence:.0%}")
     print(f"   Playbook Coverage: {answer.playbook_coverage:.0%}")
     print(f"   Model: {answer.model_id or 'Ensemble'}")
@@ -52,11 +52,11 @@ def print_answer(answer, show_sources: bool = True):
         if len(answer.sources) > 3:
             print(f"   ... and {len(answer.sources) - 3} more")
     elif show_sources:
-        print(f"\n⚠️  No playbook knowledge found for this question")
-        print(f"   Answer is from LLM general knowledge only")
+        print("\n⚠️  No playbook knowledge found for this question")
+        print("   Answer is from LLM general knowledge only")
 
     if answer.consensus:
-        print(f"\n🤝 Ensemble Consensus:")
+        print("\n🤝 Ensemble Consensus:")
         print(f"   Models: {', '.join(answer.consensus['models'])}")
         print(f"   Agreement: {answer.consensus['agreement']:.0%}")
         print(f"   Selected: {answer.consensus['selected']}")

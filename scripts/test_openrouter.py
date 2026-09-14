@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.llm_client import LLMClient
 
-
 # Free models available on OpenRouter (Feb 2026)
 # Full list: curl -s https://openrouter.ai/api/v1/models | python -c "import json,sys; [print(m['id']) for m in json.load(sys.stdin)['data'] if m.get('pricing',{}).get('prompt')=='0']"
 FREE_MODELS = [

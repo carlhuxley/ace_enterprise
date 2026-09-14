@@ -22,13 +22,20 @@ Usage:
 """
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from datetime import UTC
+
 from bootstrap.audit_log import BootstrapAuditLog
-from bootstrap.clean_room import verify_clean_room, verify_clean_room_cross_language, verify_ts_style
+from bootstrap.clean_room import (
+    verify_clean_room,
+    verify_clean_room_cross_language,
+    verify_ts_style,
+)
 from bootstrap.extract import extract_features
 from bootstrap.stamp import stamp_directory
 from src.utils.llm_client import LLMQuotaExhaustedError
@@ -199,9 +206,9 @@ def _make_llm_client(model: str, client: str):
 
 def _check_openrouter_credits() -> None:
     """Fail fast if OpenRouter balance is zero or the key is invalid."""
+    import json as _json
     import os
     import urllib.request
-    import json as _json
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
@@ -448,8 +455,7 @@ class MainBranchCommitRefusedError(RuntimeError):
     a hard refusal rather than a fall-through to committing on main."""
 
 
-def _git_oss(oss_dir: Path, *args: str) -> "subprocess.CompletedProcess":
-    import subprocess
+def _git_oss(oss_dir: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=oss_dir, capture_output=True, text=True, check=True)
 
 
@@ -477,9 +483,8 @@ def _start_run_branch(oss_dir: Path, log: BootstrapAuditLog) -> str:
     bootstrap/<UTC timestamp>-<uuid> branch is cut from its tip for this
     run to write into from a known-clean baseline.
     """
-    import subprocess
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     is_new = not (oss_dir / ".git").exists()
     if is_new:
@@ -504,7 +509,7 @@ def _start_run_branch(oss_dir: Path, log: BootstrapAuditLog) -> str:
     # uuid suffix guards against two runs landing in the same second (the
     # timestamp alone collided immediately in testing -- consecutive calls
     # with no real work between them).
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     branch = f"bootstrap/{run_id}-{uuid.uuid4().hex[:6]}"
     _git_oss(oss_dir, "checkout", "main")
     _git_oss(oss_dir, "checkout", "-b", branch)
@@ -550,8 +555,7 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
     unreviewed" should not depend on nothing-external-ever-touching-the-
     directory for hours.
     """
-    import subprocess
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     branch = subprocess.run(
         ["git", "branch", "--show-current"], cwd=oss_dir, capture_output=True, text=True
@@ -609,7 +613,7 @@ def _commit_public_repo(oss_dir: Path, module_count: int, log: BootstrapAuditLog
             f"main is untouched. Fix the cause (or discard this branch) before retrying."
         )
 
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d")
     if is_new:
         msg = f"Initial clean-room synthesized release ({module_count} modules, {ts})"
     else:
@@ -663,7 +667,7 @@ def _synthesis_loop(
     from src.agents.podman_orchestrator import PodmanOrchestrator
     from src.agents.podman_runner import PodmanRunner
     from src.agents.python_language_pod import PythonLanguagePod
-    from src.agents.worker_agent import WorkerAgent, _DEFAULT_TEST_RULES, _TEST_RULES_SECTION
+    from src.agents.worker_agent import _DEFAULT_TEST_RULES, _TEST_RULES_SECTION, WorkerAgent
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
     from src.storage.schemas import BulletCreate
@@ -1181,6 +1185,7 @@ def _synthesis_loop_ts(
     force: bool = False,
     client: str = "openrouter",
 ) -> tuple[int, int]:
+    from bootstrap.synthesis_router import SynthesisRouter
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.iterative_tdd_runner import IterativeTDDRunner
     from src.agents.podman_orchestrator import PodmanOrchestrator
@@ -1189,7 +1194,6 @@ def _synthesis_loop_ts(
     from src.agents.typescript_worker_agent import TypeScriptWorkerAgent
     from src.playbook.manager import PlaybookManager
     from src.storage.experiment_logger import ExperimentLogger
-    from bootstrap.synthesis_router import SynthesisRouter
 
     print("  Building TypeScript harness image...")
     build_ts_image()

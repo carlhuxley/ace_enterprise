@@ -162,7 +162,7 @@ class ProjectDetector:
                     return data["tool"]["poetry"].get("name", root.name)
                 if "project" in data:
                     return data["project"].get("name", root.name)
-            except:
+            except Exception:
                 pass
 
         # Try setup.py (look for name= in file)
@@ -175,7 +175,7 @@ class ProjectDetector:
                 match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', content)
                 if match:
                     return match.group(1)
-            except:
+            except Exception:
                 pass
 
         # Use directory name
@@ -273,7 +273,7 @@ class ProjectDetector:
                     python_dep = data["tool"]["poetry"]["dependencies"].get("python")
                     if python_dep:
                         return python_dep
-            except:
+            except Exception:
                 pass
 
         return None

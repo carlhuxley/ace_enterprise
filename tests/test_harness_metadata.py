@@ -1,12 +1,8 @@
 """Tests for harness metadata in ExperimentLogger (ace_enterprise-8mz)."""
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from src.storage.experiment_logger import ExperimentLogger
 from src.storage.repository import PlaybookRepository
-
 
 SAMPLE_METADATA = {
     "source_hash": "a" * 64,

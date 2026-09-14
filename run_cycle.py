@@ -14,7 +14,7 @@ from src.agents.iterative_tdd_runner import IterativeTDDRunner
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod
-from src.agents.worker_agent import WorkerAgent, _DEFAULT_TEST_RULES, _TEST_RULES_SECTION
+from src.agents.worker_agent import _DEFAULT_TEST_RULES, _TEST_RULES_SECTION, WorkerAgent
 from src.playbook.manager import PlaybookManager
 from src.storage.experiment_logger import ExperimentLogger
 from src.storage.schemas import BulletCreate
@@ -82,7 +82,7 @@ def main():
         sys.stdout.flush()
         result = runner.run_from_feature(FEATURE_FILE)
 
-        print(f"\n=== RESULT ===")
+        print("\n=== RESULT ===")
         print(f"Complete      : {result.complete}")
         print(f"Success       : {result.success}")
         print(f"Cycles run    : {result.iterations}")

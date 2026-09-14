@@ -10,8 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.playbook.manager import PlaybookManager
-from src.storage.schemas import PlaybookCreate
-from src.utils.llm_client import LLMClient
 
 
 def view_playbook(playbook_id: str = None):
@@ -65,7 +63,7 @@ def view_playbook(playbook_id: str = None):
                 print(f"    Helpful: {bullet.helpful_count} | Harmful: {bullet.harmful_count}")
                 if bullet.last_used:
                     print(f"    Last Used: {bullet.last_used}")
-                print(f"\n    Content:")
+                print("\n    Content:")
                 # Indent content for readability
                 for line in bullet.content.split('\n'):
                     print(f"    {line}")

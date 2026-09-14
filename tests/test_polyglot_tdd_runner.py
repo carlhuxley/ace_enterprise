@@ -4,14 +4,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
-from src.analytics.token_efficiency import EfficiencyReport
+from src.agents.language_pod import PhaseResult, TokenUsage
 from src.agents.polyglot_tdd_runner import (
     PodFactory,
     PolyglotRunResult,
     PolyglotTDDRunner,
 )
-
+from src.analytics.token_efficiency import EfficiencyReport
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -237,7 +236,6 @@ class TestPodFactory:
 
 class TestPodKwargsPassthrough:
     def test_run_passes_pod_kwargs_to_real_pod_factory(self, tmp_path):
-        from src.agents.python_language_pod import PythonLanguagePod
         from src.agents.polyglot_tdd_runner import PodFactory
 
         worker = MagicMock()
@@ -306,7 +304,7 @@ class _SpyAuditClient:
         self.events = []
 
     def emit_simple(self, *, event_type, actor_id, payload, playbook_id=None):
-        self.events.append(dict(event_type=event_type, payload=payload, playbook_id=playbook_id))
+        self.events.append({"event_type": event_type, "payload": payload, "playbook_id": playbook_id})
         return True
 
 
@@ -318,7 +316,6 @@ class TestAuditTrailParity:
         assert "python" in result.language_results  # doesn't raise without one
 
     def test_emits_events_through_real_tdd_cycle_runner(self, tmp_path):
-        from src.agents.python_language_pod import PythonLanguagePod
         from src.agents.polyglot_tdd_runner import PodFactory
 
         worker = MagicMock()

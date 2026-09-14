@@ -219,7 +219,7 @@ class ContractArchitect:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error: {e}. JSON string: {json_str[:500]}...")
-            raise ValueError(f"Invalid JSON: {e}")
+            raise ValueError(f"Invalid JSON: {e}") from e
 
         if "contracts" not in data:
             raise ValueError("Response missing 'contracts' key")

@@ -25,7 +25,7 @@ from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.python_language_pod import PythonLanguagePod
-from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner, _is_abort
+from src.agents.tdd_cycle_runner import TDDCycleRunner, _is_abort
 
 # ---------------------------------------------------------------------------
 # Representative LLM outputs for the 'ingest_files' feature

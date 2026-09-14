@@ -8,16 +8,14 @@ import pytest
 
 from src.benchmark.blind_evaluation import (
     BlindEvaluator,
-    EvaluationResult,
     MultiRunResult,
     Submission,
 )
-from src.broker.adaptive_broker import AdaptiveBroker, BrokerConfig
+from src.broker.adaptive_broker import AdaptiveBroker
 from src.broker.performance_aggregator import (
     AgentPerformanceMetrics,
     PerformanceAggregator,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -13,7 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-class TDDFailureCategory(str, Enum):
+class TDDFailureCategory(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Categories of TDD failures for analysis."""
 
     TEST_DESIGN = "test_design"

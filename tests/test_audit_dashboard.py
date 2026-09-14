@@ -91,7 +91,7 @@ class TestIdentityMapping:
 
     def test_register_identity(self):
         """Should map agent_ref to identity (model name, provider)."""
-        from src.audit.dashboard import AuditDashboard, AgentIdentity
+        from src.audit.dashboard import AgentIdentity, AuditDashboard
 
         dashboard = AuditDashboard([])
 
@@ -107,7 +107,7 @@ class TestIdentityMapping:
 
     def test_reveal_identities_in_report(self):
         """Should reveal identities in human-readable report."""
-        from src.audit.dashboard import AuditDashboard, AgentIdentity
+        from src.audit.dashboard import AgentIdentity, AuditDashboard
 
         audit_events = [
             {"actor_id": "agent-001", "event_type": "CYCLE_COMPLETED", "payload": {"success": True}},
@@ -219,7 +219,7 @@ class TestDashboardSummary:
 
     def test_generate_summary(self):
         """Should generate human-readable summary."""
-        from src.audit.dashboard import AuditDashboard, AgentIdentity
+        from src.audit.dashboard import AgentIdentity, AuditDashboard
 
         audit_events = [
             {"actor_id": "agent-001", "event_type": "CYCLE_COMPLETED",

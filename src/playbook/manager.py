@@ -569,7 +569,7 @@ class PlaybookManager:
             raise ValueError(f"Playbook {playbook_id} not found")
 
         # Search all sections
-        for section_name, bullets in playbook.sections.items():
+        for _section_name, bullets in playbook.sections.items():
             for i, bullet in enumerate(bullets):
                 if bullet.id == bullet_id:
                     bullets.pop(i)

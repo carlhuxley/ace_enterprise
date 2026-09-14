@@ -53,8 +53,12 @@ class ConsensusBuilder:
         bullet_texts = [b.content for b in bullets]
         embeddings = self.embedding_service.embed_batch(bullet_texts)
 
-        # Assign embeddings to bullets
-        for bullet, embedding in zip(bullets, embeddings):
+        # Assign embeddings to bullets. strict=True: embed_batch() silently
+        # drops empty/whitespace-only texts before encoding, so a length
+        # mismatch here would mean bullets and embeddings have drifted out
+        # of alignment -- surface that loudly instead of pairing bullets
+        # with the wrong embeddings.
+        for bullet, embedding in zip(bullets, embeddings, strict=True):
             bullet._embedding = embedding  # Temporary storage
 
         # Greedy clustering
@@ -116,7 +120,7 @@ class ConsensusBuilder:
 
         consensus_bullets = []
 
-        for cluster_id, cluster_bullets in clusters.items():
+        for _cluster_id, cluster_bullets in clusters.items():
             if len(cluster_bullets) == 1:
                 # Unique bullet, keep as-is
                 consensus_bullets.append(cluster_bullets[0])
@@ -257,7 +261,11 @@ class ConsensusBuilder:
         """Calculate cosine similarity between two vectors."""
         import math
 
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        # strict=True: two embedding vectors of different dimension would
+        # mean they came from different (incompatible) models -- a silent
+        # truncated dot product would return a wrong-but-plausible-looking
+        # similarity score instead of surfacing that mismatch.
+        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
         magnitude1 = math.sqrt(sum(a * a for a in vec1))
         magnitude2 = math.sqrt(sum(b * b for b in vec2))
 

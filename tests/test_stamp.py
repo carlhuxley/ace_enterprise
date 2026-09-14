@@ -5,8 +5,6 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-
 from bootstrap.audit_log import BootstrapAuditLog
 from bootstrap.stamp import stamp_directory
 

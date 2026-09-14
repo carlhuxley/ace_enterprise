@@ -55,10 +55,10 @@ class DocumentationRubric(EvaluationRubric):
         return score
 
     def _score_clarity(self, text: str) -> float:
-        lines = [l for l in text.splitlines() if l.strip()]
+        lines = [ln for ln in text.splitlines() if ln.strip()]
         if not lines:
             return 0.0
-        avg_len = sum(len(l) for l in lines) / len(lines)
+        avg_len = sum(len(ln) for ln in lines) / len(lines)
         # Sweet spot 40-100 chars per line → 100 pts; very short or very long → lower
         if 40 <= avg_len <= 100:
             return 100.0

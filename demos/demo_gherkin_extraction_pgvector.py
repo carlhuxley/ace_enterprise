@@ -15,9 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from agents.gherkin_extraction_agent import ExtractionResult, GherkinExtractionAgent
 from storage.repository import PlaybookRepository
 from utils.embedding import get_embedding_service
-from agents.gherkin_extraction_agent import GherkinExtractionAgent, ExtractionResult
 
 print("\n" + "="*80)
 print("GHERKIN EXTRACTION → POSTGRESQL STORAGE DEMO")
@@ -34,7 +34,7 @@ code_path = Path("src/ml_experiment_knowledge")
 test_path = Path("tests/test_experiment_knowledge.py")
 
 if not code_path.exists() or not test_path.exists():
-    print(f"   ⚠ Example code not found. Using OAuth example instead...")
+    print("   ⚠ Example code not found. Using OAuth example instead...")
     # Create simple OAuth example for demo
     code_path = Path("temp_oauth_example.py")
     test_path = Path("temp_oauth_test.py")
@@ -259,8 +259,8 @@ print("="*80)
 print("\n📊 Summary:")
 print(f"   • Extracted {len(extraction_result.feature.scenarios)} Gherkin scenarios from code")
 print(f"   • Generated {len(all_bullets)} knowledge patterns")
-print(f"   • Stored in PostgreSQL with vector embeddings")
-print(f"   • Enabled semantic search across patterns")
+print("   • Stored in PostgreSQL with vector embeddings")
+print("   • Enabled semantic search across patterns")
 
 print("\n🎯 Key Benefits:")
 print("   1. Reverse engineer existing code into reusable patterns")

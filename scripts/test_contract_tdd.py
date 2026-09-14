@@ -20,21 +20,20 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.audit.dashboard import AgentIdentity, AuditDashboard
+from src.audit.local_client import LocalAuditClient
+from src.audit.schemas import AuditEventType
 from src.contracts.contract_driven import (
     InterfaceContract,
     TestCase,
 )
-from src.audit.local_client import LocalAuditClient
-from src.audit.schemas import AuditEventType
-from src.audit.dashboard import AuditDashboard, AgentIdentity
-
 
 # Agent identity for audit
 EFFGEN_AGENT_ID = "effgen-qwen-1.5b-tdd"
@@ -455,7 +454,6 @@ def main():
     for r in results:
         red = "✓" if r.red_passed else "✗"
         green = "✓" if r.green_passed else "✗"
-        status = "PASS" if r.red_passed and r.green_passed else "FAIL"
         print(f"{r.contract_id:<20} {red:<8} {green:<8} {r.elapsed:.1f}s")
         if r.green_passed:
             passed += 1

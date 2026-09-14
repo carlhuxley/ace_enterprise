@@ -14,13 +14,11 @@ Together: Complete institutional memory of ML experimentation
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.experiment_knowledge import MLExperimentKnowledge, ExperimentDecision, ExperimentPattern
 from src.ml.mlflow_callback import ACEMLflowCallback
 from src.ml.query_interface import MLflowKnowledgeQuery
 
@@ -41,11 +39,10 @@ def simulate_experiment_with_ace():
 
     try:
         import mlflow
-        import numpy as np
         from sklearn.datasets import make_classification
-        from sklearn.model_selection import train_test_split
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.metrics import accuracy_score, f1_score
+        from sklearn.model_selection import train_test_split
     except ImportError as e:
         print(f"\n❌ Missing required package: {e}")
         print("Install with: pip install mlflow scikit-learn numpy")
@@ -347,16 +344,16 @@ def simulate_experiment_with_ace():
     # Compare runs
     print("\n🔬 Comparing baseline vs best run:")
     comparison = query.compare_runs(run1_id, run3_id)
-    print(f"\n  Parameter differences:")
+    print("\n  Parameter differences:")
     for param, diff in comparison["param_differences"].items():
         print(f"    {param}: {diff['run1']} → {diff['run2']}")
 
-    print(f"\n  Metric differences:")
+    print("\n  Metric differences:")
     for metric, diff in comparison["metric_differences"].items():
         print(f"    {metric}: {diff['run1']:.4f} → {diff['run2']:.4f} "
               f"({diff['diff']:+.4f}, {diff['pct_change']:+.2f}%)")
 
-    print(f"\n  Decision differences:")
+    print("\n  Decision differences:")
     for question, diff in comparison["decision_differences"].items():
         print(f"    {question}")
         print(f"      Run 1: {diff['run1']}")

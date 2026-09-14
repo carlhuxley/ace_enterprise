@@ -67,7 +67,7 @@ _REJECT_RE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _REJECT_PATTE
 _FLAG_RE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _FLAG_PATTERNS]
 
 
-class Verdict(str, Enum):
+class Verdict(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     OK = "ok"
     FLAG = "flag"
     REJECT = "reject"

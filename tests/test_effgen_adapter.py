@@ -1,5 +1,4 @@
 """Tests for effGen MCP adapter - connects small models to ACE."""
-import pytest
 
 
 class TestEffGenAgentConfig:
@@ -37,8 +36,8 @@ class TestEffGenAdapter:
 
     def test_register_agent(self):
         """Should register effGen agent with capability registry."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
 
         registry = CapabilityRegistry()
         adapter = EffGenAdapter(registry)
@@ -58,8 +57,8 @@ class TestEffGenAdapter:
 
     def test_register_multiple_agents(self):
         """Should register multiple effGen agents."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
 
         registry = CapabilityRegistry()
         adapter = EffGenAdapter(registry)
@@ -82,8 +81,8 @@ class TestEffGenAdapter:
 
     def test_get_agent_endpoint(self):
         """Should retrieve endpoint for registered agent."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
 
         registry = CapabilityRegistry()
         adapter = EffGenAdapter(registry)
@@ -104,11 +103,7 @@ class TestEffGenTaskExecution:
 
     def test_create_task_request(self):
         """Should create MCP-formatted task request."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig, TaskRequest
-        from src.broker.capability_registry import CapabilityRegistry
-
-        registry = CapabilityRegistry()
-        adapter = EffGenAdapter(registry)
+        from src.broker.effgen_adapter import TaskRequest
 
         request = TaskRequest(
             task_id="task-001",
@@ -146,8 +141,8 @@ class TestEffGenMultiAgent:
 
     def test_register_multi_agent_instance(self):
         """Should support multi-agent effGen (team) as single registration."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
 
         registry = CapabilityRegistry()
         adapter = EffGenAdapter(registry)
@@ -174,8 +169,8 @@ class TestEffGenHealthCheck:
 
     def test_check_agent_health(self):
         """Should check if effGen agent is healthy."""
-        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.effgen_adapter import EffGenAdapter, EffGenAgentConfig
 
         registry = CapabilityRegistry()
         adapter = EffGenAdapter(registry)

@@ -12,14 +12,14 @@ from datetime import datetime
 from enum import Enum
 
 
-class VoteType(str, Enum):
+class VoteType(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Types of votes a model can cast."""
     APPROVE = "approve"
     REJECT = "reject"
     ABSTAIN = "abstain"
 
 
-class BulletSection(str, Enum):
+class BulletSection(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Playbook sections for organizing bullets."""
     STRATEGIES = "strategies_and_hard_rules"
     CODE_SNIPPETS = "code_snippets"

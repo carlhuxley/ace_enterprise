@@ -9,15 +9,12 @@ Tests all scenarios from the Gherkin feature file:
 5. Get best model for a specific task type
 6. Track model performance over time
 """
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from src.benchmark.model_attribution import (
     ModelAttributionTracker,
-    TaskCompletion,
-    ModelMetrics,
-    ModelFamilyMetrics,
-    DailyMetrics,
 )
 
 

@@ -1,13 +1,13 @@
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.analytics.success_rate_calculator import (
-    SuccessRateCalculator,
     RatePeriod,
+    SuccessRateCalculator,
     VersionRate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

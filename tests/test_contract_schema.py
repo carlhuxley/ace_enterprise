@@ -9,9 +9,8 @@ The contract schema defines:
 - Hints for implementation
 """
 
+
 import pytest
-import yaml
-from pathlib import Path
 
 
 class TestContractSchemaLoading:
@@ -19,7 +18,7 @@ class TestContractSchemaLoading:
 
     def test_loads_contract_from_yaml_string(self):
         """Should parse contract from YAML."""
-        from src.contracts.contract_schema import ContractSpec, load_contracts
+        from src.contracts.contract_schema import load_contracts
 
         yaml_content = """
 contracts:
@@ -133,7 +132,7 @@ class TestContractFixtures:
 
     def test_supports_fixtures_field(self):
         """Should support optional fixtures field."""
-        from src.contracts.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+        from src.contracts.contract_schema import ContractSpec, FixtureSpec, TestCaseSpec
 
         fixtures = FixtureSpec(
             setup="init_db()",
@@ -196,7 +195,7 @@ contracts:
 
     def test_fixtures_converts_to_interface_contract(self):
         """Fixtures should be included in InterfaceContract."""
-        from src.contracts.contract_schema import ContractSpec, TestCaseSpec, FixtureSpec
+        from src.contracts.contract_schema import ContractSpec, FixtureSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="fix-001",
@@ -220,8 +219,8 @@ class TestContractToInterfaceContract:
 
     def test_converts_to_interface_contract(self):
         """Should convert to InterfaceContract for TDD execution."""
-        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
         from src.contracts.contract_driven import InterfaceContract
+        from src.contracts.contract_schema import ContractSpec, TestCaseSpec
 
         spec = ContractSpec(
             id="conv-001",

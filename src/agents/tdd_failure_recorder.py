@@ -49,7 +49,7 @@ class InterventionRecord:
 class TDDFailureRecorder:
     """
     Records TDD failures and interventions for self-improvement.
-    
+
     Responsibilities:
     1. Log failed experiments to ExperimentLogger
     2. Create bug issues in .beads/issues.jsonl
@@ -78,11 +78,11 @@ class TDDFailureRecorder:
     ) -> str:
         """
         Record a TDD failure with full context.
-        
+
         Args:
             context: Failure context details
             suggested_fix: LLM-suggested fix if available
-            
+
         Returns:
             Experiment ID of the logged failure
         """
@@ -140,7 +140,7 @@ class TDDFailureRecorder:
     ) -> None:
         """
         Record that intervention was required after a failure.
-        
+
         Args:
             experiment_id: The failed experiment ID
             intervention: Details of the intervention
@@ -165,7 +165,7 @@ class TDDFailureRecorder:
     def calculate_intervention_rate(self) -> float:
         """
         Calculate intervention rate from experiment logs.
-        
+
         Returns:
             Rate as float between 0 and 1 (interventions / total builds)
         """

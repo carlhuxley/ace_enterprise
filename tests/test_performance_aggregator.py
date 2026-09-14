@@ -11,11 +11,12 @@ Tests that the aggregator:
 6. Maintains double-blind (never exposes content)
 """
 
-import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock
 
-from src.audit.schemas import AuditEvent, AuditEventType
+import pytest
+
+from src.audit.schemas import AuditEventType
 
 
 class TestPerformanceAggregatorMetricsOnly:

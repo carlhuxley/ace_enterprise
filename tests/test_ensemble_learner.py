@@ -16,12 +16,10 @@ from src.ensemble.models import (
     BulletSection,
     ConsensusBullet,
     EnsembleResult,
-    ModelPerformance,
     Vote,
     VoteResults,
     VoteType,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -419,7 +417,7 @@ class TestLearnFromTask:
 
         with patch.object(learner, "_execute_models", return_value=canned), \
              patch.object(learner, "_conduct_cross_voting"):
-            from src.storage.schemas import TaskInput, EnvironmentFeedback
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
             task = TaskInput(id="t1", query="test task", context={})
             env = EnvironmentFeedback(result="SUCCESS")
             result = learner.learn_from_task(task, env, parallel=False)
@@ -432,7 +430,7 @@ class TestLearnFromTask:
 
         with patch.object(learner, "_execute_models", return_value=canned), \
              patch.object(learner, "_conduct_cross_voting"):
-            from src.storage.schemas import TaskInput, EnvironmentFeedback
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
             task = TaskInput(id="t1", query="test task", context={})
             env = EnvironmentFeedback(result="SUCCESS")
             result = learner.learn_from_task(task, env, parallel=False)
@@ -446,7 +444,7 @@ class TestLearnFromTask:
 
         with patch.object(learner, "_execute_models", return_value=canned), \
              patch.object(learner, "_conduct_cross_voting"):
-            from src.storage.schemas import TaskInput, EnvironmentFeedback
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
             task = TaskInput(id="t1", query="test task", context={})
             env = EnvironmentFeedback(result="SUCCESS")
             result = learner.learn_from_task(task, env, parallel=False)
@@ -459,7 +457,7 @@ class TestLearnFromTask:
 
         with patch.object(learner, "_execute_models", return_value=canned), \
              patch.object(learner, "_conduct_cross_voting"):
-            from src.storage.schemas import TaskInput, EnvironmentFeedback
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
             task = TaskInput(id="t1", query="test task", context={})
             env = EnvironmentFeedback(result="SUCCESS")
             result = learner.learn_from_task(task, env, parallel=False)
@@ -472,7 +470,7 @@ class TestLearnFromTask:
 
         with patch.object(learner, "_execute_models", return_value=canned) as mock_exec, \
              patch.object(learner, "_conduct_cross_voting"):
-            from src.storage.schemas import TaskInput, EnvironmentFeedback
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
             task = TaskInput(id="t1", query="test task", context={})
             env = EnvironmentFeedback(result="SUCCESS")
             learner.learn_from_task(task, env, parallel=True)

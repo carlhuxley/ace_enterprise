@@ -1,4 +1,6 @@
 """Tests for TokenEfficiencyReporter (ace_enterprise-k8t)."""
+import pytest
+
 from src.agents.language_pod import TokenUsage
 from src.analytics.token_efficiency import (
     CrossLanguageComparison,
@@ -7,7 +9,6 @@ from src.analytics.token_efficiency import (
     PodRun,
     TokenEfficiencyReporter,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -251,16 +252,14 @@ class TestToDict:
 # Integration: stub pods with known token counts
 # ---------------------------------------------------------------------------
 
-import pytest
-
 
 class TestIntegrationWithStubPods:
     def test_two_pod_stubs_produce_correct_report(self, tmp_path):
         from unittest.mock import MagicMock
-        from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
-        from src.agents.python_language_pod import PythonLanguagePod
+
         from src.agents.go_language_pod import GoLanguagePod
-        from unittest.mock import patch
+        from src.agents.language_pod import PhaseResult, PodSpec
+        from src.agents.python_language_pod import PythonLanguagePod
 
         # Python stub pod (current architecture: worker + orchestrator)
         worker = MagicMock()

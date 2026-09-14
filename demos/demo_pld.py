@@ -12,13 +12,11 @@ Shows how the PLD system:
 import json
 from pathlib import Path
 
-from src.playbook.clustering import BulletClusterer, build_distillation_playbook
+from src.playbook.clustering import BulletClusterer
 from src.playbook.distillation_router import (
     DistillationRouter,
-    RouterConfig,
     Provenance,
-    Supplier,
-    LicenseCategory,
+    RouterConfig,
     classify_license,
     detect_supplier,
     filter_bullets_by_provenance,
@@ -217,7 +215,7 @@ def demo_routing(manager: PlaybookManager):
         elif result.system_prompt:
             # Show first part of system prompt
             lines = result.system_prompt.split('\n')[:10]
-            print(f"\n  System prompt preview:")
+            print("\n  System prompt preview:")
             for line in lines:
                 print(f"    {line}")
             print("    ...")

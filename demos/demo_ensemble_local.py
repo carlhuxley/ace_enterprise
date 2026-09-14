@@ -44,7 +44,7 @@ def main():
         ("ollama", "deepseek-coder:1.3b"),
     ]
 
-    for i, (provider, model) in enumerate(models, 1):
+    for i, (_provider, model) in enumerate(models, 1):
         print(f"  {i}. {model}")
 
     # Create playbook
@@ -92,7 +92,7 @@ def main():
     print("=" * 80)
 
     print(f"\n📝 Task: {task.query}")
-    print(f"📋 Requirements:")
+    print("📋 Requirements:")
     for req in task.context.get("requirements", []):
         print(f"   - {req}")
 
@@ -117,19 +117,19 @@ def main():
         print("  ENSEMBLE LEARNING RESULTS")
         print("=" * 80)
 
-        print(f"\n📊 Summary:")
+        print("\n📊 Summary:")
         print(f"   Total proposals: {len(result.consensus_bullets)}")
         print(f"   Approved: {result.vote_results.approved}")
         print(f"   Rejected: {result.vote_results.rejected}")
         print(f"   Pending: {result.vote_results.pending}")
 
-        print(f"\n🎯 Metrics:")
+        print("\n🎯 Metrics:")
         print(f"   Diversity score: {result.diversity_score:.2f}")
         print(f"   Consensus strength: {result.consensus_strength:.2f}")
         print(f"   Execution time: {result.execution_time_seconds:.1f}s")
 
         # Show model performance
-        print(f"\n🏆 Model Performance:")
+        print("\n🏆 Model Performance:")
         for model_id, perf in result.model_performance.items():
             approval_rate = (
                 perf.proposals_approved / perf.proposals_made
@@ -155,7 +155,7 @@ def main():
             print(f"   Approval rate: {bullet.approval_rate:.0%}")
             print(f"   Vote counts: {bullet.vote_counts}")
 
-            print(f"\n   Votes (LLM reasoning):")
+            print("\n   Votes (LLM reasoning):")
             for vote in bullet.votes:
                 vote_emoji = "👍" if vote.vote.value == "approve" else "👎" if vote.vote.value == "reject" else "🤷"
                 print(f"      {vote_emoji} {vote.model_id}: {vote.vote.value.upper()} (confidence: {vote.confidence:.2f})")

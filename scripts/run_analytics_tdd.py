@@ -16,8 +16,8 @@ is only ever written to SRC_DIR/TEST_DIR after it passes inside the container.
 import logging
 from pathlib import Path
 
-from src.agents.iterative_tdd_runner import IterativeTDDRunner
 from src.agents.incremental_planner import IncrementalPlanner
+from src.agents.iterative_tdd_runner import IterativeTDDRunner
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod

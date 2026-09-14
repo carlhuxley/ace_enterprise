@@ -5,13 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.broker.adaptive_broker import AdaptiveBroker, BrokerConfig
+from src.broker.adaptive_broker import AdaptiveBroker
 from src.broker.performance_aggregator import (
     AgentPerformanceMetrics,
     ModelProfile,
     PerformanceAggregator,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,7 +36,7 @@ def _aggregator_with(metrics_map: dict[str, AgentPerformanceMetrics]) -> Perform
     """Return a PerformanceAggregator whose get_all_agent_metrics returns metrics_map."""
     agg = MagicMock(spec=PerformanceAggregator)
     agg.get_all_agent_metrics.return_value = metrics_map
-    for ref, m in metrics_map.items():
+    for _ref, m in metrics_map.items():
         agg.get_agent_metrics.return_value = m  # last one wins; override per test if needed
 
     # Wire build_model_profile and get_all_model_profiles to real implementations

@@ -7,9 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from sqlalchemy import text
+
 from storage.repository import PlaybookRepository
 from utils.embedding import get_embedding_service
-from sqlalchemy import text
 
 print("\n" + "="*80)
 print("TDD KNOWLEDGE IN DATABASE")

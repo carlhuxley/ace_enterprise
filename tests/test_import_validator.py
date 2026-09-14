@@ -1,8 +1,9 @@
 """Tests for ImportValidator."""
-import pytest
 from pathlib import Path
 
-from src.utils.import_validator import ImportValidator, ImportValidationError
+import pytest
+
+from src.utils.import_validator import ImportValidationError, ImportValidator
 
 
 @pytest.fixture

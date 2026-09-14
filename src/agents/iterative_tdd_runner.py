@@ -67,18 +67,18 @@ class IterativeTDDRunner:
         self._planner = planner
         self._max_iterations = max_iterations
         self._redundancy_checker = redundancy_checker
-        self._runner_kwargs = dict(
-            max_green_attempts=max_green_attempts,
-            experiment_logger=experiment_logger,
-            playbook_id=playbook_id,
-            reflector=reflector,
-            curator=curator,
-            audit_client=audit_client,
-            max_red_attempts=max_red_attempts,
-            team_id=team_id,
-            model_id=model_id,
-            task_type=task_type,
-        )
+        self._runner_kwargs = {
+            "max_green_attempts": max_green_attempts,
+            "experiment_logger": experiment_logger,
+            "playbook_id": playbook_id,
+            "reflector": reflector,
+            "curator": curator,
+            "audit_client": audit_client,
+            "max_red_attempts": max_red_attempts,
+            "team_id": team_id,
+            "model_id": model_id,
+            "task_type": task_type,
+        }
 
     def _redundancy_skip(self, increment: TestIncrement, test_file: Path) -> CycleResult | None:
         """Pre-check `increment` against tests already in test_file.

@@ -137,7 +137,7 @@ Output EITHER "COMPLETE" or ONE pipe-delimited line.
             logger.info("IncrementalPlanner: requirement satisfied")
             return COMPLETE
 
-        lines = [l.strip() for l in response.split("\n") if "|" in l and not l.startswith("#")]
+        lines = [ln.strip() for ln in response.split("\n") if "|" in ln and not ln.startswith("#")]
         if not lines:
             logger.warning("IncrementalPlanner: could not parse increment from: %s", response)
             return None
@@ -225,7 +225,7 @@ test_name | description with exact values | test_file_path | impl_file_path
 
         response = self._llm.generate(prompt, temperature=self._temperature)["content"].strip()
 
-        lines = [l.strip() for l in response.split("\n") if "|" in l and not l.startswith("#")]
+        lines = [ln.strip() for ln in response.split("\n") if "|" in ln and not ln.startswith("#")]
         if not lines:
             logger.warning("IncrementalPlanner: could not parse scenario increment from: %s", response)
             return None
@@ -285,7 +285,7 @@ test_name | description with exact values | test_file_path | impl_file_path
             for file_key, funcs in self._test_functions.items():
                 summaries.append(f"\n{Path(file_key).name}:")
                 for fn in funcs:
-                    asserts = [l.strip() for l in fn["code"].split("\n") if "assert" in l]
+                    asserts = [ln.strip() for ln in fn["code"].split("\n") if "assert" in ln]
                     if asserts:
                         summaries.append(f"  - {fn['name']}: {' | '.join(asserts[:2])}")
                     else:

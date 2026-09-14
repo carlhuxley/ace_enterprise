@@ -1,5 +1,7 @@
 """ACE ensemble: multi-model consensus, voting strategies, and ensemble learning."""
 
+from src.ensemble.consensus import ConsensusBuilder
+from src.ensemble.learner import EnsembleLearner
 from src.ensemble.models import (
     BulletSection,
     ConsensusBullet,
@@ -9,9 +11,7 @@ from src.ensemble.models import (
     VoteResults,
     VoteType,
 )
-from src.ensemble.consensus import ConsensusBuilder
-from src.ensemble.voting import VotingStrategy, MajorityVoting
-from src.ensemble.learner import EnsembleLearner
+from src.ensemble.voting import MajorityVoting, VotingStrategy
 
 __all__ = [
     "BulletSection",

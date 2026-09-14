@@ -24,7 +24,6 @@ from src.contracts.module_architect import (
 )
 from src.utils.llm_client import LLMClient
 
-
 AUDIT_DB_URL = "sqlite:///.local/audit.db"
 
 
@@ -169,7 +168,7 @@ def run_module_flow(requirement: str):
         if success:
             break
         else:
-            print(f"  Escalating to next model...")
+            print("  Escalating to next model...")
 
     # Summary
     print()

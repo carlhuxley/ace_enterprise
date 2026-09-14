@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.broker.performance_aggregator import AgentPerformanceMetrics, PerformanceAggregator
 from src.broker.regression_detector import (
     REGRESSION_THRESHOLD,
     WARNING_THRESHOLD,
@@ -13,9 +14,7 @@ from src.broker.regression_detector import (
     RegressionAlert,
     RegressionDetector,
 )
-from src.broker.performance_aggregator import AgentPerformanceMetrics, PerformanceAggregator
 from src.utils.llm_client import extract_model_version
-
 
 # ---------------------------------------------------------------------------
 # Helpers

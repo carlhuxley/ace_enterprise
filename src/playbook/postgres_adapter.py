@@ -85,8 +85,10 @@ class PostgresPlaybookAdapter:
         playbook_id = generate_playbook_id()
         now = datetime.utcnow()
 
-        # Create playbook in PostgreSQL
-        playbook_model = self.repo.get_or_create_playbook(
+        # Create playbook in PostgreSQL -- the row is what matters here; the
+        # response below is built from create_data/metadata directly rather
+        # than the returned model.
+        _playbook_model = self.repo.get_or_create_playbook(
             playbook_id=playbook_id,
             version="0.1.0",
             domain=create_data.domain,
@@ -344,7 +346,6 @@ class PostgresPlaybookAdapter:
         Returns:
             List of playbook IDs
         """
-        stats = self.repo.get_stats()
         # Note: The repository doesn't have a list method yet,
         # so we'll need to add one or query directly
         from sqlalchemy import select

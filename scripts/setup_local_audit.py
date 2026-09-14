@@ -5,7 +5,6 @@ Creates SQLite audit database and provides a local audit client
 that writes directly to the database (bypassing HTTP for local dev).
 """
 
-import os
 import sys
 from pathlib import Path
 

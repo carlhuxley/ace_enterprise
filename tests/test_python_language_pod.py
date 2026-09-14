@@ -7,8 +7,6 @@ removed in 76980c8 in favour of WorkerAgent + PodmanOrchestrator.
 """
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
 from src.agents.python_language_pod import PythonLanguagePod
 

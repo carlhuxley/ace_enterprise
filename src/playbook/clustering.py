@@ -24,7 +24,7 @@ from src.storage.schemas import Bullet
 logger = logging.getLogger(__name__)
 
 
-class RepresentativeStrategy(str, Enum):
+class RepresentativeStrategy(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """Strategy for selecting cluster representatives."""
 
     HIGHEST_HELPFUL = "highest_helpful"  # Best helpful/harmful ratio
@@ -196,7 +196,10 @@ class BulletClusterer:
         cluster_map: dict[int, list[tuple[Bullet, np.ndarray]]] = {}
         outliers: list[Bullet] = list(bullets_without_embeddings)  # Start with no-embedding bullets
 
-        for bullet, embedding, label in zip(bullets_with_embeddings, embeddings, labels):
+        # strict=True: labels comes from DBSCAN over embeddings, which is
+        # itself built 1:1 from bullets_with_embeddings -- any drift there
+        # is a real bug in the setup above, not something to mask.
+        for bullet, embedding, label in zip(bullets_with_embeddings, embeddings, labels, strict=True):
             if label == -1:
                 outliers.append(bullet)
             else:

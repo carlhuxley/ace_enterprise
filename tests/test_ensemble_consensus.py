@@ -15,7 +15,6 @@ import pytest
 
 from src.ensemble.models import BulletSection, ConsensusBullet, Vote, VoteType
 
-
 # ---------------------------------------------------------------------------
 # Deterministic embedding mock
 # ---------------------------------------------------------------------------

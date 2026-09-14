@@ -1,5 +1,4 @@
 """Tests for HumanDecisionInterface - where humans see everything and decide."""
-import pytest
 
 
 class TestDecisionContext:
@@ -103,9 +102,9 @@ class TestHumanDecisionInterface:
 
     def test_get_context_combines_broker_and_audit(self):
         """Should combine broker recommendation with audit data."""
-        from src.broker.human_decision import HumanDecisionInterface
         from src.broker.advisor import BrokerAdvisor, TaskRequirements
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.human_decision import HumanDecisionInterface
 
         # Setup registry and advisor
         registry = CapabilityRegistry()
@@ -136,9 +135,9 @@ class TestHumanDecisionInterface:
 
     def test_record_decision(self):
         """Should record human decision."""
-        from src.broker.human_decision import HumanDecisionInterface, HumanDecision
         from src.broker.advisor import BrokerAdvisor
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.human_decision import HumanDecision, HumanDecisionInterface
 
         registry = CapabilityRegistry()
         advisor = BrokerAdvisor(registry)
@@ -158,9 +157,9 @@ class TestHumanDecisionInterface:
 
     def test_get_decision_history(self):
         """Should retrieve decision history."""
-        from src.broker.human_decision import HumanDecisionInterface, HumanDecision
         from src.broker.advisor import BrokerAdvisor
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.human_decision import HumanDecision, HumanDecisionInterface
 
         registry = CapabilityRegistry()
         advisor = BrokerAdvisor(registry)
@@ -188,9 +187,9 @@ class TestDecisionAnalytics:
 
     def test_get_override_rate(self):
         """Should calculate how often humans override recommendations."""
-        from src.broker.human_decision import HumanDecisionInterface, HumanDecision
         from src.broker.advisor import BrokerAdvisor
         from src.broker.capability_registry import CapabilityRegistry
+        from src.broker.human_decision import HumanDecision, HumanDecisionInterface
 
         registry = CapabilityRegistry()
         advisor = BrokerAdvisor(registry)

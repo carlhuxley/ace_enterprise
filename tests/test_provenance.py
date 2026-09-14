@@ -1,6 +1,7 @@
 """Tests for provenance matching in prompt-level distillation."""
 
-import pytest
+
+from datetime import datetime
 
 from src.playbook.distillation_router import (
     LicenseCategory,
@@ -11,7 +12,6 @@ from src.playbook.distillation_router import (
     filter_bullets_by_provenance,
 )
 from src.storage.schemas import Bullet
-from datetime import datetime
 
 
 def make_bullet(

@@ -1,9 +1,8 @@
 import textwrap
-from pathlib import Path
 
 import pytest
 
-from src.utils.context_map import ASTSignature, ContextMap, ContextMapBuilder, FileSignatures
+from src.utils.context_map import ContextMapBuilder
 
 
 @pytest.fixture

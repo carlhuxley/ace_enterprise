@@ -1,6 +1,4 @@
 """Tests for SessionLog - tracks edits and tests in current session."""
-import pytest
-from pathlib import Path
 
 
 class TestSessionLog:

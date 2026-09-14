@@ -8,8 +8,6 @@ pure math (_cosine_similarity) without loading sentence-transformers.
 """
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from src.playbook.retrieval import BulletRetriever
 from src.storage.schemas import Bullet
 
@@ -17,12 +15,12 @@ _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _bullet(content="always validate input", section="strategies_and_hard_rules", **kw):
-    defaults = dict(
-        id=kw.pop("id", "ctx-00001"),
-        content=content,
-        section=section,
-        created_at=_NOW,
-    )
+    defaults = {
+        "id": kw.pop("id", "ctx-00001"),
+        "content": content,
+        "section": section,
+        "created_at": _NOW,
+    }
     defaults.update(kw)
     return Bullet(**defaults)
 

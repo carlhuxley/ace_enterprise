@@ -8,7 +8,6 @@ generates embeddings for all bullets, and stores them in PostgreSQL.
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
@@ -66,13 +65,13 @@ for idx, playbook_path in enumerate(playbook_files, 1):
 
     try:
         # Load playbook JSON
-        with open(playbook_path, 'r') as f:
+        with open(playbook_path) as f:
             playbook_data = json.load(f)
 
         # Check if playbook is essentially empty (some are just metadata)
         total_bullets = playbook_data.get("metadata", {}).get("total_bullets", 0)
         if total_bullets == 0:
-            print(f"       ⊘ Skipping (empty playbook)")
+            print("       ⊘ Skipping (empty playbook)")
             stats["skipped_playbooks"] += 1
             continue
 
@@ -112,7 +111,7 @@ for idx, playbook_path in enumerate(playbook_files, 1):
                 })
 
         if not all_bullets:
-            print(f"       ⊘ Skipping (no bullets found)")
+            print("       ⊘ Skipping (no bullets found)")
             stats["skipped_playbooks"] += 1
             continue
 
@@ -128,7 +127,7 @@ for idx, playbook_path in enumerate(playbook_files, 1):
         except Exception as e:
             # If we get a duplicate key error, the playbook was already migrated
             if "duplicate key" in str(e).lower():
-                print(f"       ⊘ Already exists (skipping)")
+                print("       ⊘ Already exists (skipping)")
                 stats["skipped_playbooks"] += 1
             else:
                 print(f"       ✗ Error storing bullets: {e}")
@@ -165,6 +164,7 @@ if stats["errors"]:
     for error in stats["errors"][:10]:  # Show first 10 errors
         print(f"   • {error}")
     if len(stats["errors"]) > 10:
-        print(f"   ... and {len(stats["errors"]) - 10} more")
+        remaining = len(stats["errors"]) - 10
+        print(f"   ... and {remaining} more")
 
 print()

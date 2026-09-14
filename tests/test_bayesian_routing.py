@@ -1,6 +1,5 @@
 """Tests for Bayesian confidence-interval routing (ace_enterprise-2uq)."""
 
-import pytest
 
 from src.broker.bayesian import (
     INSUFFICIENT_DATA_THRESHOLD,
@@ -8,7 +7,6 @@ from src.broker.bayesian import (
     estimate_success_rate,
 )
 from src.broker.performance_aggregator import AgentPerformanceMetrics
-
 
 # ---------------------------------------------------------------------------
 # estimate_success_rate unit tests
@@ -182,20 +180,19 @@ def test_zero_task_agent_falls_back_to_variance_adjusted():
 
 def _aggregator_with_mock_store(successful: int, failed: int):
     """Build a PerformanceAggregator whose store returns synthetic events."""
+    from datetime import UTC, datetime
     from unittest.mock import MagicMock
-    from datetime import datetime, UTC
 
     from src.broker.performance_aggregator import PerformanceAggregator
-    from src.audit.schemas import AuditEventType
 
     events = []
-    for i in range(successful):
+    for _i in range(successful):
         ev = MagicMock()
         ev.actor_id = "agent-a"
         ev.timestamp = datetime.now(UTC)
         ev.payload = {"success": True, "elapsed_seconds": 1.0}
         events.append(ev)
-    for i in range(failed):
+    for _i in range(failed):
         ev = MagicMock()
         ev.actor_id = "agent-a"
         ev.timestamp = datetime.now(UTC)

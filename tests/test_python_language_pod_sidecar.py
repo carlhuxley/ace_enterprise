@@ -10,12 +10,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.agents.language_pod import PhaseResult, PodSpec
 from src.agents.podman_orchestrator import PodmanOrchestrator, PulseResult, canonical_hash
 from src.agents.python_language_pod import PythonLanguagePod
-
 
 # ---------------------------------------------------------------------------
 # Test doubles

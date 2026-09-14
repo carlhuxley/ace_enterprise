@@ -3,7 +3,6 @@ Tests for RedundancyPreChecker - detects redundant tests BEFORE writing them.
 
 TDD RED PHASE: These tests define the expected behavior.
 """
-import pytest
 from dataclasses import dataclass
 
 

@@ -190,7 +190,7 @@ class PlaybookQA:
         """Get all bullets from playbooks (optionally filtered by domain)."""
         all_bullets = []
 
-        for playbook_id, playbook in self.playbook_manager._playbooks.items():
+        for _playbook_id, playbook in self.playbook_manager._playbooks.items():
             # Filter by domain if specified
             if domain and playbook.metadata.domain != domain:
                 continue
@@ -319,9 +319,13 @@ Answer:"""
 
         for i in range(len(texts)):
             for j in range(i + 1, len(texts)):
-                # Simple similarity: how many chars match at start
+                # Simple similarity: how many chars match at start.
+                # strict=False is deliberate here (not just the default): the
+                # two texts are independent and routinely different lengths --
+                # stopping at the shorter one is the intended "common prefix"
+                # behavior, not a mismatch to catch.
                 common = 0
-                for c1, c2 in zip(texts[i], texts[j]):
+                for c1, c2 in zip(texts[i], texts[j], strict=False):
                     if c1.lower() == c2.lower():
                         common += 1
                     else:

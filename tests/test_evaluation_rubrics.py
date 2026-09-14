@@ -16,7 +16,6 @@ from src.benchmark.rubrics import (
 )
 from src.benchmark.rubrics.base import DimensionScore
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -131,7 +130,7 @@ class TestEvaluationRubricBase:
                 return 50.0
 
         with pytest.raises(NotImplementedError):
-            BadRubric().name
+            BadRubric().name  # noqa: B018 -- accessing the property is the point: triggers its getter, which is expected to raise
 
     def test_score_aggregates_weighted_dimensions(self):
         class SimpleRubric(EvaluationRubric):

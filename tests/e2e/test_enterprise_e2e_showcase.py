@@ -20,7 +20,6 @@ from before assuming otherwise.
 """
 import shutil
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -30,7 +29,6 @@ from src.agents.podman_runner import PodmanRunner
 from src.agents.python_language_pod import PythonLanguagePod
 from src.agents.worker_agent import WorkerAgent
 from src.audit.local_client import LocalAuditClient
-from src.audit.schemas import AuditEventType
 from src.audit.store import AuditStore
 from src.core.curator.module import Curator
 from src.core.reflector.module import Reflector
@@ -366,7 +364,7 @@ def test_e2e_playbook_learning_loop(tmp_path):
     )
     assert learned_content in applied_contents, (
         f"CGR3 retrieved the bullet but did not verdict it APPLY "
-        f"(landed in ask_first instead: {[q for q in response.questions]})"
+        f"(landed in ask_first instead: {list(response.questions)})"
     )
 
 

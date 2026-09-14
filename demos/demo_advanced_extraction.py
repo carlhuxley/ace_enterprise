@@ -11,9 +11,9 @@ This is more complex than the simple OAuth example, showing:
 - Production-quality code patterns
 """
 
+import logging
 import sys
 from pathlib import Path
-import logging
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -51,22 +51,22 @@ def demonstrate_real_codebase_extraction():
         print("This demo requires the ML integration to be present.")
         return
 
-    print(f"\n📂 Analyzing:")
+    print("\n📂 Analyzing:")
     print(f"   Code: {code_file}")
     if test_file.exists():
         print(f"   Tests: {test_file}")
     else:
-        print(f"   Tests: Not found (will extract from code structure only)")
+        print("   Tests: Not found (will extract from code structure only)")
 
     # Initialize extraction agent
-    print(f"\n🤖 Initializing Gherkin Extraction Agent...")
+    print("\n🤖 Initializing Gherkin Extraction Agent...")
     agent = GherkinExtractionAgent()
 
     # Analyze the code
-    print(f"\n🔍 Analyzing production code...")
+    print("\n🔍 Analyzing production code...")
     code_analysis = agent.code_analyzer.analyze(code_file)
 
-    print(f"\n📊 Code Analysis Results:")
+    print("\n📊 Code Analysis Results:")
     print(f"   Classes found: {len(code_analysis.classes)}")
     for cls in code_analysis.classes:
         print(f"\n   Class: {cls.name}")
@@ -81,8 +81,8 @@ def demonstrate_real_codebase_extraction():
             print(f"        ... and {len(cls.methods) - 5} more")
 
     # Create a synthetic test scenario based on code structure
-    print(f"\n📝 Generating Gherkin from code structure...")
-    print(f"   (Note: In production, you'd have actual tests)")
+    print("\n📝 Generating Gherkin from code structure...")
+    print("   (Note: In production, you'd have actual tests)")
 
     # For demo purposes, let's extract just the ExperimentDecision class
     decision_class = next((cls for cls in code_analysis.classes if 'Decision' in cls.name), None)
@@ -100,7 +100,7 @@ def demonstrate_real_codebase_extraction():
                 scenario_name = agent._humanize_test_name(f"test_{method.name}")
 
                 # Build a basic scenario
-                given_steps = [f"an ML experiment with a decision to record"]
+                given_steps = ["an ML experiment with a decision to record"]
                 when_steps = [f"I {agent._humanize_name(method.name)}"]
                 then_steps = ["the decision should be properly recorded"]
 
@@ -139,11 +139,11 @@ def demonstrate_real_codebase_extraction():
         print(f"\n✅ Generated Gherkin: {feature_file}")
 
     # Show insights about the codebase
-    print(f"\n" + "="*80)
+    print("\n" + "="*80)
     print("INSIGHTS FROM PRODUCTION CODE")
     print("="*80)
 
-    print(f"\n📈 Complexity Analysis:")
+    print("\n📈 Complexity Analysis:")
     total_methods = sum(len(cls.methods) for cls in code_analysis.classes)
     avg_methods = total_methods / len(code_analysis.classes) if code_analysis.classes else 0
     print(f"   Total classes: {len(code_analysis.classes)}")
@@ -155,7 +155,7 @@ def demonstrate_real_codebase_extraction():
     print(f"   Documentation coverage: {doc_ratio:.0f}%")
 
     # Identify patterns
-    print(f"\n🔍 Patterns Identified:")
+    print("\n🔍 Patterns Identified:")
     dataclass_count = sum(1 for cls in code_analysis.classes if '@dataclass' in str(cls.docstring) or cls.name.endswith('Data') or cls.name.endswith('Result'))
     print(f"   Data models (dataclasses): ~{dataclass_count}")
 
@@ -166,11 +166,11 @@ def demonstrate_real_codebase_extraction():
     print(f"   Type-hinted parameters: {type_hints}")
 
     # Real-world extraction scenarios
-    print(f"\n" + "="*80)
+    print("\n" + "="*80)
     print("REAL-WORLD EXTRACTION SCENARIOS")
     print("="*80)
 
-    print(f"""
+    print("""
 🎯 SCENARIO 1: Refactor ML Knowledge System
    Current: Python implementation
    Goal: Clean up technical debt, improve performance
@@ -215,7 +215,7 @@ def demonstrate_real_codebase_extraction():
    4. Can verify behavior with executable tests
     """)
 
-    print(f"\n" + "="*80)
+    print("\n" + "="*80)
     print("COMPARISON: Simple vs Advanced Extraction")
     print("="*80)
 
@@ -240,11 +240,11 @@ Key Difference:
 - Advanced: Benefits MORE from extraction (complexity → clarity)
     """)
 
-    print(f"\n" + "="*80)
+    print("\n" + "="*80)
     print("NEXT STEPS")
     print("="*80)
 
-    print(f"""
+    print("""
 1. CREATE TESTS for ML knowledge system
    - Write pytest tests capturing current behavior
    - Run extraction again with tests
@@ -264,7 +264,7 @@ Key Difference:
    Extract → Specify → Implement → Validate → Deploy
     """)
 
-    print(f"\n✅ Advanced extraction demo complete!")
+    print("\n✅ Advanced extraction demo complete!")
     print(f"\nGenerated file: {feature_file}")
     print("\nKey Insight: Real codebases benefit MORE from extraction")
     print("Complex logic → Clear specs = Safer refactoring & migration")

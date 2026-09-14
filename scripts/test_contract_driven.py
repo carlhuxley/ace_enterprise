@@ -20,10 +20,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.contracts.contract_driven import (
-    InterfaceContract,
-    TestCase,
     ContractOrchestrator,
     ContractStatus,
+    InterfaceContract,
+    TestCase,
 )
 
 
@@ -232,7 +232,7 @@ def main():
 
         # Get implementation prompt
         prompt = orchestrator.get_implementation_prompt(contract.contract_id)
-        print(f"  Generating implementation...")
+        print("  Generating implementation...")
 
         start = time.time()
         code = implement_with_effgen_agent(prompt)
@@ -309,7 +309,7 @@ def main():
     # Complexity analysis
     print("\nBy Complexity Level:")
     by_complexity = {}
-    for contract, r in zip(contracts, results):
+    for contract, r in zip(contracts, results, strict=True):
         c = contract.estimated_complexity
         if c not in by_complexity:
             by_complexity[c] = {"validated": 0, "total": 0}

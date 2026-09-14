@@ -4,7 +4,6 @@ Tests for OAuth Client
 These existing tests capture the behavior we want to preserve.
 """
 
-import pytest
 from oauth import OAuthClient
 
 

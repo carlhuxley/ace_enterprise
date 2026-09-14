@@ -108,8 +108,8 @@ class DriftDetector:
             return None
 
         lines = result.stdout.splitlines()
-        added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
-        removed = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+        added = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
+        removed = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
         snippet = "\n".join(lines[:10])
 
         return FileDrift(

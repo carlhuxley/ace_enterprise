@@ -84,7 +84,7 @@ def create_collector_app(audit_store: AuditStore) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to store audit event",
-            )
+            ) from e
 
     @app.get("/health")
     async def health_check() -> dict:

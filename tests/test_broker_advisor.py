@@ -1,5 +1,4 @@
 """Tests for BrokerAdvisor - recommends agents by capability fit."""
-import pytest
 
 
 class TestTaskRequirements:

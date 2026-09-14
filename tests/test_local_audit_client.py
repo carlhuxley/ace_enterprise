@@ -1,7 +1,5 @@
 """Tests for local audit client."""
-import pytest
 import tempfile
-from pathlib import Path
 
 
 class TestLocalAuditClient:

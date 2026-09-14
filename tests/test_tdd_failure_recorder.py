@@ -1,13 +1,11 @@
 """Tests for TDDFailureRecorder - self-healing TDD automation."""
 import json
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 
 from src.agents.tdd_failure_recorder import (
-    TDDFailureRecorder,
     FailureContext,
     InterventionRecord,
+    TDDFailureRecorder,
 )
 
 
@@ -24,13 +22,13 @@ class TestTDDFailureRecorder:
         """TDDFailureRecorder accepts optional dependencies."""
         mock_logger = Mock()
         mock_manager = Mock()
-        
+
         recorder = TDDFailureRecorder(
             experiment_logger=mock_logger,
             playbook_manager=mock_manager,
             playbook_id="test-playbook",
         )
-        
+
         assert recorder.experiment_logger == mock_logger
         assert recorder.playbook_manager == mock_manager
         assert recorder.playbook_id == "test-playbook"
@@ -47,10 +45,10 @@ class TestRecordFailure:
             cycle_number=1,
             error_message="Test error",
         )
-        
+
         recorder.record_failure(context)
         assert recorder.failed_cycles == 1
-        
+
         recorder.record_failure(context)
         assert recorder.failed_cycles == 2
 
@@ -58,7 +56,7 @@ class TestRecordFailure:
         """record_failure calls ExperimentLogger with correct params."""
         mock_logger = Mock()
         recorder = TDDFailureRecorder(experiment_logger=mock_logger, beads_path=tmp_path / "issues.jsonl")
-        
+
         context = FailureContext(
             feature_requirement="Build markdown importer",
             cycle_number=3,
@@ -67,12 +65,12 @@ class TestRecordFailure:
             model="gemini-2.0-flash",
             provider="openrouter",
         )
-        
+
         recorder.record_failure(context)
-        
+
         mock_logger.log_experiment.assert_called_once()
         call_kwargs = mock_logger.log_experiment.call_args.kwargs
-        
+
         assert call_kwargs["result"] == "FAILED"
         assert call_kwargs["task_data"]["description"] == "Build markdown importer"
         assert call_kwargs["curator_data"]["manual_intervention_required"] is True
@@ -81,18 +79,18 @@ class TestRecordFailure:
         """record_failure creates a bug issue in beads."""
         beads_file = tmp_path / "issues.jsonl"
         beads_file.write_text("")
-        
+
         recorder = TDDFailureRecorder(beads_path=beads_file)
-        
+
         context = FailureContext(
             feature_requirement="Test feature",
             cycle_number=1,
             error_message="Something failed",
             error_type="RuntimeError",
         )
-        
+
         recorder.record_failure(context, suggested_fix="Fix the thing")
-        
+
         content = beads_file.read_text()
         assert "RuntimeError" in content
         assert "Test feature" in content
@@ -106,16 +104,16 @@ class TestRecordFailure:
             playbook_id="test-pb",
             beads_path=tmp_path / "issues.jsonl",
         )
-        
+
         context = FailureContext(
             feature_requirement="Test feature",
             cycle_number=1,
             error_message="Error details",
             error_type="ValueError",
         )
-        
+
         recorder.record_failure(context)
-        
+
         mock_manager.add_bullet.assert_called_once()
         call_args = mock_manager.add_bullet.call_args
         assert call_args[0][0] == "test-pb"  # playbook_id
@@ -130,7 +128,7 @@ class TestRecordIntervention:
     def test_records_intervention_source(self, tmp_path):
         """record_intervention stores the intervention source."""
         beads_file = tmp_path / "issues.jsonl"
-        
+
         # Create initial issue
         issue = {
             "id": "test-issue",
@@ -138,17 +136,17 @@ class TestRecordIntervention:
             "status": "open",
         }
         beads_file.write_text(json.dumps(issue))
-        
+
         recorder = TDDFailureRecorder(beads_path=beads_file)
-        
+
         intervention = InterventionRecord(
             source="ai_assistant",
             steps_taken=["Fixed imports", "Rewrote tests"],
             tests_written=5,
         )
-        
+
         recorder.record_intervention("tdd-fail-20260408-120000", intervention)
-        
+
         content = beads_file.read_text()
         data = json.loads(content)
         assert data["intervention_source"] == "ai_assistant"
@@ -182,7 +180,7 @@ class TestFailureContext:
             cycle_number=1,
             error_message="Error",
         )
-        
+
         assert context.feature_requirement == "Build X"
         assert context.cycle_number == 1
         assert context.error_message == "Error"
@@ -197,7 +195,7 @@ class TestFailureContext:
             explicit_class_name="MyClass",
             explicit_file_path="src/myclass.py",
         )
-        
+
         assert context.explicit_class_name == "MyClass"
         assert context.explicit_file_path == "src/myclass.py"
 
@@ -214,7 +212,7 @@ class TestInterventionRecord:
     def test_default_values(self):
         """InterventionRecord has sensible defaults."""
         record = InterventionRecord(source="human")
-        
+
         assert record.steps_taken == []
         assert record.files_modified == []
         assert record.tests_written == 0

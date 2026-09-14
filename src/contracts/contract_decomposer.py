@@ -142,8 +142,8 @@ Output as JSON array:
             try:
                 from src.utils.effgen_client import EffGenClient
                 self._llm_client = EffGenClient()
-            except ImportError:
-                raise DecompositionError("No LLM client available")
+            except ImportError as e:
+                raise DecompositionError("No LLM client available") from e
 
         result = self._llm_client.generate(
             prompt=prompt,

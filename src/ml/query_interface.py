@@ -167,7 +167,7 @@ class MLflowKnowledgeQuery:
             start_time=run.info.start_time,
             end_time=run.info.end_time,
             params=run.data.params,
-            metrics={k: v for k, v in run.data.metrics.items()},
+            metrics=dict(run.data.metrics.items()),
             tags=run.data.tags,
             decisions=decisions,
             related_patterns=related_patterns,

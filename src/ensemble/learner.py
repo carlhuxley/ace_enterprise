@@ -904,7 +904,7 @@ Your reconsidered vote:"""
                     perf.votes_with_majority += 1
 
         # Calculate accuracy and update voting weights
-        for model_id, perf in self.model_performance.items():
+        for _model_id, perf in self.model_performance.items():
             if perf.votes_cast > 0:
                 agreement_rate = perf.votes_with_majority / perf.votes_cast
                 perf.accuracy_score = agreement_rate

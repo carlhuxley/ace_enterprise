@@ -62,7 +62,7 @@ def generate_embeddings_for_playbooks():
         bullets_to_embed = []
         bullet_texts = []
 
-        for section_name, bullets in playbook.sections.items():
+        for _section_name, bullets in playbook.sections.items():
             for bullet in bullets:
                 total_bullets += 1
                 if bullet.embedding is None or len(bullet.embedding) == 0:
@@ -72,7 +72,7 @@ def generate_embeddings_for_playbooks():
                     total_skipped += 1
 
         if not bullets_to_embed:
-            print(f"  ✓ All bullets already have embeddings")
+            print("  ✓ All bullets already have embeddings")
             continue
 
         print(f"  Generating embeddings for {len(bullets_to_embed)} bullet(s)...")
@@ -82,7 +82,12 @@ def generate_embeddings_for_playbooks():
             embeddings = embedding_service.embed_batch(bullet_texts)
 
             # Assign embeddings to bullets
-            for bullet, embedding in zip(bullets_to_embed, embeddings):
+            # strict=True: embed_batch() silently drops empty/whitespace-only
+            # texts before encoding, so a length mismatch here would mean a
+            # bullet in bullets_to_embed had none of the text it was queued
+            # under -- surface that loudly rather than silently misaligning
+            # bullets to the wrong embeddings.
+            for bullet, embedding in zip(bullets_to_embed, embeddings, strict=True):
                 bullet.embedding = embedding
                 total_embedded += 1
 
@@ -90,7 +95,7 @@ def generate_embeddings_for_playbooks():
 
             # Save playbook with new embeddings
             pm._save_playbook(playbook_id)
-            print(f"  ✓ Saved playbook with embeddings")
+            print("  ✓ Saved playbook with embeddings")
 
         except Exception as e:
             print(f"  ❌ Error: {e}")
@@ -106,9 +111,9 @@ def generate_embeddings_for_playbooks():
 
     if total_embedded > 0:
         print(f"\n✅ Successfully generated {total_embedded} new embeddings!")
-        print(f"   All playbooks now have semantic search enabled.")
+        print("   All playbooks now have semantic search enabled.")
     else:
-        print(f"\n✓ All bullets already had embeddings.")
+        print("\n✓ All bullets already had embeddings.")
 
 
 if __name__ == "__main__":

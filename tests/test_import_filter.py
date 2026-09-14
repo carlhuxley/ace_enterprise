@@ -1,5 +1,6 @@
 import pytest
-from src.agents.import_filter import ImportFilter, ForbiddenImportError
+
+from src.agents.import_filter import ForbiddenImportError, ImportFilter
 
 
 @pytest.fixture

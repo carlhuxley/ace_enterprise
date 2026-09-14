@@ -10,9 +10,8 @@ Analyzes playbooks to show:
 """
 import json
 import sys
-from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List
+from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -27,7 +26,7 @@ def load_playbook(playbook_path: Path) -> Playbook:
     return Playbook(**data)
 
 
-def audit_all_playbooks(playbook_dir: str = "data/playbooks") -> Dict:
+def audit_all_playbooks(playbook_dir: str = "data/playbooks") -> dict:
     """Audit all playbooks in directory."""
     playbook_path = Path(playbook_dir)
 
@@ -100,7 +99,7 @@ def audit_all_playbooks(playbook_dir: str = "data/playbooks") -> Dict:
     return results
 
 
-def audit_single_playbook(playbook: Playbook, filename: str) -> Dict:
+def audit_single_playbook(playbook: Playbook, filename: str) -> dict:
     """Audit a single playbook for model provenance."""
     stats = {
         "total_bullets": 0,
@@ -153,7 +152,7 @@ def audit_single_playbook(playbook: Playbook, filename: str) -> Dict:
     return stats
 
 
-def print_full_report(results: Dict):
+def print_full_report(results: dict):
     """Print comprehensive audit report."""
     print("=" * 80)
     print("PLAYBOOK AUDIT REPORT - Model Provenance Analysis")

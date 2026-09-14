@@ -11,7 +11,7 @@ from enum import Enum
 from src.storage.schemas import Bullet
 
 
-class ReasoningVerdict(str, Enum):
+class ReasoningVerdict(str, Enum):  # noqa: UP042 -- str(member) differs from StrEnum ("X.FOO" vs "foo"); needs a call-site audit before converting, see ace_enterprise#51
     """
     Verdict from the Reason phase of CGR³.
 

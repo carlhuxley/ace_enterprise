@@ -14,7 +14,6 @@ from src.broker.feedback import (
 )
 from src.broker.performance_aggregator import AgentPerformanceMetrics, PerformanceAggregator
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -211,7 +210,6 @@ class TestBlendedScore:
         assert c.blended_score(0.0, "e1", now=NOW) >= 0.0
 
     def test_reviewer_weight_exceeds_developer(self):
-        c = _collector()
         assert ROLE_WEIGHTS["reviewer"] > ROLE_WEIGHTS["developer"]
 
     def test_feedback_weight_increases_with_more_samples(self):

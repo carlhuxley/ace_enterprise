@@ -5,19 +5,14 @@ These tests capture the actual business behavior of the ML knowledge system,
 enabling high-quality Gherkin extraction.
 """
 
-import pytest
+import sys
 from datetime import datetime
 from pathlib import Path
-import sys
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ml.experiment_knowledge import (
-    ExperimentDecision,
-    ExperimentPattern,
-    MLExperimentKnowledge
-)
+from ml.experiment_knowledge import ExperimentDecision, ExperimentPattern, MLExperimentKnowledge
 
 
 class TestExperimentDecision:

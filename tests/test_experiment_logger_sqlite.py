@@ -66,20 +66,20 @@ def test_log_tdd_cycle_upserts_on_duplicate_experiment_id(tmp_path):
     repo = _SQLiteRepo(path=str(tmp_path / "upsert.db"))
     exp_logger = ExperimentLogger(playbook_version="1.0", repository=repo)
 
-    kwargs = dict(
-        cycle_number=1,
-        requirement="add two numbers",
-        test_name="test_add",
-        test_code="def test_add(): assert add(1,2)==3",
-        implementation_code="def add(a,b): return a+b",
-        red_passed=False,
-        green_passed=False,
-        red_output="1 failed",
-        green_output="1 failed",
-        learned_bullets=[],
-        playbook_id="upsert-test",
-        retry_count=1,
-    )
+    kwargs = {
+        "cycle_number": 1,
+        "requirement": "add two numbers",
+        "test_name": "test_add",
+        "test_code": "def test_add(): assert add(1,2)==3",
+        "implementation_code": "def add(a,b): return a+b",
+        "red_passed": False,
+        "green_passed": False,
+        "red_output": "1 failed",
+        "green_output": "1 failed",
+        "learned_bullets": [],
+        "playbook_id": "upsert-test",
+        "retry_count": 1,
+    }
     exp_logger.log_tdd_cycle(**kwargs)
 
     # Second call — same experiment_id, updated outcome

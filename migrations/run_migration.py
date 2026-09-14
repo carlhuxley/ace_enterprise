@@ -4,9 +4,9 @@ Database Migration Runner
 Runs SQL migrations to set up PostgreSQL with pgvector.
 """
 
+import logging
 import sys
 from pathlib import Path
-import logging
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,7 +22,7 @@ def run_migration(migration_file: Path, conn):
     """Run a SQL migration file."""
     logger.info(f"Running migration: {migration_file.name}")
 
-    with open(migration_file, 'r') as f:
+    with open(migration_file) as f:
         sql = f.read()
 
     cursor = conn.cursor()

@@ -1,8 +1,5 @@
 """Tests for audit chain external anchoring (ace_enterprise-z8n)."""
-import os
 import uuid
-
-import pytest
 
 from src.audit.checkpoint import (
     DEFAULT_CHECKPOINTS_PATH,
@@ -42,6 +39,7 @@ class TestDefaultPathIsRepoRootAnchored:
         zero checkpoints instead of erroring. Must not regress to that."""
         monkeypatch.chdir(tmp_path)
         import importlib
+
         import src.audit.checkpoint as checkpoint_module
         importlib.reload(checkpoint_module)
         try:

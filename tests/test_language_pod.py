@@ -1,11 +1,7 @@
 """Tests for the LanguagePod protocol (ace_enterprise-g1p)."""
-from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
-
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
-
 
 # ---------------------------------------------------------------------------
 # Structural / schema tests
@@ -86,6 +82,7 @@ class TestLanguagePodProtocol:
     def test_no_language_specific_names_in_interface(self):
         """Protocol source must not mention 'python' or 'go' (case-insensitive)."""
         import inspect
+
         import src.agents.language_pod as mod
         source = inspect.getsource(mod)
         # Strip comments and strings for a clean check

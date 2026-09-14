@@ -1,6 +1,4 @@
 """Tests for CapabilityRegistry - anonymous agent capability tracking."""
-import pytest
-from datetime import datetime
 
 
 class TestAgentCapabilities:
