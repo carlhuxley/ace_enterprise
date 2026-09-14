@@ -43,6 +43,16 @@ export default defineConfig({
     reporters: ['verbose', 'json'],
     outputFile: '/tmp/vitest-results.json',
     testTimeout: 10000,
+    // Vitest 3's worker pool spawns enough OS threads/processes (esbuild's
+    // own transform workers included) to blow past the sandbox's
+    // --pids-limit (podman_runner.py), surfacing as a bare
+    // "pthread_create: Resource temporarily unavailable" with no test
+    // output at all (caught upgrading vitest off a CVE-affected 1.x pin —
+    // see the security-upgrade commit). A single-file pulse never needs
+    // parallelism anyway, so pin the pool down instead of loosening the
+    // pids cap for every language pod.
+    minWorkers: 1,
+    maxWorkers: 1,
   },
 });
 """
