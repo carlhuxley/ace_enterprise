@@ -177,6 +177,7 @@ class ModuleTDDBuilder:
         contract: ModuleContract,
         session_id: str | None = None,
         dep_modules: dict[str, str] | None = None,
+        known_project_modules: set[str] | None = None,
     ) -> ModuleBuildResult:
         """Build a complete module from contract using TDD.
 
@@ -188,6 +189,11 @@ class ModuleTDDBuilder:
                 implementer as concrete imports, made available in the
                 validation sandbox, and guarded against local re-declaration
                 (issue #28).
+            known_project_modules: names of every module already built in
+                this project (not just this module's declared dependencies)
+                -- passed through to validate_module so #53's third-party
+                inference never mistakes an undeclared sibling for a PyPI
+                package to install (issue #53 follow-up).
 
         Returns:
             ModuleBuildResult with implementation and metrics
@@ -260,6 +266,7 @@ class ModuleTDDBuilder:
         logger.info("Running integration tests...")
         integration_results, integration_failures = self._run_integration_tests(
             contract=contract, module_code=module_code, dep_modules=dep_modules,
+            known_project_modules=known_project_modules,
         )
         all_integration_passed = all(integration_results.values()) if integration_results else False
 
@@ -281,6 +288,7 @@ class ModuleTDDBuilder:
             total_cycles += 1
             integration_results, integration_failures = self._run_integration_tests(
                 contract=contract, module_code=module_code, dep_modules=dep_modules,
+                known_project_modules=known_project_modules,
             )
             all_integration_passed = (
                 all(integration_results.values()) if integration_results else False
@@ -297,6 +305,7 @@ class ModuleTDDBuilder:
                 total_cycles += 1
                 integration_results, integration_failures = self._run_integration_tests(
                     contract=contract, module_code=module_code, dep_modules=dep_modules,
+                    known_project_modules=known_project_modules,
                 )
                 all_integration_passed = all(integration_results.values()) if integration_results else False
             if self._audit:
@@ -645,6 +654,7 @@ Fix the implementation:
         contract: ModuleContract,
         module_code: str,
         dep_modules: dict[str, str] | None = None,
+        known_project_modules: set[str] | None = None,
     ) -> tuple[dict[str, bool], list[str]]:
         """Run integration tests against the built module.
 
@@ -653,12 +663,17 @@ Fix the implementation:
             module_code: Complete module implementation
             dep_modules: already-built upstream module sources, made available
                 in the sandbox and checked for local re-declaration (issue #28)
+            known_project_modules: every module built so far in this project,
+                for #53's third-party-package inference only (see validate_module)
 
         Returns:
             Tuple of (dict mapping test name to pass/fail, list of failure messages)
         """
         # Use the existing validate_module function which runs integration tests
-        passed, failures = validate_module(contract, module_code, extra_files=dep_modules)
+        passed, failures = validate_module(
+            contract, module_code, extra_files=dep_modules,
+            known_project_modules=known_project_modules,
+        )
 
         # A downstream module that re-defines an upstream symbol still passes a
         # flat-workspace test run — flag it as a failure so the repair loop

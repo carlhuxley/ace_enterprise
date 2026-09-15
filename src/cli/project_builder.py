@@ -247,7 +247,7 @@ class ProjectBuilder:
                 impl_path.unlink(missing_ok=True)
                 test_path.unlink(missing_ok=True)
 
-            outcome = self._build_module(module, built_paths, impl_path, test_path)
+            outcome = self._build_module(module, built_paths, impl_path, test_path, by_name)
 
             # The plan may have under-specified the DAG: if the generated module
             # reaches for an already-built sibling it never declared, add that
@@ -266,7 +266,7 @@ class ProjectBuilder:
                     depends_on=tuple(dict.fromkeys((*module.depends_on, *sorted(missing)))),
                 )
                 by_name[name] = module
-                outcome = self._build_module(module, built_paths, impl_path, test_path)
+                outcome = self._build_module(module, built_paths, impl_path, test_path, by_name)
 
             # A failure already ran Reflector/Curator inside _build_module,
             # writing fresh playbook bullets that diagnose exactly this
@@ -279,7 +279,7 @@ class ProjectBuilder:
                     "%s failed — retrying once with the playbook guidance "
                     "LEARN just wrote", name,
                 )
-                outcome = self._build_module(module, built_paths, impl_path, test_path)
+                outcome = self._build_module(module, built_paths, impl_path, test_path, by_name)
 
             outcomes.append(outcome)
             if outcome.status in (ModuleStatus.BUILT, ModuleStatus.FAILED):
@@ -317,15 +317,26 @@ class ProjectBuilder:
     # ------------------------------------------------------------------
 
     def _build_module(
-        self, module: ModuleSpec, built_paths: list[Path], impl_path: Path, test_path: Path
+        self, module: ModuleSpec, built_paths: list[Path], impl_path: Path, test_path: Path,
+        by_name: dict[str, ModuleSpec],
     ) -> ModuleOutcome:
         from src.contracts.module_tdd_builder import render_integration_tests
 
         context = _context_from_built(built_paths)
-        # Sources of this module's *declared* upstream dependencies — handed to
-        # the builder so it imports them instead of inlining copies (issue #28).
-        dep_names = set(module.depends_on)
+        # Sources of this module's declared upstream dependencies, transitively
+        # -- handed to the builder so it imports them instead of reimplementing
+        # (issue #28), and so a module that only imports a direct dependency
+        # (api -> service) still gets that dependency's own imports (service ->
+        # storage) resolvable in its validation sandbox. A module's code runs
+        # regardless of how many hops away a symbol's provider is declared.
+        dep_names = _transitive_deps(module.name, by_name)
         dep_modules = {p.stem: _safe_read(p) for p in built_paths if p.stem in dep_names}
+        # Every module already built in this project, declared dependency or
+        # not -- for #53's third-party-package inference only, so a
+        # transitive sibling (api -> service -> storage) never gets mistaken
+        # for a PyPI package to install. Doesn't widen what's importable;
+        # that's still dep_modules only, by design.
+        known_project_modules = {p.stem for p in built_paths}
 
         architect = self._make_architect()
         arch = architect.generate_module_contract(
@@ -336,7 +347,9 @@ class ProjectBuilder:
                                  error=f"architect: {arch.error}")
 
         contract = arch.contract
-        build = self._make_builder().build_module(contract, dep_modules=dep_modules)
+        build = self._make_builder().build_module(
+            contract, dep_modules=dep_modules, known_project_modules=known_project_modules,
+        )
 
         # Persist what was generated even on failure, so it can be inspected.
         impl_path.write_text(build.module_code or "")
@@ -472,6 +485,23 @@ def _undeclared_sibling_deps(
     missing |= (imported & set(built_stems) & set(by_name)) - declared
     missing.discard(module.name)
     return missing
+
+
+def _transitive_deps(name: str, by_name: dict[str, ModuleSpec]) -> set[str]:
+    """Every module `name` depends on, directly or through another
+    dependency (api -> service -> storage). `plan.build_order` is already a
+    valid topological order (ProjectPlan rejects cycles), so a plain
+    worklist walk terminates without needing cycle protection here too."""
+    seen: set[str] = set()
+    stack = list(by_name[name].depends_on) if name in by_name else []
+    while stack:
+        dep = stack.pop()
+        if dep in seen:
+            continue
+        seen.add(dep)
+        if dep in by_name:
+            stack.extend(by_name[dep].depends_on)
+    return seen
 
 
 def _context_from_built(built_paths: list[Path]):

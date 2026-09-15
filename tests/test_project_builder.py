@@ -48,9 +48,11 @@ class FakeBuilder:
     def __init__(self, fail: set[str] | None = None):
         self.fail = fail or set()
         self.seen_deps: list[dict[str, str]] = []
+        self.seen_known_project_modules: list[set[str]] = []
 
-    def build_module(self, contract, dep_modules=None):
+    def build_module(self, contract, dep_modules=None, known_project_modules=None):
         self.seen_deps.append(dep_modules or {})
+        self.seen_known_project_modules.append(known_project_modules or set())
         ok = contract.name not in self.fail
         return SimpleNamespace(
             success=ok,
@@ -69,7 +71,7 @@ class FlakyBuilder:
         self.fail_first = fail_first or set()
         self.attempts: dict[str, int] = {}
 
-    def build_module(self, contract, dep_modules=None):
+    def build_module(self, contract, dep_modules=None, known_project_modules=None):
         n = self.attempts.get(contract.name, 0) + 1
         self.attempts[contract.name] = n
         if contract.name in self.fail_first and n == 1:
@@ -90,7 +92,7 @@ class SiblingCallingBuilder:
     def __init__(self):
         self.calls: list[tuple[str, set[str]]] = []
 
-    def build_module(self, contract, dep_modules=None):
+    def build_module(self, contract, dep_modules=None, known_project_modules=None):
         self.calls.append((contract.name, set(dep_modules or {})))
         code = (
             "def web_fn():\n    return core_fn() + 1\n"
@@ -275,6 +277,45 @@ def test_declared_dependency_sources_are_handed_to_the_builder(dirs):
     assert fb.seen_deps[0] == {}                       # db: nothing built yet
     assert set(fb.seen_deps[1]) == {"db"}              # api: db's source only
     assert "db_fn" in fb.seen_deps[1]["db"]
+
+
+def test_known_project_modules_includes_every_built_module_not_just_declared_deps(dirs):
+    """Regression for #53's transitive-sibling bug: `api` only declares
+    `service`, but `known_project_modules` must still include `storage`
+    (built earlier, not api's declared dependency) so third-party-package
+    inference downstream doesn't mistake it for a PyPI package."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("storage", "the storage module"),
+        ModuleSpec("service", "the service module", depends_on=("storage",)),
+        ModuleSpec("api", "the api module", depends_on=("service",)),
+    )
+    fb = FakeBuilder()
+    _builder(dirs, architect=FakeArchitect(), builder=fb).build(plan, root, src, tests)
+
+    by_order = dict(zip(["storage", "service", "api"], fb.seen_known_project_modules, strict=True))
+    assert by_order["storage"] == set()
+    assert by_order["service"] == {"storage"}
+    assert by_order["api"] == {"storage", "service"}  # not just {"service"}
+
+
+def test_transitive_dependency_sources_are_handed_to_the_builder(dirs):
+    """Regression: api only declares service, but service itself imports
+    from storage -- api's validation sandbox needs storage.py mounted too,
+    or `from storage import ...` inside service.py raises ModuleNotFoundError
+    the moment api's code (transitively) runs it. Same failure this
+    resume hit live once #53 stopped masking it as a missing-package error."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("storage", "the storage module"),
+        ModuleSpec("service", "the service module", depends_on=("storage",)),
+        ModuleSpec("api", "the api module", depends_on=("service",)),
+    )
+    fb = FakeBuilder()
+    _builder(dirs, architect=FakeArchitect(), builder=fb).build(plan, root, src, tests)
+
+    by_order = dict(zip(["storage", "service", "api"], fb.seen_deps, strict=True))
+    assert set(by_order["api"]) == {"storage", "service"}  # not just {"service"}
 
 
 def test_undeclared_sibling_call_adds_the_edge_and_rebuilds(dirs):

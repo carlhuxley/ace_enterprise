@@ -943,6 +943,7 @@ _PYTEST_FAIL_RE = re.compile(r"^(?:FAILED|ERROR)\s+test_[\w./]+::(\w+)\b(?:\s*-\
 def validate_module(
     contract: ModuleContract, code: str, orchestrator=None,
     extra_files: dict[str, str] | None = None,
+    known_project_modules: set[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Validate a module implementation by running the SAME pytest file
     `ProjectBuilder` delivers (`render_integration_tests`) as one pytest
@@ -959,6 +960,15 @@ def validate_module(
             to drop alongside `code` in the sandbox, so `from <dep> import ...`
             resolves during validation instead of forcing the implementer to
             inline a copy (issue #28).
+        known_project_modules: names of every module already built in this
+            project, not just this module's *declared* dependencies. Used
+            only to keep #53's third-party-package inference from mistaking
+            a real but undeclared sibling (e.g. a transitive dependency like
+            `api` -> `service` -> `storage`) for a PyPI package to install --
+            a real package sharing that name would otherwise get installed
+            and silently shadow the local module. Doesn't affect which
+            sources are mounted/importable; that's still `extra_files` only,
+            by design (#28/#30).
 
     Returns: (all_passed, list of failure messages)
     """
@@ -987,7 +997,7 @@ def validate_module(
         # #53: install whatever third-party packages this module's generated
         # code actually imports (e.g. flask, gradio) into a cached, derived
         # image instead of only ever offering the stdlib-only base image.
-        local_names = {contract.name, *(extra_files or {})}
+        local_names = {contract.name, *(extra_files or {}), *(known_project_modules or ())}
         deps = infer_third_party_packages([code, *(extra_files or {}).values()], known_local_names=local_names)
         try:
             image = ensure_image_with_packages(deps)

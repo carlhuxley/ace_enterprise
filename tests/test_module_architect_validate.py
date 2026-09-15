@@ -415,6 +415,31 @@ class TestValidateModuleSandboxImage:
 
         assert ensure.call_args[0][0] == frozenset()
 
+    def test_known_project_modules_excludes_transitive_siblings_from_inference(self):
+        """Regression: `api` declares only `service` as a dependency, but
+        `service` itself imports from `storage` -- a real, unrelated PyPI
+        package happens to be named `storage`, so treating it as
+        third-party would install and silently shadow the local sibling
+        instead of failing loudly. known_project_modules (every module
+        built so far, not just this one's declared deps) must exclude it."""
+        code = "from flask import Flask\nfrom service import list_projects\n"
+        with (
+            patch(
+                "src.agents.sandbox_image_builder.ensure_image_with_packages",
+                return_value="localhost/ace-harness-deps:xyz",
+            ) as ensure,
+            patch("src.agents.podman_runner.PodmanRunner"),
+            patch("src.agents.podman_orchestrator.PodmanOrchestrator") as orch_cls,
+        ):
+            orch_cls.return_value.pulse.return_value = MagicMock(passed=True, error=None)
+            validate_module(
+                _contract(), code,
+                extra_files={"service": "from storage import load_data\n"},
+                known_project_modules={"service", "storage"},
+            )
+
+        assert ensure.call_args[0][0] == frozenset({"flask"})  # not "storage"
+
     def test_an_injected_orchestrator_skips_image_inference_entirely(self):
         """Tests (and any other caller) that inject their own orchestrator
         get today's behavior unchanged -- image building only ever happens
