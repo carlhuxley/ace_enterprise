@@ -217,6 +217,13 @@
       ],
       "depends_on": []
     },
+    "src/agents/sandbox_image_builder.py": {
+      "provides": [
+        "SandboxImageBuildError",
+        "ensure_image_with_packages"
+      ],
+      "depends_on": []
+    },
     "src/agents/simulation_invariants.py": {
       "provides": [
         "MetricBound",
@@ -873,6 +880,7 @@
       "depends_on": [
         "src/agents/podman_orchestrator.py",
         "src/agents/podman_runner.py",
+        "src/agents/sandbox_image_builder.py",
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/contracts/module_architect.py",
@@ -882,7 +890,8 @@
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
         "src/utils/dependency_graph.py",
-        "src/utils/llm_client.py"
+        "src/utils/llm_client.py",
+        "src/utils/third_party_imports.py"
       ]
     },
     "src/config/__init__.py": {
@@ -979,10 +988,12 @@
       "depends_on": [
         "src/agents/podman_orchestrator.py",
         "src/agents/podman_runner.py",
+        "src/agents/sandbox_image_builder.py",
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/contracts/module_tdd_builder.py",
-        "src/utils/llm_client.py"
+        "src/utils/llm_client.py",
+        "src/utils/third_party_imports.py"
       ]
     },
     "src/contracts/module_tdd_builder.py": {
@@ -1628,6 +1639,12 @@
     "src/utils/session_log.py": {
       "provides": [
         "SessionLog"
+      ],
+      "depends_on": []
+    },
+    "src/utils/third_party_imports.py": {
+      "provides": [
+        "infer_third_party_packages"
       ],
       "depends_on": []
     },

@@ -5,11 +5,16 @@ as fakes -- no LLM / container.
 """
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.cli.project_builder import MODULE_STATUS_RELPATH, ModuleStatus, ProjectBuilder
+from src.cli.project_builder import (
+    MODULE_STATUS_RELPATH,
+    ModuleStatus,
+    ProjectBuilder,
+    _run_assembly,
+)
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
 from src.contracts.project_architect import ModuleSpec, ProjectPlan
 
@@ -503,3 +508,48 @@ def test_worker_and_repair_fall_back_to_the_base_llm_when_nothing_is_configured(
 def test_escalation_client_is_disabled_by_default():
     pb = ProjectBuilder(llm_client=object())
     assert pb._escalation_llm is None
+
+
+class TestAssemblySandboxImage:
+    """_run_assembly infers third-party imports across every module's real
+    source and installs them into a derived sandbox image (#53). subprocess
+    is mocked throughout -- no real podman needed."""
+
+    def test_sandbox_image_build_failure_short_circuits_with_a_clear_message(self, tmp_path):
+        from src.agents.sandbox_image_builder import SandboxImageBuildError
+
+        src, tests = tmp_path / "src", tmp_path / "tests"
+        src.mkdir()
+        tests.mkdir()
+        (src / "api.py").write_text("from flask import Flask\napp = Flask(__name__)\n")
+        (tests / "test_api.py").write_text("def test_x(): pass\n")
+
+        with patch(
+            "src.agents.sandbox_image_builder.ensure_image_with_packages",
+            side_effect=SandboxImageBuildError("no matching distribution"),
+        ):
+            passed, failures = _run_assembly(tests, src)
+        assert passed is False
+        assert any("sandbox image build failed" in f for f in failures)
+
+    def test_inferred_packages_exclude_sibling_modules(self, tmp_path):
+        src, tests = tmp_path / "src", tmp_path / "tests"
+        src.mkdir()
+        tests.mkdir()
+        (src / "storage.py").write_text("def load_data(): return {}\n")
+        (src / "api.py").write_text("from flask import Flask\nimport storage\n")
+        (tests / "test_api.py").write_text("def test_x(): pass\n")
+
+        with (
+            patch(
+                "src.agents.sandbox_image_builder.ensure_image_with_packages",
+                return_value="localhost/ace-harness-deps:abc123",
+            ) as ensure,
+            patch("src.agents.podman_runner.PodmanRunner") as runner_cls,
+            patch("src.agents.podman_orchestrator.PodmanOrchestrator") as orch_cls,
+        ):
+            orch_cls.return_value.pulse.return_value = MagicMock(passed=True, error="")
+            _run_assembly(tests, src)
+
+        assert ensure.call_args[0][0] == frozenset({"flask"})  # not "storage"
+        assert runner_cls.call_args.kwargs["image"] == "localhost/ace-harness-deps:abc123"

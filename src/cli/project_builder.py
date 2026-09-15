@@ -511,8 +511,20 @@ def _run_assembly(test_dir: Path, src_dir: Path) -> tuple[bool, list[str]]:
 
     from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
     from src.agents.podman_runner import PodmanRunner
+    from src.agents.sandbox_image_builder import SandboxImageBuildError, ensure_image_with_packages
+    from src.utils.third_party_imports import infer_third_party_packages
 
-    orch = PodmanOrchestrator(PodmanRunner(test_timeout=60, writable_workdir=True))
+    # #53: same install-what-the-code-needs approach as validate_module,
+    # applied across every module's source at once for the cross-module
+    # assembly run.
+    local_names = {Path(name).stem for name in files}
+    deps = infer_third_party_packages(list(files.values()), known_local_names=local_names)
+    try:
+        image = ensure_image_with_packages(deps)
+    except SandboxImageBuildError as exc:
+        return False, [f"sandbox image build failed: {exc}"]
+
+    orch = PodmanOrchestrator(PodmanRunner(image=image, test_timeout=60, writable_workdir=True))
     try:
         phase = orch.pulse(files)
     except SecurityBreachError as exc:

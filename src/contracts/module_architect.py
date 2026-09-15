@@ -964,7 +964,9 @@ def validate_module(
     """
     from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
     from src.agents.podman_runner import PodmanRunner
+    from src.agents.sandbox_image_builder import SandboxImageBuildError, ensure_image_with_packages
     from src.contracts.module_tdd_builder import render_integration_tests
+    from src.utils.third_party_imports import infer_third_party_packages
 
     try:
         ast.parse(code)
@@ -982,7 +984,18 @@ def validate_module(
 
     owns_orchestrator = orchestrator is None
     if owns_orchestrator:
-        orchestrator = PodmanOrchestrator(PodmanRunner(test_timeout=30, writable_workdir=True))
+        # #53: install whatever third-party packages this module's generated
+        # code actually imports (e.g. flask, gradio) into a cached, derived
+        # image instead of only ever offering the stdlib-only base image.
+        local_names = {contract.name, *(extra_files or {})}
+        deps = infer_third_party_packages([code, *(extra_files or {}).values()], known_local_names=local_names)
+        try:
+            image = ensure_image_with_packages(deps)
+        except SandboxImageBuildError as exc:
+            return False, [f"sandbox image build failed: {exc}"]
+        orchestrator = PodmanOrchestrator(
+            PodmanRunner(image=image, test_timeout=30, writable_workdir=True)
+        )
     try:
         result = orchestrator.pulse(files)
     except SecurityBreachError as exc:

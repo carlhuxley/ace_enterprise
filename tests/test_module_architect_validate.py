@@ -7,7 +7,7 @@ language pods use. module_architect.py had zero test coverage before this.
 """
 import ast
 import shutil
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -364,3 +364,64 @@ class TestGenerateModuleContractReAsks:
         sent = arch._llm.generate.call_args_list[0][0][0]
         assert "PRIOR LESSONS" in sent
         assert "import upstream modules" in sent
+
+
+class TestValidateModuleSandboxImage:
+    """validate_module infers third-party imports from the code under test
+    and installs them into a derived sandbox image (#53). subprocess is
+    mocked throughout -- no real podman needed, no skip_no_podman marker."""
+
+    def test_sandbox_image_build_failure_short_circuits_with_a_clear_message(self):
+        from src.agents.sandbox_image_builder import SandboxImageBuildError
+
+        code = "from flask import Flask\napp = Flask(__name__)\n"
+        with patch(
+            "src.agents.sandbox_image_builder.ensure_image_with_packages",
+            side_effect=SandboxImageBuildError("no matching distribution"),
+        ):
+            passed, failures = validate_module(_contract(), code)
+        assert passed is False
+        assert any("sandbox image build failed" in f for f in failures)
+        assert any("no matching distribution" in f for f in failures)
+
+    def test_inferred_packages_are_requested_and_the_returned_image_is_used(self):
+        code = "from flask import Flask\napp = Flask(__name__)\n"
+        with (
+            patch(
+                "src.agents.sandbox_image_builder.ensure_image_with_packages",
+                return_value="localhost/ace-harness-deps:abc123",
+            ) as ensure,
+            patch("src.agents.podman_runner.PodmanRunner") as runner_cls,
+            patch("src.agents.podman_orchestrator.PodmanOrchestrator") as orch_cls,
+        ):
+            orch_cls.return_value.pulse.return_value = MagicMock(passed=True, error=None)
+            validate_module(_contract(), code)
+
+        assert ensure.call_args[0][0] == frozenset({"flask"})
+        assert runner_cls.call_args.kwargs["image"] == "localhost/ace-harness-deps:abc123"
+
+    def test_stdlib_only_code_requests_no_packages(self):
+        code = "_count = 0\ndef increment():\n    global _count\n    _count += 1\n    return _count\n"
+        with (
+            patch(
+                "src.agents.sandbox_image_builder.ensure_image_with_packages",
+                return_value="localhost/ace-harness:latest",
+            ) as ensure,
+            patch("src.agents.podman_runner.PodmanRunner"),
+            patch("src.agents.podman_orchestrator.PodmanOrchestrator") as orch_cls,
+        ):
+            orch_cls.return_value.pulse.return_value = MagicMock(passed=True, error=None)
+            validate_module(_contract(), code)
+
+        assert ensure.call_args[0][0] == frozenset()
+
+    def test_an_injected_orchestrator_skips_image_inference_entirely(self):
+        """Tests (and any other caller) that inject their own orchestrator
+        get today's behavior unchanged -- image building only ever happens
+        on the real, owned-orchestrator path."""
+        code = "from flask import Flask\napp = Flask(__name__)\n"
+        fake_orch = MagicMock()
+        fake_orch.pulse.return_value = MagicMock(passed=True, error=None)
+        with patch("src.agents.sandbox_image_builder.ensure_image_with_packages") as ensure:
+            validate_module(_contract(), code, orchestrator=fake_orch)
+        ensure.assert_not_called()

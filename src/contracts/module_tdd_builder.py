@@ -487,7 +487,9 @@ def {func.name}{func.signature}:
 2. It operates on the shared state shown above.
 3. Keep it minimal and correct.
 4. Standard-library imports are fine (json, pathlib, collections, ...) —
-   put them at the top of your output. No third-party packages.
+   put them at the top of your output. Prefer the stdlib, but a third-party
+   package is fine when the requirement genuinely needs one (e.g. a web
+   framework) — the sandbox installs whatever you import (#53).
 5. If you need behaviour from an already-built sibling module listed above,
    import it with the exact line shown — never redefine that function here.
 
@@ -621,8 +623,9 @@ Fix the implementation:
         prompt = (
             "The module below fails some of its integration tests. Rewrite the "
             "COMPLETE module so every test passes. Keep the public function "
-            "signatures. Standard library only, plus the sibling-module imports "
-            "noted below.\n\n"
+            "signatures. Prefer the standard library; a third-party import is "
+            "fine if the module already legitimately needs it, plus the "
+            "sibling-module imports noted below.\n\n"
             f"# {contract.name}.py\n```python\n{module_code}\n```\n\n"
             f"# integration tests\n```python\n{test_file}\n```\n\n"
             f"# failures\n" + "\n".join(f"- {f}" for f in failures) + "\n"
