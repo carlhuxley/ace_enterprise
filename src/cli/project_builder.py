@@ -18,6 +18,7 @@ No generated code executes on the host.
 from __future__ import annotations
 
 import ast
+import json
 import logging
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -29,6 +30,11 @@ from src.contracts.project_architect import ModuleSpec, ProjectPlan
 from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+# Per-module pass/fail record, persisted in the target project so `--resume`
+# can tell a module that actually passed from one that merely left files on
+# disk after failing (issue #52). Relative to project_root.
+MODULE_STATUS_RELPATH = Path(".ace") / "module_status.json"
 
 
 class ModuleStatus(StrEnum):
@@ -197,10 +203,13 @@ class ProjectBuilder:
         src_dir.mkdir(parents=True, exist_ok=True)
         test_dir.mkdir(parents=True, exist_ok=True)
 
+        module_status = _load_module_status(project_root)
+
         by_name = {m.name: m for m in plan.modules}
         outcomes: list[ModuleOutcome] = []
         failed: set[str] = set()
         relinked: set[str] = set()
+        retried: set[str] = set()
         stopped_at: int | None = None
         # Only modules produced by THIS run become context for later modules —
         # never pre-existing files in src_dir.
@@ -221,9 +230,22 @@ class ProjectBuilder:
             test_path = test_dir / f"test_{name}.py"
 
             if resume and impl_path.exists() and test_path.exists():
-                outcomes.append(ModuleOutcome(name, ModuleStatus.SKIPPED))
-                built_paths.append(impl_path)
-                continue
+                # File presence alone isn't proof of success (issue #52) —
+                # ModuleTDDBuilder writes both files before it knows whether
+                # they pass. Only skip when the last recorded outcome for
+                # this module was BUILT; an unrecorded module (pre-existing
+                # project, built before this status file existed) is treated
+                # as before, since we have no evidence either way.
+                if module_status.get(name) != ModuleStatus.FAILED.value:
+                    outcomes.append(ModuleOutcome(name, ModuleStatus.SKIPPED))
+                    built_paths.append(impl_path)
+                    continue
+                logger.info(
+                    "%s previously failed — clearing stale files and rebuilding "
+                    "despite --resume", name,
+                )
+                impl_path.unlink(missing_ok=True)
+                test_path.unlink(missing_ok=True)
 
             outcome = self._build_module(module, built_paths, impl_path, test_path)
 
@@ -246,7 +268,23 @@ class ProjectBuilder:
                 by_name[name] = module
                 outcome = self._build_module(module, built_paths, impl_path, test_path)
 
+            # A failure already ran Reflector/Curator inside _build_module,
+            # writing fresh playbook bullets that diagnose exactly this
+            # failure. Retry once, bounded, so that guidance gets used
+            # immediately instead of only helping a later, separate run
+            # (issue #52).
+            if outcome.status is ModuleStatus.FAILED and name not in retried:
+                retried.add(name)
+                logger.warning(
+                    "%s failed — retrying once with the playbook guidance "
+                    "LEARN just wrote", name,
+                )
+                outcome = self._build_module(module, built_paths, impl_path, test_path)
+
             outcomes.append(outcome)
+            if outcome.status in (ModuleStatus.BUILT, ModuleStatus.FAILED):
+                module_status[name] = outcome.status.value
+                _save_module_status(project_root, module_status)
             if outcome.status is ModuleStatus.BUILT:
                 built_paths.append(impl_path)
             if outcome.status is ModuleStatus.FAILED:
@@ -494,3 +532,20 @@ def _safe_read(path: Path) -> str:
         return path.read_text()
     except OSError:
         return ""
+
+
+def _load_module_status(project_root: Path) -> dict[str, str]:
+    path = project_root / MODULE_STATUS_RELPATH
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_module_status(project_root: Path, status: dict[str, str]) -> None:
+    path = project_root / MODULE_STATUS_RELPATH
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(status, indent=2, sort_keys=True))
+    except OSError:
+        logger.warning("ProjectBuilder: failed to persist module status", exc_info=True)

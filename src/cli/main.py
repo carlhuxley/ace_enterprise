@@ -112,7 +112,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     proj.add_argument(
         "--resume", action="store_true",
-        help="Skip modules whose files already exist",
+        help="Skip modules that already built successfully; rebuild ones "
+             "that previously failed",
     )
     proj.add_argument(
         "--keep-going", action="store_true",

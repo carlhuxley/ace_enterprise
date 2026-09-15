@@ -3,12 +3,13 @@
 ModuleArchitect, ModuleTDDBuilder and the Podman assembly run are all injected
 as fakes -- no LLM / container.
 """
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from src.cli.project_builder import ModuleStatus, ProjectBuilder
+from src.cli.project_builder import MODULE_STATUS_RELPATH, ModuleStatus, ProjectBuilder
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
 from src.contracts.project_architect import ModuleSpec, ProjectPlan
 
@@ -52,6 +53,28 @@ class FakeBuilder:
             total_cycles=2,
             error=None if ok else "green failed",
             learned_bullets=["b1", "b2"] if ok else [],
+        )
+
+
+class FlakyBuilder:
+    """Fails a module's first build, succeeds on the next attempt --
+    models the shape of a bug Reflector/Curator's fresh bullets actually fix."""
+
+    def __init__(self, fail_first: set[str] | None = None):
+        self.fail_first = fail_first or set()
+        self.attempts: dict[str, int] = {}
+
+    def build_module(self, contract, dep_modules=None):
+        n = self.attempts.get(contract.name, 0) + 1
+        self.attempts[contract.name] = n
+        if contract.name in self.fail_first and n == 1:
+            return SimpleNamespace(
+                success=False, module_code="", total_cycles=1,
+                error="green failed", learned_bullets=[],
+            )
+        return SimpleNamespace(
+            success=True, module_code=f"def {contract.name}_fn():\n    return 1\n",
+            total_cycles=1, error=None, learned_bullets=["b1"],
         )
 
 
@@ -157,6 +180,65 @@ def test_resume_skips_modules_whose_files_exist(dirs):
     assert by_name["db"].status is ModuleStatus.SKIPPED
     assert by_name["api"].status is ModuleStatus.BUILT
     assert [r for r, _ in arch.seen] == ["the api module"]  # db never sent to architect
+
+
+def test_a_failed_module_is_retried_once_automatically(dirs):
+    """Issue #52: a failure already ran Reflector/Curator, writing fresh
+    playbook bullets diagnosing it -- retry once with that guidance instead
+    of stopping immediately."""
+    root, src, tests = dirs
+    plan = _plan(ModuleSpec("db", "the db module"))
+    fb = FlakyBuilder(fail_first={"db"})
+    pb = _builder(dirs, architect=FakeArchitect(), builder=fb)
+    result = pb.build(plan, root, src, tests, stop_on_failure=True)
+
+    assert result.outcomes[0].status is ModuleStatus.BUILT
+    assert fb.attempts["db"] == 2
+
+
+def test_a_permanently_failing_module_is_only_retried_once(dirs):
+    root, src, tests = dirs
+    plan = _plan(ModuleSpec("db", "the db module"))
+    fb = FakeBuilder(fail={"db"})
+    pb = _builder(dirs, architect=FakeArchitect(), builder=fb)
+    result = pb.build(plan, root, src, tests, stop_on_failure=True)
+
+    assert result.outcomes[0].status is ModuleStatus.FAILED
+    assert len(fb.seen_deps) == 2  # one retry, not an unbounded loop
+
+
+def test_module_status_is_persisted_after_build(dirs):
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("db", "the db module"),
+        ModuleSpec("api", "the api module", depends_on=("db",)),
+    )
+    pb = _builder(dirs, architect=FakeArchitect(), builder=FakeBuilder(fail={"api"}))
+    pb.build(plan, root, src, tests, stop_on_failure=False)
+
+    status = json.loads((root / MODULE_STATUS_RELPATH).read_text())
+    assert status == {"db": "built", "api": "failed"}
+
+
+def test_resume_rebuilds_a_module_that_previously_failed(dirs):
+    """A stale src/test file pair left behind by a failed build must not be
+    treated as a pass just because --resume sees files on disk (issue #52)."""
+    root, src, tests = dirs
+    src.mkdir()
+    tests.mkdir()
+    (src / "db.py").write_text("# broken from a prior failed attempt\n")
+    (tests / "test_db.py").write_text("def test_x(): assert False\n")
+    (root / MODULE_STATUS_RELPATH).parent.mkdir(parents=True, exist_ok=True)
+    (root / MODULE_STATUS_RELPATH).write_text(json.dumps({"db": "failed"}))
+
+    plan = _plan(ModuleSpec("db", "the db module"))
+    arch = FakeArchitect()
+    pb = _builder(dirs, architect=arch, builder=FakeBuilder())
+    result = pb.build(plan, root, src, tests, resume=True)
+
+    assert result.outcomes[0].status is ModuleStatus.BUILT
+    assert arch.seen  # rebuilt for real, not skipped
+    assert "db_fn" in (src / "db.py").read_text()  # stale content replaced
 
 
 def test_later_modules_get_prior_modules_as_context(dirs):
