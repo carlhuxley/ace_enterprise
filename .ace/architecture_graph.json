@@ -973,6 +973,7 @@
       "provides": [
         "ExistingFunction",
         "SchemaTable",
+        "SharedConstant",
         "CodebaseContext",
         "ModuleDependencies",
         "FunctionSpec",

@@ -57,6 +57,18 @@ class SchemaTable:
 
 
 @dataclass
+class SharedConstant:
+    """A module-level UPPER_SNAKE_CASE constant an already-built sibling
+    module defines (a file path, a table/section name, ...) -- surfaced so a
+    later module reuses the same literal instead of independently inventing
+    a different one for the same purpose (e.g. two modules each hardcoding
+    their own DATA_FILE name and silently reading/writing different files)."""
+    name: str
+    value: str
+    module: str  # Which module it's in
+
+
+@dataclass
 class CodebaseContext:
     """Context about the existing codebase for the architect.
 
@@ -64,11 +76,13 @@ class CodebaseContext:
     - What functions already exist (to call them, not duplicate)
     - Database schema (to write correct queries)
     - Patterns to follow (conventions, return types)
+    - Shared constants already in use (to reuse, not diverge from)
     """
     existing_functions: list[ExistingFunction] = field(default_factory=list)
     schema: list[SchemaTable] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)  # e.g., "Use get_db() for connections"
     imports: list[str] = field(default_factory=list)  # Required imports
+    constants: list[SharedConstant] = field(default_factory=list)
 
 
 @dataclass
@@ -322,6 +336,10 @@ Design the requested module. You must:
 2. Follow the SAME conventions (return types, naming)
 3. Use ONLY the Python standard library otherwise -- there is NO database and
    NO framework
+4. REUSE any Shared Constant above with the same purpose as one you need
+   (e.g. a data file path, a section/table name) -- do NOT invent a
+   different literal value for the same thing another module already
+   defined; two modules disagreeing on a shared value is a bug
 
 ## HARD RULES FOR integration_tests
 
@@ -543,6 +561,19 @@ class ModuleArchitect:
             for f in context.existing_functions:
                 funcs.append(f"  - {f.name}{f.signature}: {f.docstring}")
             sections.append("### Existing Functions (you can call these)\n" + "\n".join(funcs))
+
+        # Shared constants (#56 -- reuse the same value, don't invent a
+        # different literal for the same purpose)
+        if context.constants:
+            consts = []
+            for c in context.constants:
+                consts.append(f"  - {c.name} = {c.value}  (defined in {c.module})")
+            sections.append(
+                "### Shared Constants (reuse the EXACT SAME value if you need "
+                "a constant for the same purpose -- e.g. a file path or "
+                "section name already used by a sibling module)\n"
+                + "\n".join(consts)
+            )
 
         # Database schema
         if context.schema:
@@ -834,6 +865,26 @@ def extract_context_from_file(file_path: str) -> CodebaseContext:
     functions = []
     tables = set()
     patterns = []
+    constants = []
+
+    # Module-level UPPER_SNAKE_CASE constants (top-level body only -- not
+    # nested inside a function/class, and not this module's private mutable
+    # shared_state like `_count = 0`, which the naming convention excludes).
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        if (
+            isinstance(target, ast.Name)
+            and re.match(r"^[A-Z][A-Z0-9_]*$", target.id)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, (str, int, float, bool))
+        ):
+            constants.append(SharedConstant(
+                name=target.id, value=repr(node.value.value), module=module_name,
+            ))
 
     for node in ast.walk(tree):
         # Extract function definitions
@@ -893,6 +944,7 @@ def extract_context_from_file(file_path: str) -> CodebaseContext:
         existing_functions=functions,
         schema=schema,
         patterns=patterns,
+        constants=constants,
     )
 
 

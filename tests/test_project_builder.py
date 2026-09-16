@@ -85,6 +85,16 @@ class FlakyBuilder:
         )
 
 
+class ConstantEmittingBuilder:
+    """Every module it builds defines the same top-level constant -- models
+    the #56 shape (two independently-built modules each needing "the data
+    file path" as a constant)."""
+
+    def build_module(self, contract, dep_modules=None, known_project_modules=None):
+        code = f"DATA_FILE: str = 'shared.json'\ndef {contract.name}_fn():\n    return 1\n"
+        return SimpleNamespace(success=True, module_code=code, total_cycles=1, error=None)
+
+
 class SiblingCallingBuilder:
     """Emits `web` code that calls core_fn() regardless of what the plan
     declared — models the #30 'plan under-specified the DAG' shape."""
@@ -261,6 +271,28 @@ def test_later_modules_get_prior_modules_as_context(dirs):
     contexts = dict(arch.seen)
     assert contexts["the db module"] is None                 # nothing built yet
     assert contexts["the api module"] is not None            # db.py scanned into context
+
+
+def test_later_modules_get_prior_shared_constants_as_context(dirs):
+    """Regression for #56: a sibling module's already-defined constant
+    (e.g. DATA_FILE) is surfaced to the next module's architect, so it can
+    reuse the same value instead of independently picking a different one."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("storage", "the storage module"),
+        ModuleSpec("api", "the api module", depends_on=("storage",)),
+    )
+    arch = FakeArchitect()
+    pb = _builder(dirs, architect=arch, builder=ConstantEmittingBuilder())
+    pb.build(plan, root, src, tests)
+
+    contexts = dict(arch.seen)
+    assert contexts["the storage module"] is None
+    api_ctx = contexts["the api module"]
+    assert api_ctx is not None
+    assert any(
+        c.name == "DATA_FILE" and c.value == "'shared.json'" for c in api_ctx.constants
+    )
 
 
 def test_declared_dependency_sources_are_handed_to_the_builder(dirs):

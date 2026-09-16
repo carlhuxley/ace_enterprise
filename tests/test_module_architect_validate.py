@@ -18,7 +18,9 @@ from src.contracts.module_architect import (
     IntegrationTest,
     ModuleArchitect,
     ModuleContract,
+    SharedConstant,
     check_contract_consistency,
+    extract_context_from_file,
     validate_module,
 )
 
@@ -450,3 +452,86 @@ class TestValidateModuleSandboxImage:
         with patch("src.agents.sandbox_image_builder.ensure_image_with_packages") as ensure:
             validate_module(_contract(), code, orchestrator=fake_orch)
         ensure.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# extract_context_from_file / _format_context -- shared constants (#56)
+#
+# Two independently-built sibling modules each hardcoding their own literal
+# for the same purpose (e.g. api.py's DATA_FILE = 'a.json' vs ui.py's
+# DATA_FILE = 'b.json') silently reads/writes different files with no error
+# anywhere -- the architect had no visibility into constants a sibling
+# module already defined, only its functions. Surfacing them (advisory,
+# same as existing_functions/patterns) is the cheap fix; a hard consistency
+# gate is a separate, bigger follow-up if this keeps recurring.
+# ---------------------------------------------------------------------------
+
+class TestExtractContextConstants:
+    def test_upper_snake_case_constant_is_extracted(self, tmp_path):
+        f = tmp_path / "storage.py"
+        f.write_text("DATA_FILE: str = 'aceenterprise_data.json'\n")
+        ctx = extract_context_from_file(str(f))
+        assert ctx.constants == [
+            SharedConstant(name="DATA_FILE", value="'aceenterprise_data.json'", module="storage")
+        ]
+
+    def test_plain_assign_without_annotation_is_also_extracted(self, tmp_path):
+        f = tmp_path / "config.py"
+        f.write_text("MAX_RETRIES = 3\n")
+        ctx = extract_context_from_file(str(f))
+        assert ctx.constants == [SharedConstant(name="MAX_RETRIES", value="3", module="config")]
+
+    def test_lowercase_module_level_variable_is_not_treated_as_a_constant(self, tmp_path):
+        """Private mutable shared_state (`_count = 0`, `cache = {}`) isn't a
+        constant to propagate -- only the UPPER_SNAKE_CASE convention counts."""
+        f = tmp_path / "counter.py"
+        f.write_text("_count = 0\ncache = {}\n")
+        ctx = extract_context_from_file(str(f))
+        assert ctx.constants == []
+
+    def test_constant_inside_a_function_is_not_extracted(self, tmp_path):
+        f = tmp_path / "mod.py"
+        f.write_text("def foo():\n    LOCAL = 1\n    return LOCAL\n")
+        ctx = extract_context_from_file(str(f))
+        assert ctx.constants == []
+
+    def test_non_literal_value_is_not_extracted(self, tmp_path):
+        """A constant whose value is an expression, not a literal, isn't
+        safely summarizable as `name = value` -- skip it rather than guess."""
+        f = tmp_path / "mod.py"
+        f.write_text("BASE = some_call()\n")
+        ctx = extract_context_from_file(str(f))
+        assert ctx.constants == []
+
+    def test_multiple_constants_all_extracted(self, tmp_path):
+        f = tmp_path / "config.py"
+        f.write_text("DATA_FILE = 'x.json'\nMAX_ITEMS = 100\nDEBUG = False\n")
+        ctx = extract_context_from_file(str(f))
+        assert {c.name for c in ctx.constants} == {"DATA_FILE", "MAX_ITEMS", "DEBUG"}
+
+
+class TestFormatContextConstants:
+    def _architect(self):
+        return ModuleArchitect(llm_client=MagicMock(), model_id="test")
+
+    def test_constants_section_rendered_when_present(self):
+        arch = self._architect()
+        ctx = CodebaseContext(constants=[
+            SharedConstant(name="DATA_FILE", value="'aceenterprise_data.json'", module="storage"),
+        ])
+        rendered = arch._format_context(ctx)
+        assert "Shared Constants" in rendered
+        assert "DATA_FILE = 'aceenterprise_data.json'" in rendered
+        assert "storage" in rendered
+
+    def test_no_constants_section_when_absent(self):
+        arch = self._architect()
+        rendered = arch._format_context(CodebaseContext(existing_functions=[
+            ExistingFunction(name="foo", signature="()", docstring="d", module="m"),
+        ]))
+        assert "Shared Constants" not in rendered
+
+    def test_context_prompt_instructs_reuse_of_shared_constants(self):
+        from src.contracts.module_architect import MODULE_ARCHITECT_CONTEXT_PROMPT
+        assert "REUSE" in MODULE_ARCHITECT_CONTEXT_PROMPT
+        assert "Shared Constant" in MODULE_ARCHITECT_CONTEXT_PROMPT

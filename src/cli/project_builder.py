@@ -506,8 +506,10 @@ def _transitive_deps(name: str, by_name: dict[str, ModuleSpec]) -> set[str]:
 
 def _context_from_built(built_paths: list[Path]):
     """A CodebaseContext from the modules built earlier in this run (their
-    function signatures), so a later module can import and call them. None
-    when nothing has been built yet."""
+    function signatures and shared constants), so a later module can import
+    and call them -- and reuse the same constant instead of independently
+    picking a different literal for the same purpose (#56). None when
+    nothing has been built yet."""
     if not built_paths:
         return None
     from src.contracts.module_architect import CodebaseContext, extract_context_from_file
@@ -520,7 +522,8 @@ def _context_from_built(built_paths: list[Path]):
             continue
         ctx.existing_functions.extend(got.existing_functions)
         ctx.patterns.extend(p for p in got.patterns if p not in ctx.patterns)
-    return ctx if ctx.existing_functions else None
+        ctx.constants.extend(got.constants)
+    return ctx if (ctx.existing_functions or ctx.constants) else None
 
 
 def _run_assembly(test_dir: Path, src_dir: Path) -> tuple[bool, list[str]]:
