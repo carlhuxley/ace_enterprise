@@ -175,6 +175,126 @@ class TestRunGreen:
 
 
 # ---------------------------------------------------------------------------
+# run_green — patch mode (#53 diff-based-editing follow-up)
+#
+# Opt-in via use_patch_mode=True. Only engages when there's an existing
+# implementation to patch against; a fresh file still goes through
+# generate_implementation. A patch that fails to apply (bad SEARCH text,
+# invalid resulting Python) is rejected deterministically, host-side,
+# before the sandbox is ever touched, and counts toward an escalation
+# threshold that falls back to whole-file generation.
+# ---------------------------------------------------------------------------
+
+_SR_BLOCK = "<<<<<<< SEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE"
+
+
+def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2):
+    worker = MagicMock()
+    worker.llm_client = MagicMock()
+    worker.llm_client.generate.return_value = {
+        "content": "x", "prompt_tokens": 10, "completion_tokens": 0,
+        "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o",
+    }
+
+    def _generate_patch(*args, **kwargs):
+        worker.llm_client.generate("patch prompt")
+        return _SR_BLOCK
+
+    def _generate_implementation(*args, **kwargs):
+        worker.llm_client.generate("impl prompt")
+        return "def foo():\n    return 99  # whole-file fallback\n"
+
+    worker.generate_patch.side_effect = _generate_patch
+    worker.generate_implementation.side_effect = _generate_implementation
+
+    orchestrator = MagicMock()
+    orchestrator.pulse.return_value = pulse_result or PhaseResult(
+        passed=True, output="1 passed", error=None
+    )
+    return PythonLanguagePod(
+        worker, tmp_path, orchestrator,
+        use_patch_mode=True, patch_escalation_threshold=patch_escalation_threshold,
+    )
+
+
+class TestRunGreenPatchMode:
+    def test_first_green_with_no_existing_file_uses_whole_file_generation(self, tmp_path):
+        """Nothing to patch against yet -- patch mode must not engage."""
+        pod = make_patch_pod(tmp_path)
+        pod.run_green(spec(tmp_path))
+        pod._worker.generate_patch.assert_not_called()
+        pod._worker.generate_implementation.assert_called_once()
+
+    def test_existing_file_uses_patch_mode(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path)
+        pod.run_green(s)
+        pod._worker.generate_patch.assert_called_once()
+        pod._worker.generate_implementation.assert_not_called()
+
+    def test_successful_patch_is_pulsed_and_committed(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed"))
+        result = pod.run_green(s)
+        assert result.passed
+        assert "return 2" in s.implementation_file.read_text()
+
+    def test_patch_that_fails_to_apply_never_reaches_the_sandbox(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path)
+        # SEARCH text that will never match this file, even fuzzily.
+        pod._worker.generate_patch.side_effect = (
+            lambda *a, **kw: "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        )
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_repeated_patch_failures_escalate_to_whole_file_generation(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path, patch_escalation_threshold=2)
+        pod._worker.generate_patch.side_effect = (
+            lambda *a, **kw: "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        )
+
+        result1 = pod.run_green(s)
+        assert result1.error.startswith("PATCH_APPLY_FAILED:")
+        result2 = pod.run_green(s)
+        assert result2.error.startswith("PATCH_APPLY_FAILED:")
+        assert pod._worker.generate_patch.call_count == 2
+
+        # Threshold (2) now reached -- the next attempt falls back to whole-file.
+        pod.run_green(s)
+        pod._worker.generate_implementation.assert_called_once()
+        assert pod._worker.generate_patch.call_count == 2  # not called a 3rd time
+
+    def test_success_resets_the_escalation_counter(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path, patch_escalation_threshold=2)
+        bad_patch = "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: bad_patch
+        pod.run_green(s)  # 1 failure
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: _SR_BLOCK
+        pod.run_green(s)  # succeeds, resets counter
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: bad_patch
+        result = pod.run_green(s)  # still under threshold again -- patch mode, not fallback
+        pod._worker.generate_patch.assert_called()
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+
+
+# ---------------------------------------------------------------------------
 # run_refactor
 #
 # Calls worker.generate_refactor(spec, current_code=...) to produce a

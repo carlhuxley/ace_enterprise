@@ -2,7 +2,7 @@
 
 # Architecture Dependency Graph
 
-162 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
+163 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
 
 Deterministically derived from real `import` statements (AST-parsed), not hand-maintained or LLM-narrated -- see `src/utils/dependency_graph.py`.
 
@@ -166,10 +166,11 @@ flowchart TD
     n155["import_validator"]
     n156["llm_client"]
     n157["mermaid_validation"]
-    n158["playbook_enforcer"]
-    n159["session_log"]
-    n160["third_party_imports"]
-    n161["topo"]
+    n158["patcher"]
+    n159["playbook_enforcer"]
+    n160["session_log"]
+    n161["third_party_imports"]
+    n162["topo"]
     n1 --> n57
     n2 --> n15
     n2 --> n16
@@ -211,6 +212,7 @@ flowchart TD
     n18 --> n8
     n18 --> n11
     n18 --> n13
+    n18 --> n158
     n22 --> n21
     n22 --> n26
     n22 --> n27
@@ -333,7 +335,7 @@ flowchart TD
     n85 --> n84
     n85 --> n86
     n85 --> n96
-    n85 --> n161
+    n85 --> n162
     n86 --> n13
     n86 --> n14
     n86 --> n20
@@ -347,7 +349,7 @@ flowchart TD
     n86 --> n122
     n86 --> n150
     n86 --> n156
-    n86 --> n160
+    n86 --> n161
     n89 --> n90
     n89 --> n91
     n89 --> n92
@@ -370,7 +372,7 @@ flowchart TD
     n94 --> n57
     n94 --> n95
     n94 --> n156
-    n94 --> n160
+    n94 --> n161
     n95 --> n56
     n95 --> n57
     n95 --> n94
@@ -380,7 +382,7 @@ flowchart TD
     n96 --> n56
     n96 --> n57
     n96 --> n156
-    n96 --> n161
+    n96 --> n162
     n97 --> n99
     n97 --> n101
     n97 --> n103
@@ -484,5 +486,5 @@ flowchart TD
     n144 --> n152
     n152 --> n88
     n156 --> n88
-    n158 --> n159
+    n159 --> n160
 ```

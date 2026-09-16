@@ -188,6 +188,60 @@ class TestGenerateRefactor:
 
 
 # ---------------------------------------------------------------------------
+# WorkerAgent — generate_patch (#53 diff-based-editing follow-up)
+# ---------------------------------------------------------------------------
+
+_SR_BLOCK = "<<<<<<< SEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE"
+
+
+class TestGeneratePatch:
+    def test_returns_raw_content_not_code_extracted(self, tmp_path):
+        """Unlike generate_test/generate_implementation/generate_refactor,
+        the payload is SEARCH/REPLACE markers, not a source file -- it must
+        come back verbatim, not run through the ```python fence extractor."""
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        result = w.generate_patch(_spec(tmp_path), existing_code="def foo():\n    return 1\n")
+        assert result == _SR_BLOCK
+
+    def test_calls_llm_once(self, tmp_path):
+        client = _llm(content=_SR_BLOCK)
+        w = WorkerAgent(client)
+        w.generate_patch(_spec(tmp_path), existing_code="def foo():\n    return 1\n")
+        client.generate.assert_called_once()
+
+    def test_prompt_includes_existing_code(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(_spec(tmp_path), existing_code="def foo():\n    return 1\n")
+        assert "def foo():\n    return 1" in _captured_prompt(w)
+
+    def test_prompt_includes_error_output_when_provided(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(
+            _spec(tmp_path), existing_code="x = 1", error_output="AssertionError: boom",
+        )
+        assert "AssertionError: boom" in _captured_prompt(w)
+
+    def test_prompt_includes_test_code_when_provided(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(_spec(tmp_path), existing_code="x = 1", test_code="def test_x(): assert x == 1")
+        assert "def test_x(): assert x == 1" in _captured_prompt(w)
+
+    def test_prompt_instructs_search_replace_format_not_whole_file(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(_spec(tmp_path), existing_code="x = 1")
+        prompt = _captured_prompt(w)
+        assert "SEARCH/REPLACE" in prompt
+        assert "do NOT output the whole file" in prompt
+
+    def test_prompt_includes_playbook_bullets(self, tmp_path):
+        pm = MagicMock()
+        pm.get_bullets.return_value = ["always validate input"]
+        w = WorkerAgent(_llm(content=_SR_BLOCK), playbook_manager=pm)
+        w.generate_patch(_spec(tmp_path), existing_code="x = 1")
+        assert "always validate input" in _captured_prompt(w)
+
+
+# ---------------------------------------------------------------------------
 # PythonLanguagePod (worker + orchestrator construction)
 # ---------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ import os
 from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+from src.utils.patcher import apply_patch
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,9 @@ class PythonLanguagePod:
         worker_agent,
         project_root,
         orchestrator: PodmanOrchestrator,
+        *,
+        use_patch_mode: bool = False,
+        patch_escalation_threshold: int = 2,
     ) -> None:
         self._worker = worker_agent
         self._orchestrator = orchestrator
@@ -48,6 +52,16 @@ class PythonLanguagePod:
         self._actual_model: str | None = None
         self._requested_model: str | None = None
         self._provider: str | None = None
+        # Diff-based GREEN (search/replace patching instead of whole-file
+        # rewrite), opt-in -- off by default so existing behavior/tests are
+        # unaffected. Only used when there's an existing implementation to
+        # patch against; the very first GREEN for a file always writes it
+        # fresh. After `patch_escalation_threshold` consecutive patch
+        # failures on the same file, falls back to whole-file generation for
+        # that file until a patch attempt succeeds again.
+        self._use_patch_mode = use_patch_mode
+        self._patch_escalation_threshold = patch_escalation_threshold
+        self._patch_failure_counts: dict[str, int] = {}
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -92,14 +106,50 @@ class PythonLanguagePod:
             if spec.implementation_file.exists()
             else ""
         )
+
+        file_key = str(spec.implementation_file)
+        use_patch = (
+            self._use_patch_mode
+            and bool(existing_impl)
+            and self._patch_failure_counts.get(file_key, 0) < self._patch_escalation_threshold
+        )
+
+        if use_patch:
+            try:
+                patch_text = self._worker.generate_patch(
+                    spec,
+                    existing_code=existing_impl,
+                    error_output=spec.error_output,
+                    test_code=test_code,
+                )
+            except Exception as exc:
+                self._record_usage(spec.cycle_number)
+                return PhaseResult(passed=False, output="", error=str(exc))
+            patch_result = apply_patch(existing_impl, patch_text)
+            if not patch_result.success:
+                # Deterministic, host-side rejection -- never reaches the
+                # sandbox. Counted toward escalation and fed back as normal
+                # retry feedback (TDDCycleRunner threads PhaseResult.error
+                # into the next attempt's spec.error_output), so the worker
+                # sees exactly which SEARCH block failed and why.
+                self._patch_failure_counts[file_key] = self._patch_failure_counts.get(file_key, 0) + 1
+                self._record_usage(spec.cycle_number)
+                return PhaseResult(passed=False, output="", error=f"PATCH_APPLY_FAILED: {patch_result.error}")
+            impl_code = patch_result.code
+        else:
+            try:
+                impl_code = self._worker.generate_implementation(
+                    spec,
+                    error_output=spec.error_output,
+                    failing_test_ids=[str(spec.test_file)],
+                    test_code=test_code,
+                    existing_code=existing_impl,
+                )
+            except Exception as exc:
+                self._record_usage(spec.cycle_number)
+                return PhaseResult(passed=False, output="", error=str(exc))
+
         try:
-            impl_code = self._worker.generate_implementation(
-                spec,
-                error_output=spec.error_output,
-                failing_test_ids=[str(spec.test_file)],
-                test_code=test_code,
-                existing_code=existing_impl,
-            )
             _import_filter.check(impl_code)
         except ForbiddenImportError as exc:
             self._record_usage(spec.cycle_number)
@@ -120,6 +170,7 @@ class PythonLanguagePod:
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
+            self._patch_failure_counts[file_key] = 0
         self._record_usage(spec.cycle_number)
         return result
 

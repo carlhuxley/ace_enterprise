@@ -85,6 +85,23 @@ class WorkerAgent:
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
+    def generate_patch(
+        self,
+        spec: PodSpec,
+        *,
+        existing_code: str,
+        error_output: str = "",
+        test_code: str = "",
+    ) -> str:
+        """SEARCH/REPLACE-block edit of `existing_code` (src/utils/patcher.py
+        applies it deterministically, host-side) rather than a whole-file
+        rewrite. Returns the raw response text -- not code-fence-extracted,
+        since the payload is SEARCH/REPLACE markers, not a source file."""
+        bullets = self._get_bullets()
+        prompt = self._patch_prompt(spec, existing_code, error_output, test_code, bullets)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
+        return response.get("content", "")
+
     # --- prompt builders ---
 
     def _test_prompt(self, spec: PodSpec, existing_code: str) -> str:
@@ -149,6 +166,52 @@ class WorkerAgent:
         if bullets:
             parts.append("\nPlaybook guidance:\n" + "\n".join(f"- {b}" for b in bullets))
         parts.append("Output only valid Python code.")
+        return "\n".join(parts)
+
+    def _patch_prompt(
+        self,
+        spec: PodSpec,
+        existing_code: str,
+        error_output: str,
+        test_code: str,
+        bullets: list[str],
+    ) -> str:
+        parts = [
+            "Modify the EXISTING module below so the whole test file passes, "
+            "using SEARCH/REPLACE blocks -- do NOT output the whole file.",
+            f"Feature: {spec.feature_requirement}",
+            f"Implementation file: {spec.implementation_file.name}",
+            _SANDBOX_IMPORT_RULE,
+            f"\nExisting module ({spec.implementation_file.name}):\n"
+            f"```python\n{existing_code}\n```",
+        ]
+        if test_code:
+            parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
+        if error_output:
+            parts.append(f"\nTest failure output:\n{error_output}")
+        if bullets:
+            parts.append("\nPlaybook guidance:\n" + "\n".join(f"- {b}" for b in bullets))
+        parts.append(
+            "\nOutput ONLY one or more SEARCH/REPLACE blocks in this EXACT "
+            "format, nothing else -- no prose, no markdown fence around the "
+            "blocks themselves:\n\n"
+            "<<<<<<< SEARCH\n"
+            "<exact existing lines to find, copied verbatim from the module above>\n"
+            "=======\n"
+            "<the replacement lines>\n"
+            ">>>>>>> REPLACE\n\n"
+            "Rules:\n"
+            "- The SEARCH text must match a contiguous block of lines EXACTLY "
+            "as they appear above (same whitespace/indentation) -- copy it, "
+            "don't retype it from memory.\n"
+            "- Keep each block minimal: only the lines that change, plus just "
+            "enough surrounding context to make the match unambiguous (it "
+            "must match exactly once).\n"
+            "- Output multiple SEARCH/REPLACE blocks for multiple separate edits.\n"
+            "- To add new code with nothing to anchor it to, SEARCH for the "
+            "last line of the existing module and REPLACE it with itself plus "
+            "the new code appended after."
+        )
         return "\n".join(parts)
 
     def _refactor_prompt(self, spec: PodSpec, current_code: str) -> str:
