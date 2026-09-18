@@ -17,6 +17,7 @@ from src.contracts.project_architect import ModuleSpec, ProjectPlan
 def _args(**overrides):
     defaults = {
         "spec": None,
+        "from_spec_dir": None,
         "project": Path("."),
         "model": None,
         "plan_only": False,
@@ -89,6 +90,22 @@ class TestErrorPaths:
         assert rc == 1
         assert "spec file not found" in capsys.readouterr().err
 
+    def test_neither_spec_nor_spec_dir_given(self, tmp_path, capsys):
+        rc = cmd_project(_args(spec=None, from_spec_dir=None, project=tmp_path))
+        assert rc == 1
+        assert "exactly one of" in capsys.readouterr().err
+
+    def test_both_spec_and_spec_dir_given(self, project, capsys):
+        root, spec = project
+        rc = cmd_project(_args(spec=spec, from_spec_dir=root, project=root))
+        assert rc == 1
+        assert "exactly one of" in capsys.readouterr().err
+
+    def test_missing_spec_dir(self, tmp_path, capsys):
+        rc = cmd_project(_args(from_spec_dir=tmp_path / "nope", project=tmp_path))
+        assert rc == 1
+        assert "spec directory not found" in capsys.readouterr().err
+
     def test_missing_project_dir(self, project, capsys):
         _, spec = project
         rc = cmd_project(_args(spec=spec, project=Path("/does/not/exist")))
@@ -102,6 +119,53 @@ class TestErrorPaths:
             rc = cmd_project(_args(spec=spec, project=root))
         assert rc == 1
         assert "could not plan" in capsys.readouterr().err
+
+
+@pytest.fixture
+def structured_project(tmp_path):
+    """A --from-spec-dir project: contracts/*.contract.yml, no free-text spec."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    contracts = tmp_path / "specs" / "contracts"
+    contracts.mkdir(parents=True)
+    (contracts / "db.contract.yml").write_text("module: db\ndepends_on: []\ndescription: storage\n")
+    (contracts / "api.contract.yml").write_text(
+        "module: api\ndepends_on: [db]\ndescription: http layer\n"
+    )
+    return tmp_path, tmp_path / "specs"
+
+
+class TestFromSpecDir:
+    def test_builds_the_plan_without_calling_the_llm_architect(self, structured_project, capsys):
+        root, spec_dir = structured_project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, pl:
+            rc = cmd_project(_args(from_spec_dir=spec_dir, project=root, plan_only=True))
+        assert rc == 0
+        architect.plan.assert_not_called()
+        out = capsys.readouterr().out
+        assert "db" in out and "api" in out
+        assert str(spec_dir) in out
+
+    def test_builds_and_reports_like_the_free_text_path(self, structured_project):
+        root, spec_dir = structured_project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, pl:
+            rc = cmd_project(_args(from_spec_dir=spec_dir, project=root))
+        assert rc == 0
+        builder.build.assert_called_once()
+        plan_arg = builder.build.call_args[0][0]
+        assert plan_arg.build_order == ["db", "api"]
+
+    def test_malformed_contract_yaml_is_reported_and_does_not_build(self, structured_project, capsys):
+        root, spec_dir = structured_project
+        (spec_dir / "contracts" / "bad.contract.yml").write_text("description: no module key\n")
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, pl:
+            rc = cmd_project(_args(from_spec_dir=spec_dir, project=root))
+        assert rc == 1
+        builder.build.assert_not_called()
+        assert "could not load structured spec" in capsys.readouterr().err
 
 
 class TestPlanOnly:
@@ -283,3 +347,10 @@ def test_parser_wires_project_subcommand():
     assert ns.command == "project"
     assert ns.plan_only and ns.yes and ns.resume
     assert ns.model == "ollama/q:7b"
+
+
+def test_parser_wires_from_spec_dir_and_makes_spec_optional():
+    ns = _build_parser().parse_args(["project", "--from-spec-dir", "specs/", "--project", "p"])
+    assert ns.spec is None
+    assert ns.from_spec_dir == Path("specs/")
+    assert ns.project == Path("p")

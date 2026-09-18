@@ -85,6 +85,76 @@ class TestProjectPlan:
         json.dumps(plan.to_payload())
 
 
+# --- ProjectPlan.from_spec_dir (issue #57) ---------------------------------
+
+def _write_contract(path, module: str, depends_on: list | None = None, description: str = "", extra: str = ""):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"module: {module}"]
+    if depends_on is not None:
+        lines.append("depends_on: [" + ", ".join(depends_on) + "]")
+    if description:
+        lines.append(f"description: {description}")
+    lines.append(extra)
+    path.write_text("\n".join(lines) + "\n")
+
+
+class TestFromSpecDir:
+    def test_happy_path_builds_the_same_plan_shape_as_the_llm_path(self, tmp_path):
+        _write_contract(
+            tmp_path / "contracts" / "db.contract.yml", "db", depends_on=[], description="storage layer"
+        )
+        _write_contract(
+            tmp_path / "contracts" / "api.contract.yml", "api", depends_on=["db"], description="http layer"
+        )
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        assert plan.build_order == ["db", "api"]
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["api"].description == "http layer"
+        assert by_name["api"].depends_on == ("db",)
+
+    def test_falls_back_to_the_dir_itself_when_no_contracts_subdir(self, tmp_path):
+        _write_contract(tmp_path / "db.contract.yml", "db")
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        assert plan.build_order == ["db"]
+
+    def test_prefers_contracts_subdir_over_top_level_files(self, tmp_path):
+        _write_contract(tmp_path / "db.contract.yml", "wrong_module")
+        _write_contract(tmp_path / "contracts" / "db.contract.yml", "right_module")
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        assert plan.build_order == ["right_module"]
+
+    def test_no_contract_files_raises(self, tmp_path):
+        with pytest.raises(ProjectPlanError, match="no \\*.contract.yml files"):
+            ProjectPlan.from_spec_dir(tmp_path)
+
+    def test_missing_module_key_raises(self, tmp_path):
+        path = tmp_path / "contracts" / "bad.contract.yml"
+        path.parent.mkdir(parents=True)
+        path.write_text("description: no module key here\n")
+        with pytest.raises(ProjectPlanError, match="missing required top-level 'module' key"):
+            ProjectPlan.from_spec_dir(tmp_path)
+
+    def test_non_list_depends_on_raises(self, tmp_path):
+        path = tmp_path / "contracts" / "bad.contract.yml"
+        path.parent.mkdir(parents=True)
+        path.write_text("module: bad\ndepends_on: not_a_list\n")
+        with pytest.raises(ProjectPlanError, match="'depends_on' must be a list"):
+            ProjectPlan.from_spec_dir(tmp_path)
+
+    def test_invalid_yaml_raises(self, tmp_path):
+        path = tmp_path / "contracts" / "bad.contract.yml"
+        path.parent.mkdir(parents=True)
+        path.write_text("module: [unclosed\n")
+        with pytest.raises(ProjectPlanError, match="invalid YAML"):
+            ProjectPlan.from_spec_dir(tmp_path)
+
+    def test_cycle_across_yaml_files_is_still_rejected(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "a.contract.yml", "a", depends_on=["b"])
+        _write_contract(tmp_path / "contracts" / "b.contract.yml", "b", depends_on=["a"])
+        with pytest.raises(ProjectPlanError, match="cycle"):
+            ProjectPlan.from_spec_dir(tmp_path)
+
+
 # --- ProjectArchitect.plan ------------------------------------------------
 
 class TestArchitectPlan:

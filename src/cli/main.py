@@ -79,7 +79,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "project",
         help="Decompose a spec into modules and build them in dependency order",
     )
-    proj.add_argument("spec", type=Path, help="Path to the project spec file (free text)")
+    proj.add_argument(
+        "spec", type=Path, nargs="?", default=None,
+        help="Path to the project spec file (free text). Omit when using --from-spec-dir.",
+    )
+    proj.add_argument(
+        "--from-spec-dir", type=Path, default=None,
+        help="Build from a structured spec directory (contracts/<module>.contract.yml "
+             "per module, each stating its own depends_on) instead of a free-text spec "
+             "+ LLM decomposition. Mutually exclusive with the positional spec.",
+    )
     proj.add_argument(
         "--project", type=Path, default=Path("."),
         help="Target project directory (default: current directory)",
@@ -318,16 +327,32 @@ def cmd_project(args: argparse.Namespace) -> int:
     from src.cli.config import ProjectConfig
     from src.cli.factory import _route_llm, default_llm_client, llm_client_from_ref
     from src.cli.project_builder import ProjectBuilder
-    from src.contracts.project_architect import ProjectArchitect
+    from src.contracts.project_architect import ProjectArchitect, ProjectPlan, ProjectPlanError
 
     if args.model and not _valid_model_ref(args.model):
         return 1
 
-    spec_path = args.spec if args.spec.is_absolute() else Path.cwd() / args.spec
-    spec_path = spec_path.resolve()
-    if not spec_path.is_file():
-        print(f"error: spec file not found: {spec_path}", file=sys.stderr)
+    from_spec_dir = getattr(args, "from_spec_dir", None)
+    if bool(args.spec) == bool(from_spec_dir):
+        print(
+            "error: pass exactly one of a spec file or --from-spec-dir, not both/neither",
+            file=sys.stderr,
+        )
         return 1
+
+    spec_path = None
+    spec_dir = None
+    if from_spec_dir is not None:
+        spec_dir = from_spec_dir.resolve()
+        if not spec_dir.is_dir():
+            print(f"error: spec directory not found: {spec_dir}", file=sys.stderr)
+            return 1
+    else:
+        spec_path = args.spec if args.spec.is_absolute() else Path.cwd() / args.spec
+        spec_path = spec_path.resolve()
+        if not spec_path.is_file():
+            print(f"error: spec file not found: {spec_path}", file=sys.stderr)
+            return 1
 
     project_root = args.project.resolve()
     if not project_root.is_dir():
@@ -373,15 +398,22 @@ def cmd_project(args: argparse.Namespace) -> int:
     repair_model_id = _model_id_for(repair_llm)
     escalation_model_id = _model_id_for(escalation_llm) if escalation_llm is not None else None
 
-    architect = ProjectArchitect(architect_llm, audit_client=audit, model_id=architect_model_id)
-    plan_result = architect.plan(spec_path.read_text(encoding="utf-8"))
-    if not plan_result.success or plan_result.plan is None:
-        print(f"error: could not plan the project — {plan_result.error}", file=sys.stderr)
-        return 1
-    plan = plan_result.plan
+    if spec_dir is not None:
+        try:
+            plan = ProjectPlan.from_spec_dir(spec_dir)
+        except ProjectPlanError as exc:
+            print(f"error: could not load structured spec — {exc}", file=sys.stderr)
+            return 1
+    else:
+        architect = ProjectArchitect(architect_llm, audit_client=audit, model_id=architect_model_id)
+        plan_result = architect.plan(spec_path.read_text(encoding="utf-8"))
+        if not plan_result.success or plan_result.plan is None:
+            print(f"error: could not plan the project — {plan_result.error}", file=sys.stderr)
+            return 1
+        plan = plan_result.plan
 
     print(f"Project:    {project_root}")
-    print(f"Spec:       {spec_path}")
+    print(f"Spec:       {spec_dir if spec_dir is not None else spec_path}")
     if not args.no_learn:
         print(f"Playbook:   {config.playbook_id}")
     print()

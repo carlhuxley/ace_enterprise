@@ -16,6 +16,9 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
@@ -93,6 +96,48 @@ class ProjectPlan:
             "build_order": list(self.build_order),
             "edges": [list(e) for e in self.edges],
         }
+
+    @classmethod
+    def from_spec_dir(cls, spec_dir: Path) -> ProjectPlan:
+        """Build a plan directly from a structured spec directory --
+        `contracts/<module>.contract.yml` per module, each stating its own
+        `depends_on` -- bypassing ProjectArchitect's LLM decomposition
+        entirely (issue #57). Every module's own FunctionSpec/
+        IntegrationTest decomposition still goes through the normal
+        ModuleArchitect + ModuleTDDBuilder pipeline unchanged; this only
+        replaces the *project-level* "what are the modules and how do
+        they depend on each other" step.
+
+        Raises ProjectPlanError on any malformed input -- same exception
+        type as the LLM path, so callers handle both identically.
+        """
+        contracts_dir = spec_dir / "contracts"
+        if not contracts_dir.is_dir():
+            contracts_dir = spec_dir
+        contract_files = sorted(contracts_dir.glob("*.contract.yml"))
+        if not contract_files:
+            raise ProjectPlanError(f"no *.contract.yml files found under {spec_dir}")
+
+        modules: list[ModuleSpec] = []
+        for path in contract_files:
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                raise ProjectPlanError(f"{path}: invalid YAML: {exc}") from exc
+            if not isinstance(data, dict) or "module" not in data:
+                raise ProjectPlanError(f"{path}: missing required top-level 'module' key")
+            depends_on_raw = data.get("depends_on", []) or []
+            if not isinstance(depends_on_raw, list):
+                raise ProjectPlanError(f"{path}: 'depends_on' must be a list")
+            modules.append(
+                ModuleSpec(
+                    name=str(data["module"]).strip(),
+                    description=str(data.get("description", "")).strip(),
+                    depends_on=tuple(str(d).strip() for d in depends_on_raw if str(d).strip()),
+                )
+            )
+
+        return cls(spec=f"structured spec dir: {spec_dir}", modules=modules)
 
 
 @dataclass
