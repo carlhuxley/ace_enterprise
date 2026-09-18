@@ -78,6 +78,91 @@ def test_validate_function_accepts_exception_classes():
     assert b._validate_function("def register(): pass\n", spec) is not None  # neither def nor class of that name
 
 
+# Issue #58: a dotted func.name (e.g. "Observation.is_success") names a
+# METHOD of an already-defined class. `def Observation.is_success(...):` is
+# not valid Python and can never appear in real code, so the old
+# `f"def {func.name}" not in code` check was guaranteed to fail forever. The
+# valid form is a plain `def is_success(...)` attached with
+# `Observation.is_success = is_success`.
+
+def test_validate_function_accepts_dotted_method_spec_with_monkeypatch():
+    b = ModuleTDDBuilder(llm_client=SimpleNamespace(model="x"))
+    spec = FunctionSpec("Observation.is_success", "(self) -> bool", "true iff evaluated cleanly")
+    code = (
+        "def is_success(self) -> bool:\n"
+        "    return self.error is None and self.fail_class == 'ok'\n"
+        "\n"
+        "Observation.is_success = is_success\n"
+    )
+    assert b._validate_function(code, spec) is None
+
+
+def test_validate_function_rejects_dotted_method_spec_missing_attachment():
+    b = ModuleTDDBuilder(llm_client=SimpleNamespace(model="x"))
+    spec = FunctionSpec("Observation.is_success", "(self) -> bool", "true iff evaluated cleanly")
+    code = "def is_success(self) -> bool:\n    return True\n"  # never attached to Observation
+    error = b._validate_function(code, spec)
+    assert error is not None and "Observation.is_success" in error
+
+
+def test_validate_function_rejects_the_literal_impossible_dotted_def():
+    # The exact failure mode from issue #58: an LLM that (wrongly) tried to
+    # write `def Observation.is_success(...)` literally can't even compile.
+    b = ModuleTDDBuilder(llm_client=SimpleNamespace(model="x"))
+    spec = FunctionSpec("Observation.is_success", "(self) -> bool", "d")
+    code = "def Observation.is_success(self) -> bool:\n    return True\n"
+    error = b._validate_function(code, spec)
+    assert error is not None and "Syntax error" in error
+
+
+def test_extract_function_code_finds_dotted_method_via_fallback_line_walk():
+    b = ModuleTDDBuilder(llm_client=SimpleNamespace(model="x"))
+    # No code fences, so _extract_function_code falls back to line-walking.
+    response = (
+        "Here you go:\n"
+        "def is_success(self) -> bool:\n"
+        "    return self.error is None and self.fail_class == 'ok'\n"
+        "\n"
+        "Observation.is_success = is_success\n"
+    )
+    code = b._extract_function_code(response, "Observation.is_success")
+    assert "def is_success" in code
+    assert "Observation.is_success = is_success" in code
+
+
+def test_build_function_prompt_for_dotted_spec_never_shows_invalid_syntax():
+    calls = []
+
+    class FakeLLM:
+        model = "fake"
+
+        def generate(self, prompt):
+            calls.append(prompt)
+            return {
+                "content": (
+                    "def is_success(self) -> bool:\n"
+                    "    return self.error is None and self.fail_class == 'ok'\n"
+                    "\n"
+                    "Observation.is_success = is_success\n"
+                ),
+                "actual_model": "fake",
+                "provider": "fake",
+            }
+
+    b = ModuleTDDBuilder(llm_client=FakeLLM())
+    spec = FunctionSpec("Observation.is_success", "(self) -> bool", "true iff evaluated cleanly")
+    result = b._build_function(
+        spec, shared_state="", hints=[], existing_code="class Observation:\n    pass\n"
+    )
+
+    assert result.success is True
+    assert "Observation.is_success = is_success" in result.code
+    # The rules text may warn against the invalid form by name, but the
+    # rendered code template must never show it as something to emit.
+    assert "def Observation.is_success(self) -> bool:" not in calls[0]
+    assert "def is_success(self) -> bool:" in calls[0]
+
+
 def test_dep_import_lines_lists_public_symbols_grouped_by_module():
     deps = {
         "dag_graph": "def add_edge(a, b): pass\ndef _private(): pass\nclass Node: pass\n",

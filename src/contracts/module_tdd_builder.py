@@ -472,6 +472,49 @@ class ModuleTDDBuilder:
                 + "\n".join(f"- {b}" for b in prior_lessons)
             )
 
+        # A dotted name (e.g. "Observation.is_success") means the architect
+        # asked for a METHOD of an already-defined class. `def
+        # Observation.is_success(...):` is not valid Python, and functions
+        # are generated as independent top-level snippets later concatenated
+        # into the module (see build_module), so the class body itself
+        # cannot be reopened here. The only syntactically valid way to add
+        # behaviour to an existing class from a standalone snippet is to
+        # define a plain function and attach it as an attribute (issue #58).
+        if "." in func.name:
+            class_name, method_name = func.name.rsplit(".", 1)
+            target_intro = (
+                f"**To implement — `{func.name}` (a METHOD of the "
+                f"already-defined class `{class_name}`):**"
+            )
+            target_code = (
+                f'def {method_name}{func.signature}:\n'
+                f'    """{func.docstring}"""\n'
+                f'    # Your implementation\n'
+                f'\n'
+                f'{class_name}.{method_name} = {method_name}'
+            )
+            rule_1 = (
+                f"1. `{func.name}` names a method, not a standalone function. "
+                f"`{class_name}` already exists elsewhere in the module -- do "
+                f"NOT redefine it and do NOT write `def {func.name}(...)` "
+                f"(not valid Python). Instead output a top-level "
+                f"`def {method_name}(...)` and then the line "
+                f"`{class_name}.{method_name} = {method_name}` to attach it, "
+                f"exactly as shown above."
+            )
+        else:
+            target_intro = f"**To implement — `{func.name}`:**"
+            target_code = (
+                f'def {func.name}{func.signature}:\n'
+                f'    """{func.docstring}"""\n'
+                f'    # Your implementation'
+            )
+            rule_1 = (
+                f"1. Output ONLY this one definition. It is usually a `def`; "
+                f"if `{func.name}` is a class or exception (e.g. ends in "
+                f"Error/Exception, or is CamelCase), output a `class` instead."
+            )
+
         prompt = f"""You are implementing ONE piece of a Python module.
 
 **Existing module code:**
@@ -479,20 +522,16 @@ class ModuleTDDBuilder:
 {existing_code}
 ```
 
-**To implement — `{func.name}`:**
+{target_intro}
 ```python
-def {func.name}{func.signature}:
-    \"\"\"{func.docstring}\"\"\"
-    # Your implementation
+{target_code}
 ```
 
 **Implementation hints:**
 {chr(10).join(f"- {h}" for h in hints) if hints else "None"}{dep_block}{lessons_block}
 
 **Rules:**
-1. Output ONLY this one definition. It is usually a `def`; if `{func.name}`
-   is a class or exception (e.g. ends in Error/Exception, or is CamelCase),
-   output a `class` instead.
+{rule_1}
 2. It operates on the shared state shown above.
 3. Keep it minimal and correct.
 4. Standard-library imports are fine (json, pathlib, collections, ...) —
@@ -563,12 +602,18 @@ Fix the implementation:
         if stripped != response.strip():
             return stripped
 
+        # A dotted function_name (e.g. "Observation.is_success") names a
+        # method attached via "ClassName.method_name = method_name" (issue
+        # #58) -- the line actually defining it is "def method_name(...)",
+        # never "def ClassName.method_name(...)".
+        search_name = function_name.rsplit(".", 1)[-1] if "." in function_name else function_name
+
         lines = response.strip().split("\n")
         func_lines = []
         in_func = False
 
         for line in lines:
-            if line.strip().startswith((f"def {function_name}", f"class {function_name}")):
+            if line.strip().startswith((f"def {search_name}", f"class {search_name}")):
                 in_func = True
             if in_func:
                 func_lines.append(line)
@@ -587,6 +632,26 @@ Fix the implementation:
         try:
             # Check it parses (raises SyntaxError if not)
             compile(code, "<string>", "exec")
+
+            # A dotted func.name (e.g. "Observation.is_success") names a
+            # METHOD of an already-defined class, not a standalone def/class
+            # of that exact (invalid, dotted) name -- `def
+            # Observation.is_success(...):` is not valid Python and can
+            # never appear in real code (issue #58). The valid form is a
+            # plain `def is_success(...)` attached with
+            # `Observation.is_success = is_success`.
+            if "." in func.name:
+                class_name, method_name = func.name.rsplit(".", 1)
+                has_method = f"def {method_name}" in code or f"class {method_name}" in code
+                attaches_to_class = f"{class_name}.{method_name}" in code
+                if not (has_method and attaches_to_class):
+                    return (
+                        f"Definition of {func.name}: expected a top-level "
+                        f"`def {method_name}(...)` plus "
+                        f"`{class_name}.{method_name} = {method_name}` to "
+                        f"attach it as a method, not found in code"
+                    )
+                return None
 
             # The spec entry may be a function OR a class (e.g. an exception
             # like CircularDependencyError, or a dataclass).

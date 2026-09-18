@@ -263,6 +263,11 @@ RULES:
 - Every name a test calls must be defined: a function in this module's
   `functions` list, an already-built dependency, or the stdlib. Don't
   reference functions that belong to a different module.
+- A class and every one of its methods are declared as ONE `functions`
+  entry — the class's own generated code includes its full body,
+  methods and all. NEVER create a separate entry whose `name` is
+  dotted (e.g. "ClassName.method_name") to describe a method: methods
+  are built together with their class, never as a standalone spec.
 
 Respond with valid JSON only:
 ```json
@@ -352,6 +357,11 @@ Design the requested module. You must:
 - GRAPH / DIRECTIONAL modules: fix ONE convention (e.g. "add_edge(a, b) is
   the directed edge a -> b; a depends on b") and use the same argument order
   for the same meaning in EVERY test. Never flip it.
+- A class and every one of its methods are declared as ONE `functions`
+  entry — the class's own generated code includes its full body,
+  methods and all. NEVER create a separate entry whose `name` is
+  dotted (e.g. "ClassName.method_name") to describe a method: methods
+  are built together with their class, never as a standalone spec.
 
 ## REQUIREMENT
 
