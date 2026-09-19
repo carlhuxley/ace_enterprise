@@ -26,6 +26,27 @@ _SANDBOX_IMPORT_RULE = (
     "write_text, read_text, exists); use pytest's tmp_path fixture for temp dirs."
 )
 
+
+def _flat_import_rule(spec: PodSpec) -> str:
+    """Neither _test_prompt nor _impl_prompt stated any convention for
+    importing sibling project modules, so the model guessed -- often a
+    `src.`-qualified package path that doesn't exist in this project's flat
+    layout (test/impl files as siblings, no package wrapper), failing every
+    run at pytest collection before any test logic runs, with no retry able
+    to recover since the same guess repeats. State it explicitly and
+    concretely, naming this module, rather than leaving it to a prior."""
+    stem = spec.implementation_file.stem
+    return (
+        f"LAYOUT: this project is flat — {spec.implementation_file.name} and every "
+        f"sibling module live directly under the source directory, with no package "
+        f"wrapper. Import this module as `from {stem} import ...`, and any other "
+        f"project module the same way: `from other_module import ...`. NEVER "
+        f"prefix a project-module import with `src.` or any other package/"
+        f"directory name (e.g. `from src.{stem} import ...` is wrong) — that path "
+        f"does not exist in the sandbox and fails at collection before any test "
+        f"logic runs."
+    )
+
 _DEFAULT_TEST_RULES = [
     (
         "Assert PROPERTIES not exact value when multiple correct outputs exist "
@@ -111,6 +132,7 @@ class WorkerAgent:
             "The new test must FAIL before any implementation exists (RED phase).",
             "Do NOT duplicate or overlap with any existing test; give it a unique name.",
             _SANDBOX_IMPORT_RULE,
+            _flat_import_rule(spec),
         ]
         if spec.gherkin_context:
             parts.append(
@@ -153,6 +175,7 @@ class WorkerAgent:
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
             _SANDBOX_IMPORT_RULE,
+            _flat_import_rule(spec),
         ]
         if existing_code:
             parts.append(f"\nExisting module ({spec.implementation_file.name}):\n"
@@ -182,6 +205,7 @@ class WorkerAgent:
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
             _SANDBOX_IMPORT_RULE,
+            _flat_import_rule(spec),
             f"\nExisting module ({spec.implementation_file.name}):\n"
             f"```python\n{existing_code}\n```",
         ]
@@ -220,6 +244,7 @@ class WorkerAgent:
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
             _SANDBOX_IMPORT_RULE,
+            _flat_import_rule(spec),
         ]
         if current_code:
             parts.append(f"\nCurrent code:\n{current_code}")

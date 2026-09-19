@@ -75,6 +75,19 @@ class TestGenerateTest:
         prompt = _captured_prompt(w)
         assert "os" in prompt and "subprocess" in prompt and "pathlib.Path" in prompt
 
+    def test_prompt_states_the_flat_import_convention_for_this_module(self, tmp_path):
+        # Neither prompt builder used to state any import convention for
+        # sibling modules at all, so the model guessed -- often a `src.`-
+        # qualified path that doesn't exist in this project's flat layout,
+        # failing every GREEN at pytest collection with no way to recover
+        # since the same guess just repeats.
+        w = WorkerAgent(_llm())
+        w.generate_test(_spec(tmp_path))
+        prompt = _captured_prompt(w)
+        assert "from order import" in prompt
+        assert "from src.order import" in prompt  # named as the wrong example
+        assert "flat" in prompt.lower()
+
 
 # ---------------------------------------------------------------------------
 # WorkerAgent — generate_implementation
@@ -121,6 +134,14 @@ class TestGenerateImplementation:
         w = WorkerAgent(_llm())
         w.generate_implementation(_spec(tmp_path))
         assert "SANDBOX:" in _captured_prompt(w)
+
+    def test_prompt_states_the_flat_import_convention_for_this_module(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(_spec(tmp_path))
+        prompt = _captured_prompt(w)
+        assert "from order import" in prompt
+        assert "from src.order import" in prompt  # named as the wrong example
+        assert "flat" in prompt.lower()
 
     def test_no_existing_code_prompts_a_fresh_implementation(self, tmp_path):
         w = WorkerAgent(_llm())
@@ -186,6 +207,13 @@ class TestGenerateRefactor:
         w.generate_refactor(_spec(tmp_path))
         assert "Process an order" in _captured_prompt(w)
 
+    def test_prompt_states_the_flat_import_convention_for_this_module(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_refactor(_spec(tmp_path))
+        prompt = _captured_prompt(w)
+        assert "from order import" in prompt
+        assert "flat" in prompt.lower()
+
 
 # ---------------------------------------------------------------------------
 # WorkerAgent — generate_patch (#53 diff-based-editing follow-up)
@@ -232,6 +260,13 @@ class TestGeneratePatch:
         prompt = _captured_prompt(w)
         assert "SEARCH/REPLACE" in prompt
         assert "do NOT output the whole file" in prompt
+
+    def test_prompt_states_the_flat_import_convention_for_this_module(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(_spec(tmp_path), existing_code="x = 1")
+        prompt = _captured_prompt(w)
+        assert "from order import" in prompt
+        assert "flat" in prompt.lower()
 
     def test_prompt_includes_playbook_bullets(self, tmp_path):
         pm = MagicMock()
