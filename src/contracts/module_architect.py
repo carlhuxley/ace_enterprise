@@ -320,7 +320,7 @@ Respond with valid JSON only:
 
 Requirement:
 {requirement}
-
+{contract_block}
 Generate a complete module contract with integration tests.
 '''
 
@@ -366,7 +366,7 @@ Design the requested module. You must:
 ## REQUIREMENT
 
 {requirement}
-
+{contract_block}
 ## OUTPUT FORMAT
 
 Respond with valid JSON only:
@@ -414,6 +414,34 @@ Respond with valid JSON only:
 ```
 
 Generate a self-contained module contract with integration tests.
+'''
+
+
+# Injected when the caller has a formal, hand-authored `.contract.yml` for
+# this module (issue #57 follow-up) -- the one-line `requirement` above is
+# then only a human-readable summary, and this is the ground truth. Kept as
+# a raw YAML passthrough rather than a translated/typed structure: the
+# formal contract carries things a rigid schema would lose (exact equations,
+# cell-id conventions, prose invariants), and the architect model can read
+# YAML directly.
+CONTRACT_BLOCK_TEMPLATE = '''
+## AUTHORITATIVE CONTRACT — implement EXACTLY this interface
+
+The REQUIREMENT above is only a one-line human-readable summary. The full
+formal contract below is the ground truth. Every public class name, method
+name, signature, formula, invariant, and raised exception it lists MUST
+appear in your `functions` list and generated code, using the SAME names
+and signatures given here -- do not rename, drop, merge, or reinterpret
+anything below. Where the contract gives an exact mathematical formula,
+implement that formula literally, term for term (including its sign on
+each term) -- do not substitute an equivalent-seeming metric of your own
+design. Where it names a field on a type (e.g. an Observation's `score`),
+that exact field name is part of the interface other already-built or
+future modules depend on.
+
+```yaml
+{contract_yaml}
+```
 '''
 
 
@@ -466,6 +494,7 @@ class ModuleArchitect:
         requirement: str,
         session_id: str | None = None,
         context: CodebaseContext | None = None,
+        contract_yaml: str | None = None,
     ) -> ModuleArchitectResult:
         """Generate a module contract from a requirement.
 
@@ -473,6 +502,12 @@ class ModuleArchitect:
             requirement: Natural language description of what to build
             session_id: Optional session ID for audit tracking
             context: Optional codebase context (existing functions, schema, patterns)
+            contract_yaml: Optional raw text of a formal `.contract.yml` for
+                this module (issue #57 follow-up). When given, it is
+                injected as the AUTHORITATIVE interface -- exact class/
+                method names, signatures, formulas, and invariants -- so
+                the architect stops re-deriving the module's shape from a
+                one-line `requirement` alone.
 
         Returns:
             ModuleArchitectResult with the generated contract
@@ -482,15 +517,22 @@ class ModuleArchitect:
         start_time = time.time()
 
         try:
+            contract_block = (
+                CONTRACT_BLOCK_TEMPLATE.format(contract_yaml=contract_yaml)
+                if contract_yaml else ""
+            )
             # Use context-aware prompt if context is provided
             if context:
                 context_section = self._format_context(context)
                 prompt = MODULE_ARCHITECT_CONTEXT_PROMPT.format(
                     context_section=context_section,
                     requirement=requirement,
+                    contract_block=contract_block,
                 )
             else:
-                prompt = MODULE_ARCHITECT_PROMPT.format(requirement=requirement)
+                prompt = MODULE_ARCHITECT_PROMPT.format(
+                    requirement=requirement, contract_block=contract_block,
+                )
             prompt = self._lessons_block() + prompt
 
             result = self._llm.generate(prompt)

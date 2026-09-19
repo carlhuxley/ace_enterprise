@@ -38,11 +38,16 @@ class ProjectPlanError(ValueError):
 class ModuleSpec:
     """One module in a project plan. `name` becomes `<name>.py` /
     `test_<name>.py`; `description` is the requirement handed to
-    `ModuleArchitect`."""
+    `ModuleArchitect`. `contract_yaml`, when set (only via
+    `ProjectPlan.from_spec_dir`, issue #57 follow-up), is the raw text of
+    this module's formal `.contract.yml` -- passed to `ModuleArchitect` as
+    the authoritative interface instead of letting it re-derive the
+    module's shape from `description` alone."""
 
     name: str
     description: str
     depends_on: tuple[str, ...] = ()
+    contract_yaml: str | None = None
 
 
 @dataclass
@@ -102,11 +107,11 @@ class ProjectPlan:
         """Build a plan directly from a structured spec directory --
         `contracts/<module>.contract.yml` per module, each stating its own
         `depends_on` -- bypassing ProjectArchitect's LLM decomposition
-        entirely (issue #57). Every module's own FunctionSpec/
-        IntegrationTest decomposition still goes through the normal
-        ModuleArchitect + ModuleTDDBuilder pipeline unchanged; this only
-        replaces the *project-level* "what are the modules and how do
-        they depend on each other" step.
+        entirely (issue #57). Each module's raw contract text is also
+        carried on its `ModuleSpec.contract_yaml`, so `ProjectBuilder`
+        passes the full formal interface -- exact class/method names,
+        signatures, formulas, invariants -- to `ModuleArchitect` instead of
+        the one-line `description` alone (issue #57 follow-up).
 
         Raises ProjectPlanError on any malformed input -- same exception
         type as the LLM path, so callers handle both identically.
@@ -120,8 +125,9 @@ class ProjectPlan:
 
         modules: list[ModuleSpec] = []
         for path in contract_files:
+            raw_text = path.read_text(encoding="utf-8")
             try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                data = yaml.safe_load(raw_text)
             except yaml.YAMLError as exc:
                 raise ProjectPlanError(f"{path}: invalid YAML: {exc}") from exc
             if not isinstance(data, dict) or "module" not in data:
@@ -134,6 +140,7 @@ class ProjectPlan:
                     name=str(data["module"]).strip(),
                     description=str(data.get("description", "")).strip(),
                     depends_on=tuple(str(d).strip() for d in depends_on_raw if str(d).strip()),
+                    contract_yaml=raw_text,
                 )
             )
 

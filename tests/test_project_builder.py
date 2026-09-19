@@ -35,9 +35,11 @@ class FakeArchitect:
     def __init__(self, fail: set[str] | None = None):
         self.fail = fail or set()
         self.seen: list[tuple[str, object]] = []
+        self.seen_contract_yaml: list[str | None] = []
 
-    def generate_module_contract(self, *, requirement, context=None):
+    def generate_module_contract(self, *, requirement, context=None, contract_yaml=None):
         self.seen.append((requirement, context))
+        self.seen_contract_yaml.append(contract_yaml)
         name = requirement.split()[1]  # "the <name> module"
         if name in self.fail:
             return SimpleNamespace(success=False, contract=None, error="architect boom")
@@ -145,6 +147,21 @@ def test_builds_modules_in_topological_order(dirs):
     assert [o.name for o in result.outcomes] == ["db", "api"]
     assert all(o.status is ModuleStatus.BUILT for o in result.outcomes)
     assert (src / "db.py").exists() and (src / "api.py").exists()
+
+
+def test_a_modules_contract_yaml_reaches_the_architect_call(dirs):
+    """Issue #57 follow-up: a --from-spec-dir module's formal contract text
+    must reach ModuleArchitect, not just its one-line description."""
+    root, src, tests = dirs
+    plan = _plan(
+        ModuleSpec("db", "the db module", contract_yaml="module: db\ndepends_on: []\n"),
+        ModuleSpec("api", "the api module", depends_on=("db",), contract_yaml=None),
+    )
+    arch = FakeArchitect()
+    pb = _builder(dirs, architect=arch, builder=FakeBuilder())
+    result = pb.build(plan, root, src, tests)
+
+    assert arch.seen_contract_yaml == ["module: db\ndepends_on: []\n", None]
     assert (tests / "test_db.py").exists() and (tests / "test_api.py").exists()
     assert result.assembly_passed is True
     assert result.success

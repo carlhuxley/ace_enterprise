@@ -112,6 +112,13 @@ class TestFromSpecDir:
         assert by_name["api"].description == "http layer"
         assert by_name["api"].depends_on == ("db",)
 
+    def test_contract_yaml_carries_the_raw_file_text_for_the_architect(self, tmp_path):
+        path = tmp_path / "contracts" / "db.contract.yml"
+        _write_contract(path, "db", depends_on=[], description="storage layer")
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["db"].contract_yaml == path.read_text()
+
     def test_falls_back_to_the_dir_itself_when_no_contracts_subdir(self, tmp_path):
         _write_contract(tmp_path / "db.contract.yml", "db")
         plan = ProjectPlan.from_spec_dir(tmp_path)

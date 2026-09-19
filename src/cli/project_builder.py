@@ -341,6 +341,7 @@ class ProjectBuilder:
         architect = self._make_architect()
         arch = architect.generate_module_contract(
             requirement=module.description, context=context,
+            contract_yaml=module.contract_yaml,
         )
         if not arch.success or arch.contract is None:
             return ModuleOutcome(module.name, ModuleStatus.FAILED,
