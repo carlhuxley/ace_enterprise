@@ -79,7 +79,8 @@ class PythonLanguagePod:
 
         # Include existing implementation so the workspace-clear in send_pulse
         # doesn't break imports when the impl already exists from a prior cycle.
-        pulse_files: dict[str, str] = {spec.test_file.name: code}
+        pulse_files: dict[str, str] = self._sibling_files(spec)
+        pulse_files[spec.test_file.name] = code
         if spec.implementation_file.exists():
             pulse_files[spec.implementation_file.name] = spec.implementation_file.read_text()
 
@@ -157,10 +158,9 @@ class PythonLanguagePod:
         except Exception as exc:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
-        files = {
-            spec.test_file.name: test_code,
-            spec.implementation_file.name: impl_code,
-        }
+        files = self._sibling_files(spec)
+        files[spec.test_file.name] = test_code
+        files[spec.implementation_file.name] = impl_code
 
         try:
             result = self._orchestrator.pulse(files)
@@ -187,10 +187,9 @@ class PythonLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        files = {
-            spec.test_file.name: test_code,
-            spec.implementation_file.name: refactored_code,
-        }
+        files = self._sibling_files(spec)
+        files[spec.test_file.name] = test_code
+        files[spec.implementation_file.name] = refactored_code
         try:
             result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
@@ -222,6 +221,30 @@ class PythonLanguagePod:
             return result
 
         self._worker.llm_client.generate = _tracking_generate
+
+    def _sibling_files(self, spec: PodSpec) -> dict[str, str]:
+        """Already-built sibling project modules to pulse alongside the
+        target module, so `from <sibling> import ...` resolves during
+        RED/GREEN/REFACTOR instead of failing at collection every cycle
+        (#61) -- mirrors module_architect.validate_module's `extra_files`
+        mechanism for the batch `ace project` path (#28), which this
+        iterative path never had. Keyed by filename, matching the flat
+        namespace PodmanRunner mounts pulsed files into; excludes the
+        target module's own implementation file, whose freshly generated
+        content the caller sets separately and must win over any stale
+        on-disk copy this glob would otherwise pick up.
+        """
+        src_dir = self._project_root / "src"
+        if not src_dir.is_dir():
+            src_dir = self._project_root / "lib"
+        if not src_dir.is_dir():
+            src_dir = self._project_root
+        files: dict[str, str] = {}
+        for path in sorted(src_dir.rglob("*.py")):
+            if path == spec.implementation_file:
+                continue
+            files[path.name] = path.read_text()
+        return files
 
     def _record_usage(self, cycle_number: int) -> None:
         self._token_log.append(TokenUsage(

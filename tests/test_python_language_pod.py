@@ -128,6 +128,65 @@ class TestRunRed:
 
 
 # ---------------------------------------------------------------------------
+# Sibling module inclusion (#61) -- a module under `ace tdd` that legitimately
+# imports another already-built project module used to fail every RED/GREEN/
+# REFACTOR cycle at ModuleNotFoundError, since only the test and impl files
+# were ever pulsed into the sandbox.
+# ---------------------------------------------------------------------------
+
+class TestSiblingModuleInclusion:
+    def _write_sibling(self, tmp_path, name="sibling.py", content="X = 1\n"):
+        src_dir = tmp_path / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / name).write_text(content)
+
+    def test_run_red_pulses_already_built_sibling_module(self, tmp_path):
+        self._write_sibling(tmp_path, "sibling.py", "X = 1\n")
+        pod = make_pod(tmp_path)
+        pod.run_red(spec(tmp_path))
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert pulsed.get("sibling.py") == "X = 1\n"
+
+    def test_run_green_pulses_already_built_sibling_module(self, tmp_path):
+        self._write_sibling(tmp_path, "sibling.py", "X = 1\n")
+        pod = make_pod(tmp_path)
+        pod.run_green(spec(tmp_path))
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert pulsed.get("sibling.py") == "X = 1\n"
+
+    def test_run_refactor_pulses_already_built_sibling_module(self, tmp_path):
+        self._write_sibling(tmp_path, "sibling.py", "X = 1\n")
+        pod = make_pod(tmp_path)
+        pod.run_refactor(spec(tmp_path))
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert pulsed.get("sibling.py") == "X = 1\n"
+
+    def test_fresh_generated_content_wins_over_stale_sibling_glob_hit(self, tmp_path):
+        # The target module's OWN stale on-disk copy (from a prior cycle)
+        # must not shadow the freshly generated content for this cycle.
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo(): return 'stale'\n")
+        pod = make_pod(tmp_path, pulse_result=PhaseResult(passed=True, output="1 passed", error=None))
+        pod.run_green(s)
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert pulsed[s.implementation_file.name] == "def foo(): pass"
+
+    def test_falls_back_to_project_root_when_no_src_or_lib_dir(self, tmp_path):
+        (tmp_path / "sibling.py").write_text("X = 1\n")
+        pod = make_pod(tmp_path)
+        pod.run_red(spec(tmp_path))
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert pulsed.get("sibling.py") == "X = 1\n"
+
+    def test_no_sibling_files_present_pulses_only_test_and_impl(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod.run_red(spec(tmp_path))
+        pulsed = pod._orchestrator.pulse.call_args.args[0]
+        assert set(pulsed.keys()) == {"test_order.py"}
+
+
+# ---------------------------------------------------------------------------
 # run_green
 # ---------------------------------------------------------------------------
 
