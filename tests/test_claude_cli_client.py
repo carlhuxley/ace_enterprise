@@ -51,12 +51,13 @@ class TestGenerateSignature:
         cmd = run.call_args.args[0]
         assert "--system-prompt" in cmd
 
-    def test_prompt_is_last_positional_arg(self):
+    def test_prompt_is_sent_via_stdin_not_argv(self):
         client = ClaudeCliClient()
         with patch("subprocess.run", return_value=_fake_completed_process()) as run:
             client.generate(prompt="hi there", system_prompt="be terse")
+        assert run.call_args.kwargs["input"] == "hi there"
         cmd = run.call_args.args[0]
-        assert cmd[-1] == "hi there"
+        assert "hi there" not in cmd
 
     def test_reflector_style_call_does_not_raise(self):
         # Exact call shape Reflector.reflect()/Curator.curate() use.
@@ -81,16 +82,35 @@ class TestToolsDisabled:
         assert "--tools" in cmd
         assert cmd[cmd.index("--tools") + 1] == ""
 
-    def test_double_dash_separates_flags_from_prompt(self):
-        # Prevents a prompt that happens to start with "-" from being
-        # parsed as a CLI flag.
+
+class TestPromptViaStdin:
+    """#62: the prompt used to be appended to argv (`cmd += ["--", prompt]`),
+    which raises `OSError: [Errno 7] Argument list too long` once its
+    encoded size crosses the kernel's MAX_ARG_STRLEN. Stdin has no
+    comparable size ceiling."""
+
+    def test_prompt_starting_with_dash_is_safe_via_stdin(self):
+        # A prompt starting with "-" used to need a `--` argv separator to
+        # avoid being parsed as a CLI flag; now moot since the prompt
+        # travels via stdin, never touching argv at all.
         client = ClaudeCliClient()
         with patch("subprocess.run", return_value=_fake_completed_process()) as run:
             client.generate(prompt="-rf everything")
+        assert run.call_args.kwargs["input"] == "-rf everything"
         cmd = run.call_args.args[0]
-        assert "--" in cmd
-        assert cmd[cmd.index("--") + 1] == "-rf everything"
-        assert cmd[-1] == "-rf everything"
+        assert "-rf everything" not in cmd
+
+    def test_large_prompt_never_touches_argv(self):
+        # Regression for the actual failure: a prompt well past a typical
+        # 128 KiB single-argv-string limit must still work, because it
+        # never becomes an argv element at all.
+        large_prompt = "x" * 500_000
+        client = ClaudeCliClient()
+        with patch("subprocess.run", return_value=_fake_completed_process()) as run:
+            client.generate(prompt=large_prompt)
+        assert run.call_args.kwargs["input"] == large_prompt
+        cmd = run.call_args.args[0]
+        assert all(len(arg) < 1000 for arg in cmd)
 
 
 class TestModelAttribution:

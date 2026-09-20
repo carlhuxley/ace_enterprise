@@ -153,14 +153,23 @@ class ClaudeCliClient:
             f"{_NO_TOOLS_SYSTEM_PROMPT}\n\n{system_prompt}" if system_prompt else _NO_TOOLS_SYSTEM_PROMPT
         )
         cmd += ["--system-prompt", combined_system_prompt]
-        cmd += ["--", prompt]
 
         result = None
         last_error: Exception | None = None
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
+                # prompt travels via stdin, not argv (#62): a prompt appended
+                # to argv (the previous `cmd += ["--", prompt]`) raises
+                # `OSError: [Errno 7] Argument list too long` once its
+                # encoded size crosses the kernel's MAX_ARG_STRLEN (128 KiB
+                # per argument) -- confirmed live once accumulated ace tdd
+                # prompts (test code + implementation + error output +
+                # playbook bullets) grew past it. stdin has no comparable
+                # size ceiling. `claude --print` reads the prompt from
+                # stdin when none is given positionally (confirmed live).
                 result = subprocess.run(
                     cmd,
+                    input=prompt,
                     capture_output=True,
                     text=True,
                     timeout=self._timeout,
