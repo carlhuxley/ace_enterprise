@@ -1315,6 +1315,7 @@
         "PlaybookManager"
       ],
       "depends_on": [
+        "src/audit/schemas.py",
         "src/config/settings.py",
         "src/playbook/content_safety.py",
         "src/playbook/deduplication.py",
@@ -1412,6 +1413,7 @@
     "src/reliability/playbook_analyzer.py": {
       "provides": [
         "BulletReliability",
+        "BulletUplift",
         "PlaybookReliabilityAnalyzer"
       ],
       "depends_on": [

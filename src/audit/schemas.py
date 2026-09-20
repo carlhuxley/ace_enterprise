@@ -58,6 +58,7 @@ class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum change
     PLAYBOOK_CREATED = "playbook_created"         # New playbook created
     PLAYBOOK_SNAPSHOT = "playbook_snapshot"       # Checkpoint created
     CONFIG_CHANGED = "config_changed"             # Configuration change
+    PLAYBOOK_BULLET_DEPRECATED = "playbook_bullet_deprecated"  # Bullet removed for negative causal uplift
 
 
 class AuditEvent(BaseModel):

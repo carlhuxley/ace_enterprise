@@ -3,7 +3,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.reliability.playbook_analyzer import BulletReliability, PlaybookReliabilityAnalyzer
+from src.reliability.playbook_analyzer import (
+    BulletReliability,
+    BulletUplift,
+    PlaybookReliabilityAnalyzer,
+)
 from src.reliability.tdd_cycle_analyzer import CyclePeriod, TDDCycleAnalyzer
 
 # ---------------------------------------------------------------------------
@@ -170,3 +174,96 @@ def test_bullet_reliability_returns_dataclass():
     analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
     result = analyzer.bullet_reliability("pb1")
     assert isinstance(result[0], BulletReliability)
+
+
+# ---------------------------------------------------------------------------
+# PlaybookReliabilityAnalyzer.bullet_uplift (playbook_uplift_and_deprecation.feature)
+# ---------------------------------------------------------------------------
+
+def test_bullet_uplift_empty_when_no_records():
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger([]), MagicMock())
+    assert analyzer.bullet_uplift("pb1") == []
+
+
+def test_bullet_uplift_computes_treatment_minus_control():
+    records = [
+        _cycle("SUCCESS", 0, bullet_ids=["b1"]),   # treatment, first-pass
+        _cycle("FAILED", 0, bullet_ids=["b1"]),    # treatment, not first-pass
+        _cycle("SUCCESS", 0, bullet_ids=[]),       # control, first-pass
+        _cycle("SUCCESS", 0, bullet_ids=[]),       # control, first-pass
+        _cycle("FAILED", 0, bullet_ids=[]),        # control, not first-pass
+        _cycle("FAILED", 0, bullet_ids=[]),        # control, not first-pass
+    ]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1")
+    assert len(result) == 1
+    b = result[0]
+    assert b.bullet_id == "b1"
+    assert b.treatment_samples == 2
+    assert b.control_samples == 4
+    assert b.treatment_first_pass_rate == pytest.approx(0.5)
+    assert b.control_first_pass_rate == pytest.approx(0.5)
+    assert b.uplift == pytest.approx(0.0)
+
+
+def test_bullet_uplift_negative_when_bullet_correlates_with_failure():
+    records = [
+        _cycle("FAILED", 0, bullet_ids=["bad"]),
+        _cycle("FAILED", 0, bullet_ids=["bad"]),
+        _cycle("SUCCESS", 0, bullet_ids=[]),
+        _cycle("SUCCESS", 0, bullet_ids=[]),
+    ]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1")
+    b = result[0]
+    assert b.treatment_first_pass_rate == pytest.approx(0.0)
+    assert b.control_first_pass_rate == pytest.approx(1.0)
+    assert b.uplift == pytest.approx(-1.0)
+
+
+def test_bullet_uplift_is_none_when_no_control_group_exists():
+    records = [
+        _cycle("SUCCESS", 0, bullet_ids=["always"]),
+        _cycle("FAILED", 0, bullet_ids=["always"]),
+    ]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1")
+    b = result[0]
+    assert b.control_samples == 0
+    assert b.control_first_pass_rate is None
+    assert b.uplift is None
+
+
+def test_bullet_uplift_excludes_bullets_below_min_samples():
+    records = [
+        _cycle("SUCCESS", 0, bullet_ids=["rare"]),
+        _cycle("SUCCESS", 0, bullet_ids=[]),
+        _cycle("SUCCESS", 0, bullet_ids=[]),
+    ]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1", min_samples=3)
+    assert result == []
+
+
+def test_bullet_uplift_sorted_worst_first_undefined_last():
+    records = [
+        # "good": always first-pass when retrieved, control mostly fails
+        _cycle("SUCCESS", 0, bullet_ids=["good", "undefined"]),
+        _cycle("FAILED", 0, bullet_ids=["undefined"]),
+        # "bad": always fails when retrieved, control mostly succeeds
+        _cycle("FAILED", 0, bullet_ids=["bad", "undefined"]),
+        _cycle("SUCCESS", 0, bullet_ids=["undefined"]),
+        # "undefined" is retrieved in every single cycle -- no control group ever exists
+    ]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1")
+    ids = [r.bullet_id for r in result]
+    assert ids.index("bad") < ids.index("good")
+    assert ids[-1] == "undefined"
+
+
+def test_bullet_uplift_returns_dataclass():
+    records = [_cycle("SUCCESS", 0, bullet_ids=["b1"]), _cycle("SUCCESS", 0, bullet_ids=[])]
+    analyzer = PlaybookReliabilityAnalyzer(_make_logger(records), MagicMock())
+    result = analyzer.bullet_uplift("pb1")
+    assert isinstance(result[0], BulletUplift)

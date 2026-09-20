@@ -1,5 +1,5 @@
 """Tests for PlaybookManager core operations (ace_enterprise-xji)."""
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -546,6 +546,100 @@ class TestRemoveBullet:
         bullet = _add(pm, "pb1", "strategies_and_hard_rules", "to remove")
         pm.remove_bullet("pb1", bullet.id)
         assert pm.get_playbook("pb1").metadata.total_bullets == 0
+
+
+# ---------------------------------------------------------------------------
+# deprecate_bullet (playbook_uplift_and_deprecation.feature)
+# ---------------------------------------------------------------------------
+
+class TestDeprecateBullet:
+    def test_removes_the_bullet(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "negative uplift")
+        assert pm.deprecate_bullet("pb1", bullet.id, "uplift below threshold") is True
+        remaining = pm.get_section_bullets("pb1", "strategies_and_hard_rules")
+        assert all(b.id != bullet.id for b in remaining)
+
+    def test_returns_false_when_bullet_not_found(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        assert pm.deprecate_bullet("pb1", "ctx-99999", "no such bullet") is False
+
+    def test_raises_for_unknown_playbook(self, tmp_path):
+        pm = _manager(tmp_path)
+        with pytest.raises(ValueError, match="not found"):
+            pm.deprecate_bullet("nope", "ctx-1", "any reason")
+
+    def test_no_audit_client_still_removes_the_bullet(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "to remove")
+        assert pm.deprecate_bullet("pb1", bullet.id, "reason", audit_client=None) is True
+
+    def test_no_audit_event_emitted_when_bullet_not_found(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        audit = MagicMock()
+        pm.deprecate_bullet("pb1", "ctx-99999", "no such bullet", audit_client=audit)
+        audit.emit_simple.assert_not_called()
+
+    def test_emits_playbook_bullet_deprecated_event(self, tmp_path):
+        from src.audit.schemas import AuditEventType
+
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "negative uplift")
+        audit = MagicMock()
+
+        pm.deprecate_bullet("pb1", bullet.id, "uplift below threshold", audit_client=audit)
+
+        audit.emit_simple.assert_called_once()
+        kwargs = audit.emit_simple.call_args.kwargs
+        assert kwargs["event_type"] == AuditEventType.PLAYBOOK_BULLET_DEPRECATED
+        assert kwargs["payload"]["bullet_id"] == bullet.id
+        assert kwargs["payload"]["reason"] == "uplift below threshold"
+        assert kwargs["playbook_id"] == "pb1"
+
+    def test_audit_emit_failure_does_not_undo_the_removal(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "to remove")
+        audit = MagicMock()
+        audit.emit_simple.side_effect = RuntimeError("audit store down")
+
+        result = pm.deprecate_bullet("pb1", bullet.id, "reason", audit_client=audit)
+
+        assert result is True
+        remaining = pm.get_section_bullets("pb1", "strategies_and_hard_rules")
+        assert all(b.id != bullet.id for b in remaining)
+
+    def test_real_audit_client_appends_a_verifiable_hash_chained_event(self, tmp_path):
+        """End-to-end with a real LocalAuditClient/AuditStore (SQLite) --
+        confirms the deprecation event actually lands on a real hash chain
+        that still verifies, not just that a duck-typed mock was called."""
+        from src.audit.local_client import LocalAuditClient
+        from src.audit.schemas import AuditEventType
+        from src.audit.store import AuditQuery, AuditStore
+
+        db_path = tmp_path / "audit.db"
+        audit = LocalAuditClient(database_url=f"sqlite:///{db_path}")
+        # A prior, unrelated event already on the chain before deprecation.
+        audit.emit_simple(event_type=AuditEventType.PLAYBOOK_CREATED, actor_id="test", payload={})
+
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "negative uplift")
+
+        pm.deprecate_bullet("pb1", bullet.id, "uplift below threshold", audit_client=audit)
+
+        store = AuditStore(audit.database_url)
+        valid, error = store.verify_full_chain()
+        assert valid is True, error
+
+        result = store.query(AuditQuery(event_types=[AuditEventType.PLAYBOOK_BULLET_DEPRECATED]))
+        assert len(result.events) == 1
+        assert result.events[0].payload["bullet_id"] == bullet.id
 
 
 # ---------------------------------------------------------------------------

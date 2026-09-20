@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.audit.schemas import AuditEventType
 from src.config.settings import settings
 from src.playbook.content_safety import (
     NEEDS_REVIEW_TAG,
@@ -599,6 +600,48 @@ class PlaybookManager:
                     return True
 
         return False
+
+    def deprecate_bullet(
+        self,
+        playbook_id: str,
+        bullet_id: str,
+        reason: str,
+        *,
+        audit_client: Any = None,
+        actor_id: str = "playbook-pruner",
+    ) -> bool:
+        """Remove a bullet for a stated reason (e.g. negative causal
+        uplift) and, when an audit_client is supplied, append a
+        PLAYBOOK_BULLET_DEPRECATED event to the hash-chained audit log --
+        remove_bullet() itself has no audit trail, since most of its
+        callers (dedup, content-safety rejection) don't need one.
+
+        Best-effort on the audit side: emit_simple failing/raising never
+        undoes the removal that already happened -- the playbook write and
+        the audit write are two separate operations, and losing the audit
+        record is preferable to silently leaving a known-bad bullet active
+        because of an unrelated audit-store outage.
+
+        Returns:
+            True if the bullet was found and removed, False otherwise
+            (matching remove_bullet's own return contract). No audit event
+            is emitted when nothing was actually removed.
+
+        Raises:
+            ValueError: If playbook not found (propagated from remove_bullet).
+        """
+        removed = self.remove_bullet(playbook_id, bullet_id)
+        if removed and audit_client is not None:
+            try:
+                audit_client.emit_simple(
+                    event_type=AuditEventType.PLAYBOOK_BULLET_DEPRECATED,
+                    actor_id=actor_id,
+                    payload={"bullet_id": bullet_id, "reason": reason},
+                    playbook_id=playbook_id,
+                )
+            except Exception as exc:  # noqa: BLE001 -- audit is best-effort here
+                logger.warning(f"PlaybookManager: failed to emit deprecation audit event: {exc}")
+        return removed
 
     # ============================================================================
     # Private Helper Methods
