@@ -69,6 +69,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When building multiple features, don't stop at the first failure",
     )
     tdd.add_argument(
+        "--diff-editing",
+        action="store_true",
+        help=(
+            "Opt in to SEARCH/REPLACE-block GREEN patching instead of always "
+            "regenerating the whole file, once an implementation already exists "
+            "to patch against (default: off; same as .ace/config.yaml's "
+            "diff_editing: true)"
+        ),
+    )
+    tdd.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -178,6 +188,8 @@ def cmd_tdd(args: argparse.Namespace) -> int:
         config.playbook_id = args.playbook_id
     if args.max_iterations:
         config.max_iterations = args.max_iterations
+    if args.diff_editing:
+        config.diff_editing = True
 
     if args.model and not _valid_model_ref(args.model):
         return 1
@@ -192,6 +204,8 @@ def cmd_tdd(args: argparse.Namespace) -> int:
     print(f"Source →    {config.src_dir.relative_to(project_root)}")
     if args.model:
         print(f"Model:      {args.model} (--model override)")
+    if config.diff_editing:
+        print("Diff edits: on (SEARCH/REPLACE-block GREEN patching)")
     if len(features) > 1:
         print(f"Features:   {len(features)} — build order: "
               f"{', '.join(f.stem for f in features)}")

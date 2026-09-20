@@ -23,6 +23,7 @@ def _args(**overrides):
         "max_iterations": None,
         "no_learn": False,
         "keep_going": False,
+        "diff_editing": False,
         "verbose": False,
     }
     defaults.update(overrides)
@@ -79,6 +80,18 @@ class TestSuccessPath:
             cmd_tdd(_args(project=project, no_learn=True))
         _, kwargs = build_agent.call_args
         assert kwargs["skip_learn"] is True
+
+    def test_diff_editing_flag_sets_config_before_build_agent(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            cmd_tdd(_args(project=project, diff_editing=True))
+        config = build_agent.call_args.args[0]
+        assert config.diff_editing is True
+
+    def test_no_diff_editing_flag_leaves_config_default(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            cmd_tdd(_args(project=project))
+        config = build_agent.call_args.args[0]
+        assert config.diff_editing is False
 
     def test_requirement_override_forwarded_to_handle(self, project):
         handle = _stub_handle()

@@ -78,6 +78,11 @@ def build_agent(
     capabilities AutonomousTDDAgent had natively that IterativeTDDRunner needs
     handed in explicitly (see tdd_cycle_runner.py's audit_client and
     iterative_tdd_runner.py's redundancy_checker params).
+
+    config.diff_editing (.ace/config.yaml `diff_editing: true`, or `ace tdd
+    --diff-editing`) turns on PythonLanguagePod's opt-in SEARCH/REPLACE-block
+    GREEN patching (#55) instead of always regenerating the whole file --
+    default False, unchanged whole-file-regeneration behavior.
     """
     from src.agents.incremental_planner import IncrementalPlanner
     from src.agents.podman_runner import PodmanRunner
@@ -118,7 +123,9 @@ def build_agent(
         playbook_id=config.playbook_id,
     )
     orchestrator = PodmanOrchestrator(runner=PodmanRunner())
-    pod = PythonLanguagePod(worker, config.project_root, orchestrator)
+    pod = PythonLanguagePod(
+        worker, config.project_root, orchestrator, use_patch_mode=config.diff_editing,
+    )
 
     reflector = curator = None
     if not skip_learn:

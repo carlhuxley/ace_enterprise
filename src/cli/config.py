@@ -41,6 +41,11 @@ class ProjectConfig:
     worker_model: str = ""
     repair_model: str = ""
     escalation_model: str = ""
+    # #55: opt-in SEARCH/REPLACE-block GREEN patching (src/utils/patcher.py)
+    # instead of whole-file regeneration, once an implementation already
+    # exists to patch against. Strictly additive -- False preserves today's
+    # whole-file-regeneration behavior unchanged.
+    diff_editing: bool = False
 
     def discover_features(self) -> list[Path]:
         """Return all .feature files in <project>/features/, falling back to project root."""
@@ -88,6 +93,7 @@ class ProjectConfig:
             worker_model=worker_model,
             repair_model=repair_model,
             escalation_model=escalation_model,
+            diff_editing=bool(raw.get("diff_editing", False)),
         )
 
 

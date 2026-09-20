@@ -50,6 +50,15 @@ class TestBuildAgentWiring:
         assert handle.test_dir == config.test_dir
         assert handle.src_dir == config.src_dir
 
+    def test_diff_editing_off_by_default(self, config):
+        handle = build_agent(config)
+        assert handle.runner._pod._use_patch_mode is False
+
+    def test_diff_editing_true_enables_patch_mode_on_the_pod(self, config):
+        config.diff_editing = True
+        handle = build_agent(config)
+        assert handle.runner._pod._use_patch_mode is True
+
     def test_learn_enabled_by_default_wires_reflector_and_curator(self, config):
         handle = build_agent(config)
         kwargs = handle.runner._runner_kwargs

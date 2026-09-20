@@ -136,6 +136,17 @@ def test_team_id_read_from_config_file(tmp_path):
     assert config.team_id == "payments"
 
 
+def test_diff_editing_defaults_to_false(tmp_path):
+    config = ProjectConfig.load(_project(tmp_path))
+    assert config.diff_editing is False
+
+
+def test_diff_editing_read_from_config_file(tmp_path):
+    project = _project(tmp_path, config_yaml="diff_editing: true\n")
+    config = ProjectConfig.load(project)
+    assert config.diff_editing is True
+
+
 # ---------------------------------------------------------------------------
 # candidate_models (AdaptiveBroker routing)
 # ---------------------------------------------------------------------------
