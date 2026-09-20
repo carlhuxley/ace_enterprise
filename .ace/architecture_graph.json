@@ -639,7 +639,9 @@
         "src/benchmark/rubrics/base.py",
         "src/benchmark/rubrics/code.py",
         "src/benchmark/rubrics/docs.py",
-        "src/benchmark/rubrics/tests.py"
+        "src/benchmark/rubrics/go_code.py",
+        "src/benchmark/rubrics/tests.py",
+        "src/benchmark/rubrics/typescript_code.py"
       ]
     },
     "src/benchmark/rubrics/analysis.py": {
@@ -677,11 +679,31 @@
         "src/benchmark/rubrics/base.py"
       ]
     },
+    "src/benchmark/rubrics/go_code.py": {
+      "provides": [
+        "GoGenerationRubric"
+      ],
+      "depends_on": [
+        "src/agents/go_runner.py",
+        "src/agents/podman_orchestrator.py",
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
     "src/benchmark/rubrics/tests.py": {
       "provides": [
         "TestWritingRubric"
       ],
       "depends_on": [
+        "src/benchmark/rubrics/base.py"
+      ]
+    },
+    "src/benchmark/rubrics/typescript_code.py": {
+      "provides": [
+        "TypeScriptGenerationRubric"
+      ],
+      "depends_on": [
+        "src/agents/podman_orchestrator.py",
+        "src/agents/typescript_runner.py",
         "src/benchmark/rubrics/base.py"
       ]
     },

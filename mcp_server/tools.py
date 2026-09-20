@@ -365,10 +365,10 @@ class ACETools:
             tools.append({
                 "name": "build_feature_ensemble",
                 "description": (
-                    "Build a Python feature with 2+ candidate models, score each "
-                    "implementation blind (the evaluator never sees which model wrote "
-                    "which), and commit the winner. Every candidate is generated in its "
-                    "own throwaway sandbox; nothing reaches your project until it wins. "
+                    "Build a Python, TypeScript, or Go feature with 2+ candidate models, "
+                    "score each implementation blind (the evaluator never sees which model "
+                    "wrote which), and commit the winner. Every candidate is generated in "
+                    "its own throwaway sandbox; nothing reaches your project until it wins. "
                     "Returns per-candidate scores (attribution revealed post-scoring) and "
                     "a consensus report on how far the models' solutions converged."
                 ),
@@ -382,6 +382,11 @@ class ACETools:
                         "feature_file": {
                             "type": "string",
                             "description": "Path to a .feature file to build from. Takes precedence over 'feature'.",
+                        },
+                        "language": {
+                            "type": "string",
+                            "enum": ["python", "typescript", "go"],
+                            "description": "Target language for every candidate (default: python).",
                         },
                         "models": {
                             "type": "array",

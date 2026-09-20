@@ -2,7 +2,7 @@
 
 # Architecture Dependency Graph
 
-163 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
+165 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
 
 Deterministically derived from real `import` statements (AST-parsed), not hand-maintained or LLM-narrated -- see `src/utils/dependency_graph.py`.
 
@@ -76,112 +76,114 @@ flowchart TD
     n65["base"]
     n66["code"]
     n67["docs"]
-    n68["tests"]
-    n69["semantic_analyzer"]
-    n70["__init__"]
-    n71["adaptive_broker"]
-    n72["advisor"]
-    n73["bayesian"]
-    n74["calibration"]
-    n75["capability_registry"]
-    n76["effgen_adapter"]
-    n77["feedback"]
-    n78["human_decision"]
-    n79["model_router"]
-    n80["performance_aggregator"]
-    n81["regression_detector"]
-    n82["__init__"]
-    n83["config"]
-    n84["factory"]
-    n85["main"]
-    n86["project_builder"]
-    n87["__init__"]
-    n88["settings"]
+    n68["go_code"]
+    n69["tests"]
+    n70["typescript_code"]
+    n71["semantic_analyzer"]
+    n72["__init__"]
+    n73["adaptive_broker"]
+    n74["advisor"]
+    n75["bayesian"]
+    n76["calibration"]
+    n77["capability_registry"]
+    n78["effgen_adapter"]
+    n79["feedback"]
+    n80["human_decision"]
+    n81["model_router"]
+    n82["performance_aggregator"]
+    n83["regression_detector"]
+    n84["__init__"]
+    n85["config"]
+    n86["factory"]
+    n87["main"]
+    n88["project_builder"]
     n89["__init__"]
-    n90["contract_architect"]
-    n91["contract_decomposer"]
-    n92["contract_driven"]
-    n93["contract_schema"]
-    n94["module_architect"]
-    n95["module_tdd_builder"]
-    n96["project_architect"]
-    n97["__init__"]
-    n98["__init__"]
-    n99["module"]
+    n90["settings"]
+    n91["__init__"]
+    n92["contract_architect"]
+    n93["contract_decomposer"]
+    n94["contract_driven"]
+    n95["contract_schema"]
+    n96["module_architect"]
+    n97["module_tdd_builder"]
+    n98["project_architect"]
+    n99["__init__"]
     n100["__init__"]
     n101["module"]
     n102["__init__"]
     n103["module"]
     n104["__init__"]
-    n105["consensus"]
-    n106["learner"]
-    n107["models"]
-    n108["voting"]
-    n109["main"]
-    n110["__init__"]
-    n111["experiment_knowledge"]
-    n112["mlflow_callback"]
-    n113["postgres_mlflow_callback"]
-    n114["query_interface"]
-    n115["__init__"]
-    n116["clustering"]
-    n117["content_safety"]
-    n118["deduplication"]
-    n119["distillation_router"]
-    n120["learn_cli"]
-    n121["maintenance"]
-    n122["manager"]
-    n123["markdown_importer"]
-    n124["postgres_adapter"]
-    n125["postgres_retriever"]
-    n126["qa"]
-    n127["retrieval"]
-    n128["__init__"]
-    n129["config"]
-    n130["decision_record"]
-    n131["detector"]
-    n132["__init__"]
-    n133["playbook_analyzer"]
-    n134["tdd_cycle_analyzer"]
-    n135["__init__"]
-    n136["cgr3_retriever"]
-    n137["context_scorer"]
-    n138["schemas"]
-    n139["service"]
-    n140["__init__"]
-    n141["database"]
-    n142["experiment_logger"]
-    n143["models"]
-    n144["repository"]
-    n145["schemas"]
-    n146["__init__"]
-    n147["claude_cli_client"]
-    n148["code_extraction"]
-    n149["context_map"]
-    n150["dependency_graph"]
-    n151["effgen_client"]
-    n152["embedding"]
-    n153["file_lock"]
-    n154["id_generator"]
-    n155["import_validator"]
-    n156["llm_client"]
-    n157["mermaid_validation"]
-    n158["patcher"]
-    n159["playbook_enforcer"]
-    n160["session_log"]
-    n161["third_party_imports"]
-    n162["topo"]
+    n105["module"]
+    n106["__init__"]
+    n107["consensus"]
+    n108["learner"]
+    n109["models"]
+    n110["voting"]
+    n111["main"]
+    n112["__init__"]
+    n113["experiment_knowledge"]
+    n114["mlflow_callback"]
+    n115["postgres_mlflow_callback"]
+    n116["query_interface"]
+    n117["__init__"]
+    n118["clustering"]
+    n119["content_safety"]
+    n120["deduplication"]
+    n121["distillation_router"]
+    n122["learn_cli"]
+    n123["maintenance"]
+    n124["manager"]
+    n125["markdown_importer"]
+    n126["postgres_adapter"]
+    n127["postgres_retriever"]
+    n128["qa"]
+    n129["retrieval"]
+    n130["__init__"]
+    n131["config"]
+    n132["decision_record"]
+    n133["detector"]
+    n134["__init__"]
+    n135["playbook_analyzer"]
+    n136["tdd_cycle_analyzer"]
+    n137["__init__"]
+    n138["cgr3_retriever"]
+    n139["context_scorer"]
+    n140["schemas"]
+    n141["service"]
+    n142["__init__"]
+    n143["database"]
+    n144["experiment_logger"]
+    n145["models"]
+    n146["repository"]
+    n147["schemas"]
+    n148["__init__"]
+    n149["claude_cli_client"]
+    n150["code_extraction"]
+    n151["context_map"]
+    n152["dependency_graph"]
+    n153["effgen_client"]
+    n154["embedding"]
+    n155["file_lock"]
+    n156["id_generator"]
+    n157["import_validator"]
+    n158["llm_client"]
+    n159["mermaid_validation"]
+    n160["patcher"]
+    n161["playbook_enforcer"]
+    n162["session_log"]
+    n163["third_party_imports"]
+    n164["topo"]
     n1 --> n57
     n2 --> n15
     n2 --> n16
     n2 --> n19
     n2 --> n57
     n2 --> n60
-    n2 --> n105
-    n2 --> n106
     n2 --> n107
-    n2 --> n145
-    n2 --> n156
+    n2 --> n108
+    n2 --> n109
+    n2 --> n147
+    n2 --> n158
     n5 --> n11
     n5 --> n13
     n6 --> n13
@@ -202,7 +204,7 @@ flowchart TD
     n15 --> n38
     n15 --> n39
     n15 --> n40
-    n15 --> n149
+    n15 --> n151
     n16 --> n4
     n16 --> n5
     n16 --> n11
@@ -214,7 +216,7 @@ flowchart TD
     n18 --> n8
     n18 --> n11
     n18 --> n13
-    n18 --> n158
+    n18 --> n160
     n22 --> n21
     n22 --> n26
     n22 --> n27
@@ -239,11 +241,11 @@ flowchart TD
     n31 --> n21
     n32 --> n11
     n32 --> n57
-    n32 --> n145
-    n33 --> n122
-    n33 --> n142
-    n33 --> n145
-    n36 --> n156
+    n32 --> n147
+    n33 --> n124
+    n33 --> n144
+    n33 --> n147
+    n36 --> n158
     n37 --> n11
     n37 --> n13
     n38 --> n13
@@ -253,8 +255,8 @@ flowchart TD
     n40 --> n11
     n41 --> n42
     n41 --> n43
-    n43 --> n142
-    n48 --> n77
+    n43 --> n144
+    n48 --> n79
     n49 --> n53
     n49 --> n55
     n49 --> n57
@@ -276,68 +278,48 @@ flowchart TD
     n60 --> n63
     n62 --> n60
     n62 --> n61
-    n62 --> n143
-    n62 --> n144
+    n62 --> n145
+    n62 --> n146
     n63 --> n64
     n63 --> n65
     n63 --> n66
     n63 --> n67
     n63 --> n68
+    n63 --> n69
+    n63 --> n70
     n64 --> n65
     n66 --> n13
     n66 --> n14
     n66 --> n65
     n67 --> n65
+    n68 --> n6
+    n68 --> n13
     n68 --> n65
-    n70 --> n72
-    n70 --> n75
-    n70 --> n76
-    n70 --> n78
-    n71 --> n80
-    n72 --> n75
-    n74 --> n15
-    n74 --> n16
-    n74 --> n56
-    n74 --> n156
-    n76 --> n75
-    n78 --> n72
-    n79 --> n58
-    n79 --> n71
-    n79 --> n74
-    n79 --> n80
-    n80 --> n57
-    n80 --> n58
-    n80 --> n73
-    n80 --> n81
-    n83 --> n84
-    n84 --> n4
-    n84 --> n9
-    n84 --> n10
-    n84 --> n13
-    n84 --> n14
-    n84 --> n18
-    n84 --> n19
-    n84 --> n40
-    n84 --> n56
-    n84 --> n57
-    n84 --> n79
-    n84 --> n83
-    n84 --> n88
-    n84 --> n99
-    n84 --> n103
-    n84 --> n122
-    n84 --> n147
-    n84 --> n149
-    n84 --> n156
-    n85 --> n4
-    n85 --> n25
-    n85 --> n26
-    n85 --> n56
-    n85 --> n83
-    n85 --> n84
+    n69 --> n65
+    n70 --> n13
+    n70 --> n38
+    n70 --> n65
+    n72 --> n74
+    n72 --> n77
+    n72 --> n78
+    n72 --> n80
+    n73 --> n82
+    n74 --> n77
+    n76 --> n15
+    n76 --> n16
+    n76 --> n56
+    n76 --> n158
+    n78 --> n77
+    n80 --> n74
+    n81 --> n58
+    n81 --> n73
+    n81 --> n76
+    n81 --> n82
+    n82 --> n57
+    n82 --> n58
+    n82 --> n75
+    n82 --> n83
     n85 --> n86
-    n85 --> n96
-    n85 --> n162
     n86 --> n4
     n86 --> n9
     n86 --> n10
@@ -345,156 +327,184 @@ flowchart TD
     n86 --> n14
     n86 --> n18
     n86 --> n19
-    n86 --> n20
     n86 --> n40
     n86 --> n56
     n86 --> n57
-    n86 --> n94
-    n86 --> n95
-    n86 --> n96
-    n86 --> n99
-    n86 --> n103
-    n86 --> n122
+    n86 --> n81
+    n86 --> n85
+    n86 --> n90
+    n86 --> n101
+    n86 --> n105
+    n86 --> n124
     n86 --> n149
-    n86 --> n150
-    n86 --> n156
-    n86 --> n161
-    n89 --> n90
-    n89 --> n91
-    n89 --> n92
-    n89 --> n93
-    n89 --> n94
-    n89 --> n95
-    n90 --> n56
-    n90 --> n57
-    n90 --> n93
-    n90 --> n156
+    n86 --> n151
+    n86 --> n158
+    n87 --> n4
+    n87 --> n25
+    n87 --> n26
+    n87 --> n56
+    n87 --> n85
+    n87 --> n86
+    n87 --> n88
+    n87 --> n98
+    n87 --> n164
+    n88 --> n4
+    n88 --> n9
+    n88 --> n10
+    n88 --> n13
+    n88 --> n14
+    n88 --> n18
+    n88 --> n19
+    n88 --> n20
+    n88 --> n40
+    n88 --> n56
+    n88 --> n57
+    n88 --> n96
+    n88 --> n97
+    n88 --> n98
+    n88 --> n101
+    n88 --> n105
+    n88 --> n124
+    n88 --> n151
+    n88 --> n152
+    n88 --> n158
+    n88 --> n163
+    n91 --> n92
     n91 --> n93
-    n91 --> n151
-    n92 --> n13
-    n92 --> n14
-    n93 --> n92
+    n91 --> n94
+    n91 --> n95
+    n91 --> n96
+    n91 --> n97
+    n92 --> n56
+    n92 --> n57
+    n92 --> n95
+    n92 --> n158
+    n93 --> n95
+    n93 --> n153
     n94 --> n13
     n94 --> n14
-    n94 --> n20
-    n94 --> n56
-    n94 --> n57
-    n94 --> n95
-    n94 --> n156
-    n94 --> n161
-    n95 --> n56
-    n95 --> n57
     n95 --> n94
-    n95 --> n145
-    n95 --> n148
-    n95 --> n156
-    n96 --> n4
+    n96 --> n13
+    n96 --> n14
+    n96 --> n20
     n96 --> n56
     n96 --> n57
-    n96 --> n156
-    n96 --> n162
-    n97 --> n99
-    n97 --> n101
-    n97 --> n103
-    n99 --> n88
-    n99 --> n122
-    n99 --> n145
-    n99 --> n156
-    n101 --> n88
-    n101 --> n122
-    n101 --> n127
-    n101 --> n145
-    n101 --> n156
-    n103 --> n88
-    n103 --> n145
-    n103 --> n156
-    n104 --> n107
-    n105 --> n107
-    n105 --> n152
-    n106 --> n99
-    n106 --> n101
-    n106 --> n103
-    n106 --> n105
-    n106 --> n107
-    n106 --> n108
-    n106 --> n122
-    n106 --> n145
-    n106 --> n156
+    n96 --> n97
+    n96 --> n158
+    n96 --> n163
+    n97 --> n56
+    n97 --> n57
+    n97 --> n96
+    n97 --> n147
+    n97 --> n150
+    n97 --> n158
+    n98 --> n4
+    n98 --> n56
+    n98 --> n57
+    n98 --> n158
+    n98 --> n164
+    n99 --> n101
+    n99 --> n103
+    n99 --> n105
+    n101 --> n90
+    n101 --> n124
+    n101 --> n147
+    n101 --> n158
+    n103 --> n90
+    n103 --> n124
+    n103 --> n129
+    n103 --> n147
+    n103 --> n158
+    n105 --> n90
+    n105 --> n147
+    n105 --> n158
+    n106 --> n109
+    n107 --> n109
+    n107 --> n154
+    n108 --> n101
+    n108 --> n103
+    n108 --> n105
     n108 --> n107
-    n109 --> n88
-    n110 --> n111
-    n110 --> n112
-    n110 --> n114
-    n112 --> n111
-    n113 --> n124
-    n113 --> n142
-    n113 --> n145
-    n114 --> n111
-    n115 --> n122
-    n115 --> n124
-    n115 --> n127
-    n116 --> n145
-    n118 --> n88
-    n118 --> n145
-    n119 --> n116
-    n119 --> n122
-    n119 --> n145
-    n119 --> n152
-    n120 --> n56
-    n120 --> n57
-    n120 --> n122
-    n120 --> n123
-    n120 --> n145
-    n121 --> n122
-    n122 --> n88
-    n122 --> n117
-    n122 --> n118
-    n122 --> n145
-    n122 --> n152
-    n122 --> n154
-    n124 --> n88
-    n124 --> n143
-    n124 --> n144
-    n124 --> n145
-    n124 --> n152
+    n108 --> n109
+    n108 --> n110
+    n108 --> n124
+    n108 --> n147
+    n108 --> n158
+    n110 --> n109
+    n111 --> n90
+    n112 --> n113
+    n112 --> n114
+    n112 --> n116
+    n114 --> n113
+    n115 --> n126
+    n115 --> n144
+    n115 --> n147
+    n116 --> n113
+    n117 --> n124
+    n117 --> n126
+    n117 --> n129
+    n118 --> n147
+    n120 --> n90
+    n120 --> n147
+    n121 --> n118
+    n121 --> n124
+    n121 --> n147
+    n121 --> n154
+    n122 --> n56
+    n122 --> n57
+    n122 --> n124
+    n122 --> n125
+    n122 --> n147
+    n123 --> n124
+    n124 --> n90
+    n124 --> n119
+    n124 --> n120
+    n124 --> n147
     n124 --> n154
-    n125 --> n88
-    n125 --> n124
-    n125 --> n145
-    n126 --> n122
-    n126 --> n127
+    n124 --> n156
+    n126 --> n90
     n126 --> n145
+    n126 --> n146
+    n126 --> n147
+    n126 --> n154
     n126 --> n156
-    n127 --> n88
-    n127 --> n145
+    n127 --> n90
+    n127 --> n126
+    n127 --> n147
+    n128 --> n124
     n128 --> n129
-    n128 --> n131
-    n132 --> n133
-    n132 --> n134
-    n133 --> n122
-    n133 --> n142
-    n134 --> n142
-    n135 --> n136
-    n135 --> n138
-    n135 --> n139
-    n136 --> n127
-    n136 --> n137
-    n136 --> n138
-    n136 --> n145
+    n128 --> n147
+    n128 --> n158
+    n129 --> n90
+    n129 --> n147
+    n130 --> n131
+    n130 --> n133
+    n134 --> n135
+    n134 --> n136
+    n135 --> n124
+    n135 --> n144
+    n136 --> n144
     n137 --> n138
-    n137 --> n145
-    n138 --> n145
-    n139 --> n136
-    n139 --> n138
-    n139 --> n145
-    n141 --> n88
-    n141 --> n143
-    n142 --> n143
-    n142 --> n144
-    n144 --> n88
-    n144 --> n143
-    n144 --> n152
-    n152 --> n88
-    n156 --> n88
-    n159 --> n160
+    n137 --> n140
+    n137 --> n141
+    n138 --> n129
+    n138 --> n139
+    n138 --> n140
+    n138 --> n147
+    n139 --> n140
+    n139 --> n147
+    n140 --> n147
+    n141 --> n138
+    n141 --> n140
+    n141 --> n147
+    n143 --> n90
+    n143 --> n145
+    n144 --> n145
+    n144 --> n146
+    n146 --> n90
+    n146 --> n145
+    n146 --> n154
+    n154 --> n90
+    n158 --> n90
+    n161 --> n162
 ```

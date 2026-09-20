@@ -111,7 +111,7 @@ def test_rejects_fewer_than_two_models(project, audit):
 def test_rejects_unsupported_language(project, audit):
     root, src, tests = project
     r = EnsembleBuildRunner(
-        project_path=root, language="go", src_dir=src, test_dir=tests, playbook_id="pb",
+        project_path=root, language="rust", src_dir=src, test_dir=tests, playbook_id="pb",
     )
     result = r.run("do a thing", ["a/x", "b/y"], "thing")
     assert "not supported" in result.error
@@ -368,3 +368,101 @@ def test_learn_reaches_the_learner_even_when_no_candidate_wins(project, audit, t
     assert len(learner.learn_calls) == 1
     task, feedback = learner.learn_calls[0]
     assert feedback.result == "FAILED"
+
+
+# --- TypeScript / Go support (#7) --------------------------------------------
+
+class RecordingCandidateRunner(FakeCandidateRunner):
+    """Same behavior as FakeCandidateRunner, but records the exact
+    test_file/implementation_file paths the caller passed in."""
+
+    def __init__(self, *args, seen: list, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._seen = seen
+
+    def run(self, *, feature_requirement, test_file, implementation_file, languages):
+        self._seen.append((Path(test_file).name, Path(implementation_file).name))
+        return super().run(
+            feature_requirement=feature_requirement, test_file=test_file,
+            implementation_file=implementation_file, languages=languages,
+        )
+
+
+def _lang_runner(project, audit, language, *, builders, evaluator, scratch):
+    root, src, tests = project
+    call_log = list(builders)
+
+    def candidate_builder(**kwargs):
+        return call_log.pop(0)
+
+    return EnsembleBuildRunner(
+        project_path=root, language=language, src_dir=src, test_dir=tests,
+        playbook_id="pb", audit_client=audit, scratch_root=scratch,
+        candidate_builder=candidate_builder, evaluator=evaluator,
+    )
+
+
+def test_typescript_is_a_supported_language(project, audit, tmp_path):
+    seen: list = []
+    builders = [
+        RecordingCandidateRunner(
+            "export function thing() { return 1; }", "test('x', () => {})", True, True, 1, seen=seen,
+        ),
+        RecordingCandidateRunner(
+            "export function thing() { return 2; }", "test('x', () => {})", True, True, 1, seen=seen,
+        ),
+    ]
+    r = _lang_runner(project, audit, "typescript", builders=builders,
+                      evaluator=FakeEvaluator({}), scratch=tmp_path / "s")
+    result = r.run("do a thing", ["a/m", "b/m"], "thing")
+
+    assert result.error != "ensemble build not supported for 'typescript' yet"
+    assert seen == [("candidate.test.ts", "candidate.ts"), ("candidate.test.ts", "candidate.ts")]
+    assert result.committed is True
+    assert (project[1] / "thing.ts").exists()
+    assert (project[2] / "thing.test.ts").exists()
+
+
+def test_go_is_a_supported_language(project, audit, tmp_path):
+    seen: list = []
+    builders = [
+        RecordingCandidateRunner(
+            "package pulse\nfunc Thing() int { return 1 }", "func TestThing(t *testing.T) {}",
+            True, True, 1, seen=seen,
+        ),
+        RecordingCandidateRunner(
+            "package pulse\nfunc Thing() int { return 2 }", "func TestThing(t *testing.T) {}",
+            True, True, 1, seen=seen,
+        ),
+    ]
+    r = _lang_runner(project, audit, "go", builders=builders,
+                      evaluator=FakeEvaluator({}), scratch=tmp_path / "s")
+    result = r.run("do a thing", ["a/m", "b/m"], "thing")
+
+    assert result.error != "ensemble build not supported for 'go' yet"
+    assert seen == [("candidate_test.go", "candidate.go"), ("candidate_test.go", "candidate.go")]
+    assert result.committed is True
+    assert (project[1] / "thing.go").exists()
+    assert (project[2] / "thing_test.go").exists()
+
+
+def test_typescript_blind_evaluation_uses_the_typescript_output_type(project, audit, tmp_path):
+    builders = [
+        FakeCandidateRunner("export function thing() { return 1; }", "t", True, True, 1),
+        FakeCandidateRunner("export function thing() { return 2; }", "t", True, True, 1),
+    ]
+    ev = FakeEvaluator({})
+    r = _lang_runner(project, audit, "typescript", builders=builders, evaluator=ev, scratch=tmp_path / "s")
+    r.run("do a thing", ["a/m", "b/m"], "thing")
+    assert {s.output_type for s in ev.seen_submissions} == {"code_typescript"}
+
+
+def test_go_blind_evaluation_uses_the_go_output_type(project, audit, tmp_path):
+    builders = [
+        FakeCandidateRunner("package pulse\nfunc Thing() int { return 1 }", "t", True, True, 1),
+        FakeCandidateRunner("package pulse\nfunc Thing() int { return 2 }", "t", True, True, 1),
+    ]
+    ev = FakeEvaluator({})
+    r = _lang_runner(project, audit, "go", builders=builders, evaluator=ev, scratch=tmp_path / "s")
+    r.run("do a thing", ["a/m", "b/m"], "thing")
+    assert {s.output_type for s in ev.seen_submissions} == {"code_go"}

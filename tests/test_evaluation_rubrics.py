@@ -9,9 +9,11 @@ from src.benchmark.rubrics import (
     CodeGenerationRubric,
     DocumentationRubric,
     EvaluationRubric,
+    GoGenerationRubric,
     RubricResult,
     ScoringDimension,
     TestWritingRubric,
+    TypeScriptGenerationRubric,
     get_rubric,
 )
 from src.benchmark.rubrics.base import DimensionScore
@@ -225,6 +227,15 @@ class TestGetRubric:
         assert get_rubric("CODE") is not None
         assert get_rubric("Code") is not None
 
+    def test_code_python_returns_code_rubric(self):
+        assert isinstance(get_rubric("code_python"), CodeGenerationRubric)
+
+    def test_code_typescript_returns_typescript_rubric(self):
+        assert isinstance(get_rubric("code_typescript"), TypeScriptGenerationRubric)
+
+    def test_code_go_returns_go_rubric(self):
+        assert isinstance(get_rubric("code_go"), GoGenerationRubric)
+
 
 # ---------------------------------------------------------------------------
 # CodeGenerationRubric
@@ -279,6 +290,199 @@ class TestCodeGenerationRubric:
     def test_rubric_name_in_result(self):
         r = self.rubric.score(_GOOD_CODE)
         assert r.rubric_name == "code_generation"
+
+
+# ---------------------------------------------------------------------------
+# TypeScriptGenerationRubric / GoGenerationRubric (#7)
+# ---------------------------------------------------------------------------
+
+_GOOD_TS = """\
+/** Adds two numbers. */
+export function add(a: number, b: number): number {
+  return a + b;
+}
+"""
+
+_BAD_SYNTAX_TS = "function add(a: number, b: number): number { return a + b"
+
+_GOOD_GO = """\
+package pulse
+
+// Add adds two numbers.
+func Add(a int, b int) int {
+\treturn a + b
+}
+"""
+
+_BAD_SYNTAX_GO = "package pulse\nfunc Add(a int, b int) int {\n\treturn a + b"
+
+
+class FakeOrchestrator:
+    """Stands in for PodmanOrchestrator: returns a canned PhaseResult and
+    records exactly what files it was asked to pulse -- no Podman."""
+
+    def __init__(self, passed: bool):
+        self._passed = passed
+        self.pulsed: list[dict] = []
+        self.stopped = False
+
+    def pulse(self, files):
+        self.pulsed.append(files)
+        from src.agents.language_pod import PhaseResult
+
+        return PhaseResult(passed=self._passed, output="ok" if self._passed else "FAILED", error=None)
+
+    def stop(self):
+        self.stopped = True
+
+
+class TestTypeScriptGenerationRubric:
+    def setup_method(self):
+        self.rubric = TypeScriptGenerationRubric()
+
+    def test_name(self):
+        assert self.rubric.name == "typescript_code_generation"
+
+    def test_weights_sum_to_one(self):
+        assert sum(d.weight for d in self.rubric.dimensions) == pytest.approx(1.0)
+
+    def test_good_code_scores_above_50(self):
+        r = self.rubric.score(_GOOD_TS)
+        assert r.total_score > 50.0
+
+    def test_good_code_passes_syntax(self):
+        r = self.rubric.score(_GOOD_TS)
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(100.0)
+
+    def test_unbalanced_brackets_score_zero_on_syntax(self):
+        r = self.rubric.score(_BAD_SYNTAX_TS)
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(0.0)
+
+    def test_no_recognizable_construct_fails_syntax(self):
+        r = self.rubric.score("(((())))")
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(0.0)
+
+    def test_security_penalised_for_eval(self):
+        r = self.rubric.score("const x = eval(userInput);")
+        sec_ds = next(ds for ds in r.dimension_scores if ds.dimension == "security")
+        assert sec_ds.score == pytest.approx(0.0)
+
+    def test_clean_code_passes_security(self):
+        r = self.rubric.score(_GOOD_TS)
+        sec_ds = next(ds for ds in r.dimension_scores if ds.dimension == "security")
+        assert sec_ds.score == pytest.approx(100.0)
+
+    def test_no_test_content_gives_partial_tests_score(self):
+        r = self.rubric.score(_GOOD_TS, context={})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(50.0)
+
+    def test_bad_syntax_no_test_credit(self):
+        r = self.rubric.score(_BAD_SYNTAX_TS, context={})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(0.0)
+
+    def test_tests_dimension_pulses_fixed_candidate_filenames(self):
+        fake = FakeOrchestrator(passed=True)
+        rubric = TypeScriptGenerationRubric(orchestrator=fake)
+        r = rubric.score(_GOOD_TS, context={"test_content": "test('ok', () => {})"})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(100.0)
+        assert fake.pulsed == [{"candidate.ts": _GOOD_TS, "candidate.test.ts": "test('ok', () => {})"}]
+
+    def test_tests_dimension_reflects_a_sandbox_failure(self):
+        fake = FakeOrchestrator(passed=False)
+        rubric = TypeScriptGenerationRubric(orchestrator=fake)
+        r = rubric.score(_GOOD_TS, context={"test_content": "test('ok', () => { expect(1).toBe(2) })"})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(0.0)
+
+    def test_injected_orchestrator_is_never_stopped_by_the_rubric(self):
+        # Caller-owned orchestrators may be shared across scoring calls.
+        fake = FakeOrchestrator(passed=True)
+        rubric = TypeScriptGenerationRubric(orchestrator=fake)
+        rubric.score(_GOOD_TS, context={"test_content": "test('ok', () => {})"})
+        assert fake.stopped is False
+
+
+class TestGoGenerationRubric:
+    def setup_method(self):
+        self.rubric = GoGenerationRubric()
+
+    def test_name(self):
+        assert self.rubric.name == "go_code_generation"
+
+    def test_weights_sum_to_one(self):
+        assert sum(d.weight for d in self.rubric.dimensions) == pytest.approx(1.0)
+
+    def test_good_code_scores_above_50(self):
+        r = self.rubric.score(_GOOD_GO)
+        assert r.total_score > 50.0
+
+    def test_good_code_passes_syntax(self):
+        r = self.rubric.score(_GOOD_GO)
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(100.0)
+
+    def test_unbalanced_brackets_score_zero_on_syntax(self):
+        r = self.rubric.score(_BAD_SYNTAX_GO)
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(0.0)
+
+    def test_missing_package_or_func_fails_syntax(self):
+        r = self.rubric.score("var x = 1")
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(0.0)
+
+    def test_raw_string_backslash_is_not_treated_as_an_escape(self):
+        # Go raw strings (backtick-quoted) don't process \ as an escape --
+        # unlike "..."/'...'. A backslash immediately before the closing
+        # backtick must not be mistaken for an escaped backtick.
+        code = 'package pulse\nfunc F() string {\n\treturn `a\\`\n}'
+        r = self.rubric.score(code)
+        syntax_ds = next(ds for ds in r.dimension_scores if ds.dimension == "syntax")
+        assert syntax_ds.score == pytest.approx(100.0)
+
+    def test_security_penalised_for_exec_command(self):
+        r = self.rubric.score('package pulse\nimport "os/exec"\nfunc F() { exec.Command("ls") }')
+        sec_ds = next(ds for ds in r.dimension_scores if ds.dimension == "security")
+        assert sec_ds.score == pytest.approx(0.0)
+
+    def test_clean_code_passes_security(self):
+        r = self.rubric.score(_GOOD_GO)
+        sec_ds = next(ds for ds in r.dimension_scores if ds.dimension == "security")
+        assert sec_ds.score == pytest.approx(100.0)
+
+    def test_no_test_content_gives_partial_tests_score(self):
+        r = self.rubric.score(_GOOD_GO, context={})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(50.0)
+
+    def test_bad_syntax_no_test_credit(self):
+        r = self.rubric.score(_BAD_SYNTAX_GO, context={})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(0.0)
+
+    def test_tests_dimension_pulses_fixed_candidate_filenames(self):
+        fake = FakeOrchestrator(passed=True)
+        rubric = GoGenerationRubric(orchestrator=fake)
+        r = rubric.score(_GOOD_GO, context={"test_content": "package pulse\nfunc TestAdd(t *testing.T) {}"})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(100.0)
+        assert fake.pulsed == [{
+            "candidate.go": _GOOD_GO,
+            "candidate_test.go": "package pulse\nfunc TestAdd(t *testing.T) {}",
+        }]
+
+    def test_tests_dimension_reflects_a_sandbox_failure(self):
+        fake = FakeOrchestrator(passed=False)
+        rubric = GoGenerationRubric(orchestrator=fake)
+        r = rubric.score(_GOOD_GO, context={"test_content": "package pulse\nfunc TestAdd(t *testing.T) { t.Fail() }"})
+        tests_ds = next(ds for ds in r.dimension_scores if ds.dimension == "tests")
+        assert tests_ds.score == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------

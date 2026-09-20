@@ -32,10 +32,33 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# CodeGenerationRubric is Python-specific (it parses with `ast`); the blind
-# quality score is only meaningful for Python today. TS/Go ensemble builds are
-# a follow-up (they'd need their own rubrics).
-SUPPORTED_LANGUAGES = ("python",)
+SUPPORTED_LANGUAGES = ("python", "typescript", "go")
+
+# File names used for the THROWAWAY generation/blind-eval sandbox for one
+# candidate -- deliberately NOT the eventual feature name (that's
+# _final_file_names, used only by _commit once a winner is picked). Keeping
+# this fixed across every candidate/language means a rubric's own sandboxed
+# "tests" dimension (src/benchmark/rubrics/*) can reconstruct the exact same
+# {impl_name: test_name} pairing independently and get files whose import
+# statements (TypeScriptWorkerAgent writes `from './candidate'`-style
+# imports keyed off the impl file's own stem) still resolve correctly, with
+# no filename metadata needing to travel through Submission/RubricResult.
+_CANDIDATE_FILE_NAMES: dict[str, tuple[str, str]] = {
+    "python": ("candidate.py", "test_candidate.py"),
+    "typescript": ("candidate.ts", "candidate.test.ts"),
+    "go": ("candidate.go", "candidate_test.go"),
+}
+
+
+def _final_file_names(language: str, name: str) -> tuple[str, str]:
+    """Impl/test file names for the WINNING candidate once committed into
+    the real project -- uses the caller's feature `name`, unlike the fixed
+    throwaway names above."""
+    if language == "typescript":
+        return f"{name}.ts", f"{name}.test.ts"
+    if language == "go":
+        return f"{name}.go", f"{name}_test.go"
+    return f"{name}.py", f"test_{name}.py"
 
 
 @dataclass
@@ -233,8 +256,9 @@ class EnsembleBuildRunner:
             # generated code has the same context every non-ensemble build gets.
             _copy_tree(self._src_dir, cand_src)
 
-            test_file = cand_test / f"test_{name}.py"
-            impl_file = cand_src / f"{name}.py"
+            impl_name, test_name = _CANDIDATE_FILE_NAMES[self._language]
+            test_file = cand_test / test_name
+            impl_file = cand_src / impl_name
 
             try:
                 runner = self._candidate_builder(
@@ -287,7 +311,7 @@ class EnsembleBuildRunner:
             submission = Submission(
                 task_id=task_id,
                 submission_id=cand.submission_id,
-                output_type="code",
+                output_type=f"code_{self._language}",
                 output_content=cand.implementation_code,
                 test_content=cand.test_code or None,
             )
@@ -361,9 +385,10 @@ class EnsembleBuildRunner:
     def _commit(self, winner: EnsembleCandidate, name: str) -> None:
         self._src_dir.mkdir(parents=True, exist_ok=True)
         self._test_dir.mkdir(parents=True, exist_ok=True)
-        (self._src_dir / f"{name}.py").write_text(winner.implementation_code)
+        impl_name, test_name = _final_file_names(self._language, name)
+        (self._src_dir / impl_name).write_text(winner.implementation_code)
         if winner.test_code.strip():
-            (self._test_dir / f"test_{name}.py").write_text(winner.test_code)
+            (self._test_dir / test_name).write_text(winner.test_code)
 
     def _run_ensemble_learning(
         self,
