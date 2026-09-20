@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -139,6 +140,12 @@ class AttemptRecord:
     scenario_name: str
     telemetry: SimulationTelemetry | None
     invariants: list[MetricBound]
+    # Reflector's diagnosis + Curator's delta bullets for the CYCLE this
+    # attempt belongs to (#46) -- one dict per TDDCycleRunner._learn() call,
+    # not one per individual archived attempt (see resolve_attempt's own
+    # note on why the granularity differs). None when learning wasn't
+    # configured for that build, or the cycle never reached _learn() at all.
+    reflection: dict | None = None
 
 
 def resolve_attempt(path: Path, *, scenario_override: str | None = None) -> AttemptRecord:
@@ -169,13 +176,38 @@ def resolve_attempt(path: Path, *, scenario_override: str | None = None) -> Atte
     if scenario_name not in SCENARIOS:
         raise ValueError(f"unknown scenario {scenario_name!r} (expected one of {sorted(SCENARIOS)})")
 
+    reflection = _load_reflection(base)
+
     return AttemptRecord(
         controller_path=py_path,
         controller=load_controller_from_file(py_path),
         scenario_name=scenario_name,
         telemetry=telemetry,
         invariants=invariants,
+        reflection=reflection,
     )
+
+
+def _load_reflection(base: Path) -> dict | None:
+    """#46: TDDCycleRunner._learn() persists one reflection per CYCLE, not
+    per individual archived attempt -- SimulationPod's own archive name is
+    "{impl_stem}_cycle{N}_{phase}_attempt{M}" (finer-grained: multiple
+    attempts and phases per cycle), while the reflection file is
+    "{impl_stem}_cycle{N}.reflection.json" (one per cycle, matching how
+    often _learn() actually runs). Extract impl_stem/N from base's own
+    name and look up the coarser file next to it; returns None if absent
+    (learning wasn't configured, or this predates reflection persistence).
+    """
+    match = re.match(r"^(.+)_cycle(\d+)_", base.name)
+    if not match:
+        return None
+    reflection_path = base.parent / f"{match.group(1)}_cycle{match.group(2)}.reflection.json"
+    if not reflection_path.exists():
+        return None
+    try:
+        return json.loads(reflection_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _colorize_bodies(p, client) -> None:

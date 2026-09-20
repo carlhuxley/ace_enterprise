@@ -3,11 +3,13 @@
 Uses controlled pod doubles so we can drive exact pass/fail sequences
 without touching the container or LLM.
 """
+import json
 from datetime import UTC
 from pathlib import Path
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner
+from src.storage.schemas import CuratorOutput, DeltaBullet, ReflectorOutput
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -768,3 +770,105 @@ def test_performance_aggregator_distinguishes_models_after_real_cycles(tmp_path)
     assert set(all_metrics.keys()) == {"model-a", "model-b"}
     assert all_metrics["model-a"].total_tasks == 1
     assert all_metrics["model-b"].total_tasks == 1
+
+
+# ---------------------------------------------------------------------------
+# Reflection persistence (#46)
+# ---------------------------------------------------------------------------
+
+class _RealShapeReflector:
+    """Returns a real ReflectorOutput (not the minimal _FakeReflectorOutput
+    used elsewhere in this file), so _persist_reflection's field reads are
+    exercised for real."""
+
+    def reflect(self, task, generator_output, environment_feedback):
+        return ReflectorOutput(
+            error_identification="off-by-one in the loop bound",
+            root_cause="used < instead of <=",
+            correct_approach="use <= for an inclusive range",
+            key_insight="always check boundary conditions",
+            code_invariant="i <= n",
+        )
+
+
+class _RealShapeCurator:
+    """Returns a real CuratorOutput with real DeltaBullets."""
+
+    def __init__(self, bullets=None):
+        self._bullets = bullets if bullets is not None else [
+            DeltaBullet(section="strategies_and_hard_rules", content="check boundary conditions"),
+        ]
+
+    def curate(self, reflector_output, playbook_id, task_context=None):
+        return CuratorOutput(delta_bullets=self._bullets, reasoning="matched a known failure pattern")
+
+    def apply_updates(self, playbook_id, curator_output):
+        pass
+
+
+def test_reflection_persisted_on_success(tmp_path):
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_RealShapeReflector(), curator=_RealShapeCurator(),
+    )
+    runner.run(_spec(tmp_path))
+
+    path = tmp_path / "attempts" / "add_cycle1.reflection.json"
+    assert path.exists()
+    payload = json.loads(path.read_text())
+    assert payload["cycle"] == 1
+    assert payload["success"] is True
+    assert payload["feature_requirement"] == "add two numbers"
+    assert payload["reflector"]["root_cause"] == "used < instead of <="
+    assert payload["reflector"]["code_invariant"] == "i <= n"
+    assert payload["curator"]["reasoning"] == "matched a known failure pattern"
+    assert payload["curator"]["delta_bullets"][0]["content"] == "check boundary conditions"
+
+
+def test_reflection_persisted_on_stagnant_failure(tmp_path):
+    runner = TDDCycleRunner(
+        ControlledPod(green_pass_on=999), max_green_attempts=1,
+        reflector=_RealShapeReflector(), curator=_RealShapeCurator(),
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    path = tmp_path / "attempts" / "add_cycle1.reflection.json"
+    assert path.exists()
+    payload = json.loads(path.read_text())
+    assert payload["success"] is False
+
+
+def test_no_reflection_file_when_learning_is_not_configured(tmp_path):
+    runner = TDDCycleRunner(ControlledPod())
+    runner.run(_spec(tmp_path))
+    assert not (tmp_path / "attempts").exists()
+
+
+def test_reflection_filename_keys_on_implementation_stem_and_cycle(tmp_path):
+    spec = PodSpec(
+        feature_requirement="multiply two numbers",
+        test_file=tmp_path / "test_mul.py",
+        implementation_file=tmp_path / "mul.py",
+        cycle_number=7,
+    )
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_RealShapeReflector(), curator=_RealShapeCurator(),
+    )
+    runner.run(spec)
+    assert (tmp_path / "attempts" / "mul_cycle7.reflection.json").exists()
+
+
+def test_reflection_write_failure_does_not_lose_returned_bullets(tmp_path):
+    # A plain file where "attempts/" needs to be a directory forces a real
+    # write failure inside _persist_reflection's own try/except -- confirms
+    # that failure can't swallow the bullets _learn() already applied to
+    # the playbook and returns to the caller.
+    (tmp_path / "attempts").write_text("not a directory")
+
+    bullets = [DeltaBullet(section="strategies_and_hard_rules", content="x")]
+    runner = TDDCycleRunner(
+        ControlledPod(), reflector=_RealShapeReflector(), curator=_RealShapeCurator(bullets=bullets),
+    )
+    result = runner.run(_spec(tmp_path))
+    assert len(result.learned_bullets) == 1
+    assert result.learned_bullets[0].content == "x"

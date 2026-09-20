@@ -477,6 +477,33 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _print_reflection(reflection: dict) -> None:
+    """#46: render the Reflector diagnosis + Curator bullets persisted
+    alongside this attempt's cycle -- previously produced once and
+    discarded, now available for `ace view` to show why an attempt
+    succeeded/failed and what it taught the playbook."""
+    print(f"Reflection (cycle {reflection.get('cycle')}, "
+          f"{'success' if reflection.get('success') else 'failure'}):")
+    reflector = reflection.get("reflector") or {}
+    for label, key in (
+        ("Error", "error_identification"),
+        ("Root cause", "root_cause"),
+        ("Correct approach", "correct_approach"),
+        ("Key insight", "key_insight"),
+        ("Code invariant", "code_invariant"),
+    ):
+        value = reflector.get(key)
+        if value:
+            print(f"  {label}: {value}")
+
+    curator = reflection.get("curator") or {}
+    bullets = curator.get("delta_bullets") or []
+    if bullets:
+        print(f"  Playbook bullets written ({len(bullets)}):")
+        for bullet in bullets:
+            print(f"    - [{bullet.get('section')}] {bullet.get('content')}")
+
+
 def cmd_view(args: argparse.Namespace) -> int:
     from src.agents.simulation_replay import render_attempt_video, resolve_attempt
     from src.agents.simulation_runner import summarize_telemetry
@@ -498,6 +525,10 @@ def cmd_view(args: argparse.Namespace) -> int:
         )
     else:
         print(summarize_telemetry(attempt.telemetry, attempt.invariants))
+
+    if attempt.reflection is not None:
+        print()
+        _print_reflection(attempt.reflection)
 
     if args.video:
         output_path = args.output or attempt.controller_path.with_suffix(".mp4")

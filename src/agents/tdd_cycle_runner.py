@@ -18,6 +18,7 @@ emitted onto the hash-chained audit log (see src/audit/), same events
 AutonomousTDDAgent used to emit natively.
 """
 import dataclasses
+import json
 import logging
 import time
 import uuid
@@ -264,6 +265,7 @@ class TDDCycleRunner:
                 },
             )
             self._curator.apply_updates(self._playbook_id, curator_output)
+            self._persist_reflection(spec, result, reflector_output, curator_output)
             logger.info(
                 f"TDDCycleRunner: wrote {len(curator_output.delta_bullets)} "
                 f"bullet(s) to playbook '{self._playbook_id}'"
@@ -277,6 +279,56 @@ class TDDCycleRunner:
         except Exception as exc:
             logger.warning(f"TDDCycleRunner: learning step failed: {exc}")
             return []
+
+    def _persist_reflection(
+        self, spec: PodSpec, result: CycleResult, reflector_output, curator_output,
+    ) -> Path | None:
+        """Persist Reflector's diagnosis + Curator's delta bullets to a
+        sibling JSON file keyed by attempt identity (#46) -- previously
+        produced fresh every cycle, used once to write the playbook, and
+        then discarded, with no way to look back at *why* an attempt
+        succeeded/failed after the fact.
+
+        Pod-agnostic: every LanguagePod's PodSpec carries
+        implementation_file, so this needs no pod-specific archive to key
+        off of. Written to implementation_file.parent/"attempts"/
+        "{stem}_cycle{N}.reflection.json" -- for SimulationPod specifically,
+        this stem is the PREFIX of its own finer-grained
+        {stem}_cycle{N}_{phase}_attempt{M} archive names (see
+        simulation_pod.py's _archive_attempt): one reflection covers a
+        whole cycle's attempts, not one specific numbered attempt, since
+        _learn() only ever runs once per TDDCycleRunner.run() call
+        regardless of how many attempts that pod archived internally.
+
+        Best-effort: a write failure here must never lose the playbook
+        update _learn() already applied (see the outer try/except).
+        """
+        try:
+            attempts_dir = spec.implementation_file.parent / "attempts"
+            attempts_dir.mkdir(parents=True, exist_ok=True)
+            stem = f"{spec.implementation_file.stem}_cycle{spec.cycle_number}"
+            path = attempts_dir / f"{stem}.reflection.json"
+            payload = {
+                "cycle": spec.cycle_number,
+                "success": result.success,
+                "feature_requirement": spec.feature_requirement,
+                "reflector": {
+                    "error_identification": reflector_output.error_identification,
+                    "root_cause": reflector_output.root_cause,
+                    "correct_approach": reflector_output.correct_approach,
+                    "key_insight": reflector_output.key_insight,
+                    "code_invariant": reflector_output.code_invariant,
+                },
+                "curator": {
+                    "reasoning": curator_output.reasoning,
+                    "delta_bullets": [b.model_dump() for b in curator_output.delta_bullets],
+                },
+            }
+            path.write_text(json.dumps(payload, indent=2))
+            return path
+        except Exception as exc:
+            logger.warning(f"TDDCycleRunner: reflection persistence failed: {exc}")
+            return None
 
     # ------------------------------------------------------------------
     # Audit trail

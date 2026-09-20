@@ -90,6 +90,75 @@ def test_resolve_attempt_rejects_unknown_scenario_override(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Reflection loading (#46)
+# ---------------------------------------------------------------------------
+
+_REFLECTION_PAYLOAD = {
+    "cycle": 1,
+    "success": True,
+    "feature_requirement": "peg in hole",
+    "reflector": {
+        "error_identification": None,
+        "root_cause": None,
+        "correct_approach": None,
+        "key_insight": "slow down near contact",
+        "code_invariant": None,
+    },
+    "curator": {
+        "reasoning": "converged cleanly",
+        "delta_bullets": [{"section": "strategies_and_hard_rules", "content": "slow down near contact"}],
+    },
+}
+
+
+def test_resolve_attempt_loads_matching_reflection_file(tmp_path):
+    py_path = _write_attempt(tmp_path, with_telemetry=False)
+    (tmp_path / "controller_cycle1.reflection.json").write_text(json.dumps(_REFLECTION_PAYLOAD))
+
+    attempt = resolve_attempt(py_path)
+
+    assert attempt.reflection == _REFLECTION_PAYLOAD
+
+
+def test_resolve_attempt_reflection_is_none_when_no_file_present(tmp_path):
+    py_path = _write_attempt(tmp_path, with_telemetry=False)
+
+    attempt = resolve_attempt(py_path)
+
+    assert attempt.reflection is None
+
+
+def test_resolve_attempt_reflection_keys_on_cycle_not_specific_attempt(tmp_path):
+    # A second archived attempt in the SAME cycle (e.g. a later GREEN retry)
+    # must resolve to the same, coarser per-cycle reflection file.
+    py_path2 = tmp_path / "controller_cycle1_green_attempt2.py"
+    py_path2.write_text(_CONTROLLER_SRC)
+    (tmp_path / "controller_cycle1.reflection.json").write_text(json.dumps(_REFLECTION_PAYLOAD))
+
+    attempt = resolve_attempt(py_path2)
+
+    assert attempt.reflection == _REFLECTION_PAYLOAD
+
+
+def test_resolve_attempt_reflection_does_not_match_a_different_cycle(tmp_path):
+    py_path = _write_attempt(tmp_path, with_telemetry=False)  # cycle1
+    (tmp_path / "controller_cycle2.reflection.json").write_text(json.dumps(_REFLECTION_PAYLOAD))
+
+    attempt = resolve_attempt(py_path)
+
+    assert attempt.reflection is None
+
+
+def test_resolve_attempt_malformed_reflection_file_degrades_gracefully(tmp_path):
+    py_path = _write_attempt(tmp_path, with_telemetry=False)
+    (tmp_path / "controller_cycle1.reflection.json").write_text("not valid json")
+
+    attempt = resolve_attempt(py_path)
+
+    assert attempt.reflection is None
+
+
+# ---------------------------------------------------------------------------
 # Real-physics video export (requires the optional `simulation` extra).
 # ---------------------------------------------------------------------------
 

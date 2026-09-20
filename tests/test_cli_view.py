@@ -31,6 +31,7 @@ def _record(**overrides):
         "scenario_name": "tactile",
         "telemetry": None,
         "invariants": [],
+        "reflection": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -71,6 +72,36 @@ class TestSuccessPath:
             rc = cmd_view(_args())
         assert rc == 0
         assert "CONVERGED after 229 steps" in capsys.readouterr().out
+
+    def test_no_reflection_prints_nothing_extra(self, capsys):
+        with patch("src.agents.simulation_replay.resolve_attempt", return_value=_record()):
+            rc = cmd_view(_args())
+        assert rc == 0
+        assert "Reflection" not in capsys.readouterr().out
+
+    def test_reflection_present_prints_diagnosis_and_bullets(self, capsys):
+        record = _record(reflection={
+            "cycle": 3,
+            "success": False,
+            "reflector": {
+                "error_identification": "gripper never closed",
+                "root_cause": None,
+                "correct_approach": None,
+                "key_insight": None,
+                "code_invariant": None,
+            },
+            "curator": {
+                "reasoning": "clear failure pattern",
+                "delta_bullets": [{"section": "strategies_and_hard_rules", "content": "close gripper before descent"}],
+            },
+        })
+        with patch("src.agents.simulation_replay.resolve_attempt", return_value=record):
+            rc = cmd_view(_args())
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Reflection (cycle 3, failure)" in out
+        assert "gripper never closed" in out
+        assert "close gripper before descent" in out
 
     def test_video_flag_renders_and_prints_output_path(self, capsys):
         record = _record()
