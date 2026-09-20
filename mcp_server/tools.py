@@ -401,6 +401,18 @@ class ACETools:
                             "type": "string",
                             "description": "Team producing this pattern -- stamped onto any Playbook bullets learned from this build.",
                         },
+                        "learn": {
+                            "type": "boolean",
+                            "description": (
+                                "Run the full EnsembleLearner pass after winner selection: each "
+                                "candidate model independently reflects on the build outcome, "
+                                "cross-votes on the resulting bullets, and consensus-approved "
+                                "bullets are written to the shared playbook. Costs real LLM calls "
+                                "(generation + reflection + curation + voting per model). Default: "
+                                "false. A learning failure never fails the build; see the "
+                                "'learning' field in the response."
+                            ),
+                        },
                     },
                     "required": ["project_path", "models"],
                 },
@@ -979,7 +991,10 @@ class ACETools:
                 team_id=args.get("team_id"),
                 max_cycles=args.get("max_cycles", 5),
             )
-            result = runner.run(requirement, [str(m) for m in models], name)
+            result = runner.run(
+                requirement, [str(m) for m in models], name,
+                learn=bool(args.get("learn", False)),
+            )
 
             payload = result.to_dict()
             payload["success"] = result.committed

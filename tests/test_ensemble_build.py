@@ -86,7 +86,7 @@ def project(tmp_path):
     return tmp_path, src, tests
 
 
-def _runner(project, audit, *, builders, evaluator, consensus=None, scratch=None):
+def _runner(project, audit, *, builders, evaluator, consensus=None, scratch=None, learner_factory=None):
     root, src, tests = project
     call_log = list(builders)
 
@@ -97,7 +97,7 @@ def _runner(project, audit, *, builders, evaluator, consensus=None, scratch=None
         project_path=root, language="python", src_dir=src, test_dir=tests,
         playbook_id="pb", audit_client=audit, scratch_root=scratch,
         candidate_builder=candidate_builder, evaluator=evaluator,
-        consensus_builder=consensus,
+        consensus_builder=consensus, ensemble_learner_factory=learner_factory,
     )
 
 
@@ -222,3 +222,149 @@ def test_consensus_report_flags_winner_in_majority(project, audit, tmp_path):
     result = r.run("do a thing", ["a/m", "b/m"], "thing")
     assert result.consensus["winner_in_majority"] is True
     assert result.consensus["num_distinct_approaches"] == 1
+
+
+# --- EnsembleLearner wiring (#6) ---------------------------------------------
+
+def _ensemble_result(*, approved=1, rejected=0, models_used=("a/m", "b/m")):
+    from datetime import datetime
+
+    from src.ensemble.models import (
+        BulletSection,
+        ConsensusBullet,
+        EnsembleResult,
+        VoteResults,
+    )
+
+    bullets = [
+        ConsensusBullet(
+            content=f"bullet {i}", section=BulletSection.STRATEGIES,
+            proposed_by=models_used[0], proposal_reasoning="because",
+            approved=True,
+        )
+        for i in range(approved)
+    ] + [
+        ConsensusBullet(
+            content=f"rejected {i}", section=BulletSection.STRATEGIES,
+            proposed_by=models_used[0], proposal_reasoning="because",
+            approved=False,
+        )
+        for i in range(rejected)
+    ]
+    now = datetime.now()
+    return EnsembleResult(
+        task_description="do a thing",
+        models_used=list(models_used),
+        voting_strategy="majority",
+        bullets=bullets,
+        vote_results=VoteResults(
+            total_bullets=len(bullets), approved=approved, rejected=rejected, pending=0,
+        ),
+        model_performance={},
+        started_at=now,
+        completed_at=now,
+        diversity_score=0.5,
+        consensus_strength=0.75,
+    )
+
+
+class FakeEnsembleLearner:
+    def __init__(self, result, added=1, raise_on_learn=None):
+        self._result = result
+        self._added = added
+        self._raise_on_learn = raise_on_learn
+        self.learn_calls: list[tuple] = []
+        self.playback_calls: list = []
+
+    def learn_from_task(self, task, environment_feedback, parallel=True):
+        self.learn_calls.append((task, environment_feedback))
+        if self._raise_on_learn:
+            raise self._raise_on_learn
+        return self._result
+
+    def add_approved_bullets_to_playbook(self, result):
+        self.playback_calls.append(result)
+        return self._added
+
+
+def _learn_builders():
+    return [
+        FakeCandidateRunner("def thing(): return 1\n", "t\n", True, True, 1),
+        FakeCandidateRunner("def thing(): return 2\n", "t\n", True, True, 1),
+    ]
+
+
+def test_learn_false_by_default_never_touches_the_learner(project, audit, tmp_path):
+    learner = FakeEnsembleLearner(_ensemble_result())
+    r = _runner(project, audit, builders=_learn_builders(), evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s", learner_factory=lambda refs: learner)
+    result = r.run("do a thing", ["a/m", "b/m"], "thing")
+    assert result.learning is None
+    assert learner.learn_calls == []
+
+
+def test_learn_true_runs_the_learner_and_summarizes_the_result(project, audit, tmp_path):
+    learner = FakeEnsembleLearner(_ensemble_result(approved=2, rejected=1), added=2)
+    r = _runner(project, audit, builders=_learn_builders(), evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s", learner_factory=lambda refs: learner)
+    result = r.run("do a thing", ["a/m", "b/m"], "thing", learn=True)
+
+    assert len(learner.learn_calls) == 1
+    assert len(learner.playback_calls) == 1
+    assert result.learning == {
+        "approved_bullets": 2,
+        "rejected_bullets": 1,
+        "bullets_added_to_playbook": 2,
+        "consensus_strength": 0.75,
+        "diversity_score": 0.5,
+    }
+
+
+def test_learner_factory_receives_the_candidate_model_refs(project, audit, tmp_path):
+    seen_refs = []
+
+    def factory(refs):
+        seen_refs.append(refs)
+        return FakeEnsembleLearner(_ensemble_result())
+
+    r = _runner(project, audit, builders=_learn_builders(), evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s", learner_factory=factory)
+    r.run("do a thing", ["prov-a/m", "prov-b/m"], "thing", learn=True)
+    assert seen_refs == [["prov-a/m", "prov-b/m"]]
+
+
+def test_default_learner_factory_parses_provider_model_tuples(project, audit, tmp_path):
+    r = _runner(project, audit, builders=_learn_builders(), evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s")
+    learner = r._make_ensemble_learner(["openrouter/qwen/qwen3-coder:free", "prov-b/m"])
+    assert learner.models == [
+        ("openrouter", "qwen/qwen3-coder:free"),
+        ("prov-b", "m"),
+    ]
+    assert learner.playbook_id == "pb"
+
+
+def test_learning_failure_does_not_sink_an_otherwise_successful_build(project, audit, tmp_path):
+    learner = FakeEnsembleLearner(_ensemble_result(), raise_on_learn=RuntimeError("voting API down"))
+    r = _runner(project, audit, builders=_learn_builders(), evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s", learner_factory=lambda refs: learner)
+    result = r.run("do a thing", ["a/m", "b/m"], "thing", learn=True)
+
+    assert result.committed is True
+    assert result.learning is None
+
+
+def test_learn_reaches_the_learner_even_when_no_candidate_wins(project, audit, tmp_path):
+    builders = [
+        FakeCandidateRunner("def thing(): return 1\n", "t\n", False, False, 1),
+        FakeCandidateRunner("def thing(): return 2\n", "t\n", False, False, 1),
+    ]
+    learner = FakeEnsembleLearner(_ensemble_result())
+    r = _runner(project, audit, builders=builders, evaluator=FakeEvaluator({}),
+                scratch=tmp_path / "s", learner_factory=lambda refs: learner)
+    result = r.run("do a thing", ["a/m", "b/m"], "thing", learn=True)
+
+    assert result.committed is False
+    assert len(learner.learn_calls) == 1
+    task, feedback = learner.learn_calls[0]
+    assert feedback.result == "FAILED"

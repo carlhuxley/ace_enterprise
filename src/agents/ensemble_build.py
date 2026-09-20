@@ -89,6 +89,11 @@ class EnsembleBuildResult:
     committed: bool
     candidates: list[dict] = field(default_factory=list)
     consensus: dict | None = None
+    # Summary of the opt-in EnsembleLearner pass (#6) -- None when learn=False
+    # was passed to run(), or the pass ran but hit an error (best-effort,
+    # like consensus analysis: a learning failure must never sink an
+    # otherwise-successful build).
+    learning: dict | None = None
     error: str | None = None
 
     def to_dict(self) -> dict:
@@ -113,6 +118,7 @@ class EnsembleBuildRunner:
         candidate_builder=None,
         evaluator=None,
         consensus_builder=None,
+        ensemble_learner_factory=None,
     ) -> None:
         self._project_path = Path(project_path)
         self._language = language
@@ -127,6 +133,17 @@ class EnsembleBuildRunner:
         self._candidate_builder = candidate_builder or _build_sandboxed_candidate_runner
         self._evaluator = evaluator
         self._consensus_builder = consensus_builder
+        # model_refs -> EnsembleLearner -- overridable so tests can inject a
+        # fake without real LLM clients/voting calls (#6 needs 2N+ extra LLM
+        # calls: each model runs its own Generator/Reflector/Curator, then
+        # cross-votes on every model's proposals).
+        self._make_ensemble_learner = ensemble_learner_factory or self._default_ensemble_learner
+
+    def _default_ensemble_learner(self, model_refs: list[str]):
+        from src.ensemble.learner import EnsembleLearner
+
+        models = [tuple(ref.partition("/")[::2]) for ref in model_refs]
+        return EnsembleLearner(models=models, playbook_id=self._playbook_id)
 
     # ------------------------------------------------------------------
 
@@ -137,6 +154,7 @@ class EnsembleBuildRunner:
         name: str,
         *,
         gherkin_context: str | None = None,
+        learn: bool = False,
     ) -> EnsembleBuildResult:
         if self._language not in SUPPORTED_LANGUAGES:
             return EnsembleBuildResult(
@@ -174,6 +192,10 @@ class EnsembleBuildRunner:
 
             self._audit_selection(requirement, name, candidates, winner, consensus)
 
+            learning = None
+            if learn:
+                learning = self._run_ensemble_learning(requirement, model_refs, name, candidates, committed)
+
             return EnsembleBuildResult(
                 requirement=requirement,
                 language=self._language,
@@ -182,6 +204,7 @@ class EnsembleBuildRunner:
                 committed=committed,
                 candidates=[c.public_view() for c in candidates],
                 consensus=asdict(consensus) if consensus else None,
+                learning=learning,
                 error=None if winner else "no candidate produced a usable implementation",
             )
         finally:
@@ -341,6 +364,56 @@ class EnsembleBuildRunner:
         (self._src_dir / f"{name}.py").write_text(winner.implementation_code)
         if winner.test_code.strip():
             (self._test_dir / f"test_{name}.py").write_text(winner.test_code)
+
+    def _run_ensemble_learning(
+        self,
+        requirement: str,
+        model_refs: list[str],
+        name: str,
+        candidates: list[EnsembleCandidate],
+        committed: bool,
+    ) -> dict | None:
+        """#6: opt-in EnsembleLearner pass over this build's outcome. Every
+        candidate model independently runs its own Generator/Reflector/
+        Curator on the SAME shared feedback (learn_from_task's existing
+        design, from #3/PR #4 -- not this build's own sandboxed candidate
+        code), then cross-votes on the resulting bullets; approved ones are
+        written to the shared playbook. Real LLM calls (2N+ per model:
+        generation, reflection, curation, voting) -- best-effort like
+        consensus analysis, since a learning failure must never sink an
+        otherwise-successful build.
+        """
+        try:
+            from src.storage.schemas import EnvironmentFeedback, TaskInput
+
+            summary_lines = [
+                f"{c.model}: {'passed' if c.sandbox_passed else 'failed'} sandbox "
+                f"in {c.cycles_to_green} cycle(s)"
+                + (f", quality_score={c.quality_score}" if c.quality_score is not None else "")
+                + (f" -- {c.error}" if c.error else "")
+                for c in candidates
+            ]
+            task = TaskInput(id=name, query=requirement, context={"language": self._language})
+            feedback = EnvironmentFeedback(
+                result="SUCCESS" if committed else "FAILED",
+                feedback="Ensemble build outcome:\n" + "\n".join(summary_lines),
+                test_report={"candidates": [c.public_view() for c in candidates]},
+            )
+
+            learner = self._make_ensemble_learner(model_refs)
+            result = learner.learn_from_task(task, feedback)
+            added = learner.add_approved_bullets_to_playbook(result)
+
+            return {
+                "approved_bullets": len(result.approved_bullets),
+                "rejected_bullets": len(result.rejected_bullets),
+                "bullets_added_to_playbook": added,
+                "consensus_strength": result.consensus_strength,
+                "diversity_score": result.diversity_score,
+            }
+        except Exception as exc:  # noqa: BLE001 -- learning is a nice-to-have signal
+            logger.warning("ensemble: EnsembleLearner pass skipped: %s", exc)
+            return None
 
     # --- audit --------------------------------------------------------
 

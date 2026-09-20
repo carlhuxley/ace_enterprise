@@ -30,7 +30,9 @@
         "src/audit/schemas.py",
         "src/benchmark/blind_evaluation.py",
         "src/ensemble/consensus.py",
+        "src/ensemble/learner.py",
         "src/ensemble/models.py",
+        "src/storage/schemas.py",
         "src/utils/llm_client.py"
       ]
     },
