@@ -52,6 +52,11 @@ class ModuleOutcome:
     cycles: int = 0
     error: str | None = None
     learned: int = 0  # delta bullets written by the LEARN pass (#33)
+    # "batch" (ModuleTDDBuilder, one-shot contract synthesis) or "iterative"
+    # (IterativeTDDRunner, one Gherkin scenario per RED/GREEN/REFACTOR cycle
+    # -- #59). BLOCKED/SKIPPED outcomes never set a builder, so this stays
+    # "batch" for those regardless of what the plan's ModuleSpec specifies.
+    strategy: str = "batch"
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +66,7 @@ class ModuleOutcome:
             "cycles": self.cycles,
             "error": self.error,
             "learned": self.learned,
+            "strategy": self.strategy,
         }
 
 
@@ -102,6 +108,7 @@ class ProjectBuilder:
         model_id: str = "unknown",
         architect_factory=None,
         builder_factory=None,
+        iterative_runner_factory=None,
         assembler=None,
         playbook_id: str | None = None,
         skip_learn: bool = False,
@@ -132,7 +139,15 @@ class ProjectBuilder:
         # Test seams — default to the real sandboxed components.
         self._make_architect = architect_factory or self._default_architect
         self._make_builder = builder_factory or self._default_builder
+        # (src_dir, test_dir) -> (IterativeTDDRunner, ContainerRunner-owning
+        # orchestrator to .stop() when done) -- unlike the two factories
+        # above, this one needs per-build paths, since IncrementalPlanner/
+        # ContextMapBuilder are constructed from them (#59).
+        self._make_iterative_runner = iterative_runner_factory or self._default_iterative_runner
         self._assemble = assembler or _run_assembly
+        # Set by build() -- PythonLanguagePod needs the project root (not
+        # just src_dir) to glob already-built sibling modules (#61).
+        self._project_root: Path | None = None
         # LEARN wiring (#33): one shared project playbook; a Reflector + Curator
         # unless the caller opted out. Bullets written by each module's build
         # are visible to the modules that follow it and to the next run.
@@ -186,6 +201,42 @@ class ProjectBuilder:
             escalation_model_id=self._escalation_model_id,
         )
 
+    def _default_iterative_runner(self, src_dir: Path, test_dir: Path):
+        """Mirrors src/cli/factory.py::build_agent's wiring, reusing this
+        ProjectBuilder's already-configured LLM clients/playbook/reflector/
+        curator instead of constructing a second, separately-scoped set."""
+        from src.agents.incremental_planner import IncrementalPlanner
+        from src.agents.iterative_tdd_runner import IterativeTDDRunner
+        from src.agents.podman_orchestrator import PodmanOrchestrator
+        from src.agents.podman_runner import PodmanRunner
+        from src.agents.python_language_pod import PythonLanguagePod
+        from src.agents.redundancy_checker import RedundancyPreChecker
+        from src.agents.worker_agent import WorkerAgent
+        from src.utils.context_map import ContextMapBuilder
+
+        context_map = ContextMapBuilder().build(sorted(src_dir.rglob("*.py")))
+        worker = WorkerAgent(
+            self._worker_llm, playbook_manager=self._playbook_manager, context_map=context_map,
+        )
+        planner = IncrementalPlanner(
+            llm_client=self._worker_llm, test_dir=test_dir, src_dir=src_dir,
+            playbook_manager=self._playbook_manager, playbook_id=self._playbook_id,
+        )
+        orchestrator = PodmanOrchestrator(runner=PodmanRunner())
+        pod = PythonLanguagePod(worker, self._project_root, orchestrator)
+        runner = IterativeTDDRunner(
+            pod=pod,
+            planner=planner,
+            playbook_id=self._playbook_id or "default",
+            reflector=self._reflector,
+            curator=self._curator,
+            audit_client=self._audit,
+            redundancy_checker=RedundancyPreChecker(),
+            model_id=f"{self._worker_llm.provider}/{self._worker_llm.model}",
+            task_type="python",
+        )
+        return runner, orchestrator
+
     # ------------------------------------------------------------------
 
     def build(
@@ -202,6 +253,7 @@ class ProjectBuilder:
         src_dir, test_dir = Path(src_dir), Path(test_dir)
         src_dir.mkdir(parents=True, exist_ok=True)
         test_dir.mkdir(parents=True, exist_ok=True)
+        self._project_root = Path(project_root)
 
         module_status = _load_module_status(project_root)
 
@@ -320,6 +372,13 @@ class ProjectBuilder:
         self, module: ModuleSpec, built_paths: list[Path], impl_path: Path, test_path: Path,
         by_name: dict[str, ModuleSpec],
     ) -> ModuleOutcome:
+        # #59: a companion .feature file with 2+ scenarios routes this module
+        # through IterativeTDDRunner instead of the batch path below. Modules
+        # without one (the common case -- schema/adapter/DTO shapes) are
+        # completely unaffected by this branch.
+        if module.feature_path is not None:
+            return self._build_module_iterative(module, impl_path, test_path)
+
         from src.contracts.module_tdd_builder import render_integration_tests
 
         context = _context_from_built(built_paths)
@@ -368,6 +427,63 @@ class ProjectBuilder:
         return ModuleOutcome(
             module.name, ModuleStatus.BUILT, contract_id=contract.id,
             cycles=build.total_cycles, learned=learned,
+        )
+
+    def _build_module_iterative(
+        self, module: ModuleSpec, impl_path: Path, test_path: Path,
+    ) -> ModuleOutcome:
+        """#59: drive `module.feature_path` through IterativeTDDRunner, one
+        Gherkin scenario per RED/GREEN/REFACTOR cycle, instead of
+        ModuleTDDBuilder's batch contract synthesis. No contract_id (this
+        path never generates a ModuleContract) and no explicit dep_modules
+        wiring -- every already-built sibling module already lives on disk
+        under src_dir by the time this runs, and PythonLanguagePod resolves
+        those for free (#61).
+        """
+        from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+
+        # Unlike the batch path (which unconditionally overwrites impl_path
+        # with whatever it just generated), commit_to_disk only writes on a
+        # PASSING green -- so a retry's fresh run() call would otherwise
+        # leave a previous attempt's partial file sitting there, looking
+        # like this attempt's progress when it isn't. Every top-level call
+        # here starts clean; within-a-run cycle-to-cycle continuity is
+        # IterativeTDDRunner's own concern, not affected by this.
+        impl_path.unlink(missing_ok=True)
+        test_path.unlink(missing_ok=True)
+
+        src_dir, test_dir = impl_path.parent, test_path.parent
+        feature_text = module.feature_path.read_text(encoding="utf-8")
+        spec = GherkinFeatureBridge.parse(module.feature_path)
+
+        runner, orchestrator = self._make_iterative_runner(src_dir, test_dir)
+        try:
+            result = runner.run(
+                requirement=spec.as_requirement(),
+                gherkin_context=feature_text,
+                gherkin_scenarios=spec.scenarios,
+                test_file=test_path,
+                impl_file=impl_path,
+            )
+        finally:
+            orchestrator.stop()
+
+        learned = sum(len(c.learned_bullets or []) for c in result.cycles)
+        if not result.success:
+            failing = [c.error for c in result.cycles if not c.success]
+            return ModuleOutcome(
+                module.name, ModuleStatus.FAILED,
+                cycles=result.iterations, learned=learned, strategy="iterative",
+                error=(
+                    f"iterative TDD did not complete all scenarios "
+                    f"({len(result.cycles)}/{len(spec.scenarios)} cycles ran, "
+                    f"complete={result.complete}); first failure: "
+                    f"{failing[0] if failing else 'unknown'}"
+                ),
+            )
+        return ModuleOutcome(
+            module.name, ModuleStatus.BUILT, cycles=result.iterations, learned=learned,
+            strategy="iterative",
         )
 
     def _persist_dependency_graph(

@@ -643,3 +643,181 @@ class TestAssemblySandboxImage:
 
         assert ensure.call_args[0][0] == frozenset({"flask"})  # not "storage"
         assert runner_cls.call_args.kwargs["image"] == "localhost/ace-harness-deps:abc123"
+
+
+# --- Iterative path routing (issue #59) -------------------------------------
+
+_TWO_SCENARIO_FEATURE = """Feature: widget
+  Scenario: first behavior
+    Given a widget
+    When it is used
+    Then it works
+
+  Scenario: second behavior
+    Given a widget
+    When it is used twice
+    Then it still works
+"""
+
+
+class FakeIterativeRunner:
+    def __init__(self, result=None, raise_on_run=None):
+        self._result = result
+        self._raise_on_run = raise_on_run
+        self.run_calls: list[dict] = []
+
+    def run(self, **kwargs):
+        self.run_calls.append(kwargs)
+        if self._raise_on_run:
+            raise self._raise_on_run
+        return self._result
+
+
+class FakeOrchestrator:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+def _cycle(success=True, error=None, learned_bullets=None):
+    return SimpleNamespace(success=success, error=error, learned_bullets=learned_bullets or [])
+
+
+def _iter_result(success=True, complete=True, iterations=2, cycles=None):
+    cycles = cycles if cycles is not None else [_cycle(), _cycle()]
+    return SimpleNamespace(success=success, complete=complete, iterations=iterations, cycles=cycles)
+
+
+def _plan_with_feature(root, name="widget"):
+    feature_path = root / f"{name}.feature"
+    feature_path.write_text(_TWO_SCENARIO_FEATURE)
+    return _plan(ModuleSpec(name, f"the {name} module", feature_path=feature_path)), feature_path
+
+
+class TestIterativePathRouting:
+    def test_module_with_feature_path_never_touches_architect_or_builder(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        arch = FakeArchitect()
+        builder = FakeBuilder()
+        runner = FakeIterativeRunner(result=_iter_result())
+        orchestrator = FakeOrchestrator()
+        pb = ProjectBuilder(
+            llm_client=object(),
+            architect_factory=lambda: arch,
+            builder_factory=lambda: builder,
+            iterative_runner_factory=lambda src_dir, test_dir: (runner, orchestrator),
+        )
+        result = pb.build(plan, root, src, tests)
+
+        assert result.outcomes[0].status is ModuleStatus.BUILT
+        assert arch.seen == []
+        assert builder.seen_deps == []
+        assert len(runner.run_calls) == 1
+
+    def test_iterative_runner_receives_correct_paths_and_scenarios(self, dirs):
+        root, src, tests = dirs
+        plan, feature_path = _plan_with_feature(root)
+        runner = FakeIterativeRunner(result=_iter_result())
+        orchestrator = FakeOrchestrator()
+        seen_dirs = []
+
+        def factory(src_dir, test_dir):
+            seen_dirs.append((src_dir, test_dir))
+            return runner, orchestrator
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert seen_dirs == [(src, tests)]
+        call = runner.run_calls[0]
+        assert call["test_file"] == tests / "test_widget.py"
+        assert call["impl_file"] == src / "widget.py"
+        assert len(call["gherkin_scenarios"]) == 2
+        assert "widget" in call["requirement"]
+        assert feature_path.read_text() in call["gherkin_context"]
+
+    def test_orchestrator_is_stopped_after_a_successful_run(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        orchestrator = FakeOrchestrator()
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=_iter_result()), orchestrator),
+        )
+        pb.build(plan, root, src, tests)
+        assert orchestrator.stopped is True
+
+    def test_orchestrator_is_stopped_even_when_run_raises(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        orchestrator = FakeOrchestrator()
+        runner = FakeIterativeRunner(raise_on_run=RuntimeError("boom"))
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t: (runner, orchestrator),
+        )
+        with pytest.raises(RuntimeError, match="boom"):
+            pb.build(plan, root, src, tests)
+        assert orchestrator.stopped is True
+
+    def test_incomplete_iterative_result_is_a_failed_outcome(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        result = _iter_result(
+            success=False, complete=False, iterations=1,
+            cycles=[_cycle(success=False, error="RED never went GREEN")],
+        )
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=result), FakeOrchestrator()),
+        )
+        out = pb.build(plan, root, src, tests)
+        assert out.outcomes[0].status is ModuleStatus.FAILED
+        assert "RED never went GREEN" in out.outcomes[0].error
+
+    def test_learned_bullets_are_summed_across_cycles(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        result = _iter_result(cycles=[_cycle(learned_bullets=["a", "b"]), _cycle(learned_bullets=["c"])])
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=result), FakeOrchestrator()),
+        )
+        out = pb.build(plan, root, src, tests)
+        assert out.outcomes[0].learned == 3
+
+    def test_stale_files_from_a_previous_attempt_are_cleared_before_rerun(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        src.mkdir(parents=True, exist_ok=True)
+        tests.mkdir(parents=True, exist_ok=True)
+        (src / "widget.py").write_text("STALE\n")
+        (tests / "test_widget.py").write_text("STALE\n")
+
+        def factory(src_dir, test_dir):
+            # By the time the runner is constructed, stale files must already be gone.
+            assert not (src_dir / "widget.py").exists()
+            assert not (test_dir / "test_widget.py").exists()
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+    def test_module_without_feature_path_is_unaffected(self, dirs):
+        root, src, tests = dirs
+        plan = _plan(ModuleSpec("db", "the db module"))
+        arch = FakeArchitect()
+        builder = FakeBuilder()
+        pb = ProjectBuilder(
+            llm_client=object(),
+            architect_factory=lambda: arch,
+            builder_factory=lambda: builder,
+            iterative_runner_factory=lambda s, t: (_ for _ in ()).throw(
+                AssertionError("iterative path must not be used")
+            ),
+        )
+        result = pb.build(plan, root, src, tests)
+        assert result.outcomes[0].status is ModuleStatus.BUILT

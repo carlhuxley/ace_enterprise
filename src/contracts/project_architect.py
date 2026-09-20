@@ -42,12 +42,17 @@ class ModuleSpec:
     `ProjectPlan.from_spec_dir`, issue #57 follow-up), is the raw text of
     this module's formal `.contract.yml` -- passed to `ModuleArchitect` as
     the authoritative interface instead of letting it re-derive the
-    module's shape from `description` alone."""
+    module's shape from `description` alone. `feature_path`, when set
+    (also only via `from_spec_dir`, issue #59), routes this module through
+    `IterativeTDDRunner` (one Gherkin scenario per RED/GREEN/REFACTOR
+    cycle) instead of `ModuleTDDBuilder`'s one-shot batch contract
+    synthesis -- see ProjectBuilder._build_module for the branch point."""
 
     name: str
     description: str
     depends_on: tuple[str, ...] = ()
     contract_yaml: str | None = None
+    feature_path: Path | None = None
 
 
 @dataclass
@@ -123,6 +128,8 @@ class ProjectPlan:
         if not contract_files:
             raise ProjectPlanError(f"no *.contract.yml files found under {spec_dir}")
 
+        features_dir = spec_dir / "features"
+
         modules: list[ModuleSpec] = []
         for path in contract_files:
             raw_text = path.read_text(encoding="utf-8")
@@ -135,16 +142,41 @@ class ProjectPlan:
             depends_on_raw = data.get("depends_on", []) or []
             if not isinstance(depends_on_raw, list):
                 raise ProjectPlanError(f"{path}: 'depends_on' must be a list")
+            module_name = str(data["module"]).strip()
             modules.append(
                 ModuleSpec(
-                    name=str(data["module"]).strip(),
+                    name=module_name,
                     description=str(data.get("description", "")).strip(),
                     depends_on=tuple(str(d).strip() for d in depends_on_raw if str(d).strip()),
+                    feature_path=_iterative_feature_path(features_dir, module_name),
                     contract_yaml=raw_text,
                 )
             )
 
         return cls(spec=f"structured spec dir: {spec_dir}", modules=modules)
+
+
+def _iterative_feature_path(features_dir: Path, module_name: str) -> Path | None:
+    """Issue #59's routing signal: a companion `<module_name>.feature` file
+    with 2+ scenarios means this module is algorithmic/stateful enough that
+    it should be discovered incrementally (IterativeTDDRunner, one scenario
+    per RED/GREEN/REFACTOR cycle) rather than committed to a full pre-
+    rendered integration-test battery up front (ModuleTDDBuilder's batch
+    path). A single-scenario or missing feature file, or one that fails to
+    parse, returns None -- the batch path is the safe default, and a
+    malformed feature file must not brick an otherwise-buildable module.
+    """
+    path = features_dir / f"{module_name}.feature"
+    if not path.is_file():
+        return None
+    try:
+        from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+
+        spec = GherkinFeatureBridge.parse(path)
+    except Exception as exc:  # noqa: BLE001 -- a bad feature file must not block planning
+        logger.warning("%s: failed to parse as a Gherkin feature (%s) -- using batch build", path, exc)
+        return None
+    return path if len(spec.scenarios) >= 2 else None
 
 
 @dataclass

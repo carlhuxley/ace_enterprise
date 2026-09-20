@@ -440,7 +440,8 @@ def cmd_project(args: argparse.Namespace) -> int:
 
     print("\nModules:")
     for o in result.outcomes:
-        line = f"  {_PROJECT_STATUS_GLYPH.get(o.status.value, '?')} {o.name}  ({o.cycles} cycle(s))"
+        strategy_note = ", iterative" if getattr(o, "strategy", "batch") == "iterative" else ""
+        line = f"  {_PROJECT_STATUS_GLYPH.get(o.status.value, '?')} {o.name}  ({o.cycles} cycle(s){strategy_note})"
         if getattr(o, "learned", 0):
             line += f", +{o.learned} bullet(s)"
         if o.error:

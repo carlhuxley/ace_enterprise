@@ -162,6 +162,78 @@ class TestFromSpecDir:
             ProjectPlan.from_spec_dir(tmp_path)
 
 
+_TWO_SCENARIO_FEATURE = """Feature: widget
+  Scenario: first behavior
+    Given a widget
+    When it is used
+    Then it works
+
+  Scenario: second behavior
+    Given a widget
+    When it is used twice
+    Then it still works
+"""
+
+_ONE_SCENARIO_FEATURE = """Feature: widget
+  Scenario: only behavior
+    Given a widget
+    Then it works
+"""
+
+
+class TestFromSpecDirIterativeRouting:
+    """#59: a companion <module>.feature file with 2+ scenarios routes that
+    module through IterativeTDDRunner (ModuleSpec.feature_path set)."""
+
+    def test_two_scenario_feature_file_sets_feature_path(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "widget.contract.yml", "widget")
+        feature_path = tmp_path / "features" / "widget.feature"
+        feature_path.parent.mkdir(parents=True)
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["widget"].feature_path == feature_path
+
+    def test_single_scenario_feature_file_does_not_set_feature_path(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "widget.contract.yml", "widget")
+        feature_path = tmp_path / "features" / "widget.feature"
+        feature_path.parent.mkdir(parents=True)
+        feature_path.write_text(_ONE_SCENARIO_FEATURE)
+
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["widget"].feature_path is None
+
+    def test_no_feature_file_leaves_feature_path_none(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "widget.contract.yml", "widget")
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["widget"].feature_path is None
+
+    def test_unrelated_module_feature_file_does_not_cross_wire(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "widget.contract.yml", "widget")
+        _write_contract(tmp_path / "contracts" / "gadget.contract.yml", "gadget")
+        feature_path = tmp_path / "features" / "widget.feature"
+        feature_path.parent.mkdir(parents=True)
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["widget"].feature_path == feature_path
+        assert by_name["gadget"].feature_path is None
+
+    def test_malformed_feature_file_falls_back_to_none_not_a_raise(self, tmp_path):
+        _write_contract(tmp_path / "contracts" / "widget.contract.yml", "widget")
+        feature_path = tmp_path / "features" / "widget.feature"
+        feature_path.parent.mkdir(parents=True)
+        feature_path.write_bytes(b"\xff\xfe not valid text \x00\x01")
+
+        plan = ProjectPlan.from_spec_dir(tmp_path)
+        by_name = {m.name: m for m in plan.modules}
+        assert by_name["widget"].feature_path is None
+
+
 # --- ProjectArchitect.plan ------------------------------------------------
 
 class TestArchitectPlan:

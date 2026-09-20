@@ -879,9 +879,15 @@
         "ProjectBuilder"
       ],
       "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/agents/incremental_planner.py",
+        "src/agents/iterative_tdd_runner.py",
         "src/agents/podman_orchestrator.py",
         "src/agents/podman_runner.py",
+        "src/agents/python_language_pod.py",
+        "src/agents/redundancy_checker.py",
         "src/agents/sandbox_image_builder.py",
+        "src/agents/worker_agent.py",
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/contracts/module_architect.py",
@@ -890,6 +896,7 @@
         "src/core/curator/module.py",
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
+        "src/utils/context_map.py",
         "src/utils/dependency_graph.py",
         "src/utils/llm_client.py",
         "src/utils/third_party_imports.py"
@@ -1025,6 +1032,7 @@
         "ProjectArchitect"
       ],
       "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/utils/llm_client.py",
