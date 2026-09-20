@@ -3,6 +3,7 @@ Curator Module - Synthesize insights into playbook updates.
 Based on PRD Section 2.2.3: Curator Module
 """
 import logging
+import re
 from typing import Any
 
 from src.config.settings import settings
@@ -11,6 +12,19 @@ from src.storage.schemas import CuratorOutput, DeltaBullet, Playbook, ReflectorO
 from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+# Matches a trailing "[supersedes: ctx-00123, ctx-00456]" marker the
+# synthesis prompt asks for when a new bullet corrects/replaces existing
+# ones. Captured and stripped out of the bullet's own content in
+# finalize_bullet() below.
+_SUPERSEDES_RE = re.compile(r"\[supersedes:\s*([^\]]+)\]", re.IGNORECASE)
+
+# Existing bullets shown per section in the synthesis prompt, so the model
+# can actually see what it might be about to contradict (see
+# _existing_bullets_block). Same cap as module_architect.py's
+# _MAX_PRIOR_BULLETS -- enough for the model to check against, small enough
+# to keep the prompt bounded regardless of how large the playbook has grown.
+_MAX_EXISTING_BULLETS_PER_SECTION = 10
 
 
 class Curator:
@@ -160,6 +174,31 @@ Generate bullets that will genuinely help prevent similar mistakes in the future
 
         return delta_bullets, reasoning
 
+    def _existing_bullets_block(self, playbook: Playbook) -> str:
+        """Existing bullets (id + content), capped per section, so the
+        synthesis prompt can ask the model to check new guidance against
+        what is already there instead of only showing aggregate counts.
+
+        Without this, the LLM has no way to know it is about to write a
+        bullet that contradicts one already in the playbook -- found via
+        two real failures where a Reflector/Curator pass correctly diagnosed
+        a bug, then a LATER pass (for the same recurring bug, seen again a
+        few cycles on) misdiagnosed it and wrote the opposite fix, with
+        nothing to flag that the two bullets now gave opposite instructions
+        for the same situation.
+        """
+        sections_with_bullets = {s: b for s, b in playbook.sections.items() if b}
+        if not sections_with_bullets:
+            return ""
+
+        block = "\n\n## Existing Bullets (check new guidance against these before writing anything)\n"
+        for section, bullets in sections_with_bullets.items():
+            block += f"\n### {section}\n"
+            for bullet in bullets[-_MAX_EXISTING_BULLETS_PER_SECTION:]:
+                content = bullet.content.replace("\n", " ")
+                block += f"- [{bullet.id}] {content}\n"
+        return block
+
     def _build_synthesis_prompt(
         self,
         reflector_output: ReflectorOutput,
@@ -182,6 +221,8 @@ Version: {playbook.version}
             prompt += f"\n### {section}"
             prompt += f"\n- Bullets: {section_stats['bullet_count']}"
             prompt += f"\n- Helpful Ratio: {section_stats['helpful_ratio']:.2f}"
+
+        prompt += self._existing_bullets_block(playbook)
 
         prompt += "\n\n## Analysis from Reflector\n"
 
@@ -220,6 +261,27 @@ You can add bullets to these sections:
 
 Based on the analysis above, generate new bullets that will help prevent similar errors in the future.
 
+Before writing any bullet, check it against every existing bullet listed
+above under "## Existing Bullets". If your new guidance CONTRADICTS an
+existing bullet -- gives the opposite instruction for the same situation
+(e.g. one says use a flat import, another says use a package-qualified
+import; one says a value is required, another says it defaults) -- do not
+add a new bullet that leaves both standing. This playbook is read by a
+future run that has no way to tell which of two contradictory bullets is
+current, and following the wrong one reproduces the exact failure you are
+now trying to prevent. Instead:
+1. Verify which side is actually correct against the concrete evidence in
+   the Reflector's analysis above (the real error, the real file/module
+   layout) -- never guess or assume the newer information is automatically
+   right.
+2. Write the corrected bullet, and end it with a line naming every
+   existing bullet id it replaces: `[supersedes: ctx-00123, ctx-00456]`.
+   Omit this line entirely for a bullet that supersedes nothing.
+3. Never write a bullet that merely hedges between two existing
+   contradictory bullets (e.g. "try X, or if that fails use the opposite of
+   X") -- that still leaves a future run guessing under pressure. Resolve
+   the contradiction to one instruction.
+
 For each bullet:
 1. Choose the appropriate section
 2. Write specific, actionable content
@@ -233,13 +295,15 @@ For each bullet:
 Format your response as:
 
 ### Reasoning
-[Explain your thought process for creating these bullets]
+[Explain your thought process for creating these bullets, including which
+existing bullets (if any) each new one supersedes and why]
 
 ### Delta Bullets
 
 #### Section: [section_name]
 - [Bullet content 1]
-- [Bullet content 2]
+- [Bullet content 2 that corrects an existing bullet]
+[supersedes: ctx-00123]
 
 #### Section: [another_section_name]
 - [Bullet content 3]
@@ -303,6 +367,15 @@ Format your response as:
             bullet_content = "\n".join(current_bullet_lines).strip()
             if not bullet_content:
                 return
+
+            supersedes: list[str] = []
+            match = _SUPERSEDES_RE.search(bullet_content)
+            if match:
+                supersedes = [bid.strip() for bid in match.group(1).split(",") if bid.strip()]
+                bullet_content = _SUPERSEDES_RE.sub("", bullet_content).strip()
+                if not bullet_content:
+                    return
+
             delta_bullets.append(DeltaBullet(
                 section=current_section,
                 content=bullet_content,
@@ -311,6 +384,7 @@ Format your response as:
                 project_ids=task_context.get("project_ids"),
                 applicable_domains=task_context.get("applicable_domains"),
                 tech_context=task_context.get("tech_context"),
+                supersedes=supersedes,
             ))
 
         for line in lines:
@@ -377,10 +451,20 @@ Format your response as:
                     current_bullet_lines = [line_stripped[1:].strip()]
                     continue
 
+                # A trailing "[supersedes: ...]" marker belongs to the
+                # currently-open bullet, not a new one -- append it instead
+                # of falling through to the ignored case below, or it's
+                # silently dropped and the bullet it corrects is never
+                # removed (see _SUPERSEDES_RE / finalize_bullet above).
+                if _SUPERSEDES_RE.search(line_stripped) and current_bullet_lines is not None:
+                    current_bullet_lines.append(line_stripped)
+                    continue
+
                 # Any other line outside a fence (blank lines, stray prose
                 # between bullets) is ignored, same as before this fix --
-                # only fenced code blocks that follow a bullet are now
-                # preserved instead of silently dropped.
+                # only fenced code blocks and a trailing supersedes marker
+                # that follow a bullet are now preserved instead of
+                # silently dropped.
 
         finalize_bullet()
 

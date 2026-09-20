@@ -319,6 +319,21 @@ class PlaybookManager:
                 continue
             added_bullets.append(bullet)
 
+            # Only remove what this bullet corrects once IT has actually
+            # landed -- if the new bullet were rejected above (content
+            # safety, token budget), removing the old guidance first would
+            # leave neither instruction in the playbook.
+            for superseded_id in delta.supersedes:
+                if self.remove_bullet(playbook_id, superseded_id):
+                    logger.info(
+                        f"Bullet {bullet.id} supersedes {superseded_id} in playbook {playbook_id}"
+                    )
+                else:
+                    logger.debug(
+                        f"supersedes target {superseded_id} not found in playbook {playbook_id} "
+                        "(already removed or never existed)"
+                    )
+
         logger.info(
             f"Applied delta to playbook {playbook_id}: {len(added_bullets)}/{len(delta_bullets)} bullets added"
         )

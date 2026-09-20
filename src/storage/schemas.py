@@ -233,6 +233,16 @@ class DeltaBullet(BaseModel):
     content: str = Field(..., description="Bullet content")
     tags: list[str] = Field(default_factory=list)
 
+    # IDs of existing bullets this one corrects/replaces, because they gave
+    # contradictory guidance for the same situation (e.g. one bullet says
+    # "use flat imports", an earlier one says "use `src.`-qualified
+    # imports"). Curator._build_synthesis_prompt shows the LLM existing
+    # bullets precisely so it can populate this instead of silently piling
+    # a new bullet on top of one it contradicts; PlaybookManager.apply_delta
+    # removes each superseded id once (and only once) this bullet is
+    # actually added.
+    supersedes: list[str] = Field(default_factory=list)
+
     # CGR³ context fields (optional -- see Bullet/BulletCreate). Curator
     # never asks the LLM to invent these (provenance/scoping facts, not
     # something to synthesize); Curator.curate()'s task_context can set them
