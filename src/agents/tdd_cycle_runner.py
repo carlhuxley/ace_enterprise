@@ -360,6 +360,11 @@ class TDDCycleRunner:
             "bullets_learned": len(result.learned_bullets),
             "elapsed_seconds": elapsed_seconds,
             "task_type": self._task_type,
+            # green_attempts==1 means GREEN passed (or was abandoned) on the
+            # first try -- the "first-pass" signal PlaybookReliabilityAnalyzer
+            # correlates against retrieved_bullet_ids for causal uplift.
+            "green_attempts": result.green_attempts,
+            "retrieved_bullet_ids": result.green_result.retrieved_bullet_ids or [],
         })
 
     # ------------------------------------------------------------------

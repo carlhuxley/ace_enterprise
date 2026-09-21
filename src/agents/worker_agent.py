@@ -77,6 +77,11 @@ class WorkerAgent:
         self._playbook_manager = playbook_manager
         self._context_map = context_map
         self._temperature = temperature
+        # IDs from the most recent _get_bullets() call (the GREEN/patch strategy
+        # bullets, not test-rules bullets) -- pods read this right after calling
+        # generate_implementation/generate_patch to attach it to the PhaseResult,
+        # so TDDCycleRunner can put it on the CYCLE_COMPLETED audit payload.
+        self.last_retrieved_bullet_ids: list[str] = []
 
     def generate_test(self, spec: PodSpec, existing_code: str = "") -> str:
         prompt = self._test_prompt(spec, existing_code)
@@ -255,11 +260,15 @@ class WorkerAgent:
 
     def _get_bullets(self) -> list[str]:
         if not self._playbook_manager:
+            self.last_retrieved_bullet_ids = []
             return []
         try:
-            return self._playbook_manager.get_bullets(_PLAYBOOK_SECTION) or []
+            pairs = self._playbook_manager.get_bullets_with_ids(_PLAYBOOK_SECTION) or []
         except Exception:
+            self.last_retrieved_bullet_ids = []
             return []
+        self.last_retrieved_bullet_ids = [bullet_id for bullet_id, _ in pairs]
+        return [content for _, content in pairs]
 
     def _get_test_bullets(self) -> list[str]:
         if not self._playbook_manager:

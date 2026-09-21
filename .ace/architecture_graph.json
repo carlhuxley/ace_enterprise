@@ -1417,8 +1417,9 @@
         "PlaybookReliabilityAnalyzer"
       ],
       "depends_on": [
-        "src/playbook/manager.py",
-        "src/storage/experiment_logger.py"
+        "src/audit/schemas.py",
+        "src/audit/store.py",
+        "src/playbook/manager.py"
       ]
     },
     "src/reliability/tdd_cycle_analyzer.py": {

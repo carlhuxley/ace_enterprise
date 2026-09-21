@@ -479,10 +479,19 @@ class PlaybookManager:
 
     def get_bullets(self, section: str) -> list[str]:
         """Return bullet content strings from all loaded playbooks for a section."""
+        return [content for _, content in self.get_bullets_with_ids(section)]
+
+    def get_bullets_with_ids(self, section: str) -> list[tuple[str, str]]:
+        """Return (bullet_id, content) pairs from all loaded playbooks for a section.
+
+        Callers that need to correlate retrieval with downstream cycle outcomes
+        (e.g. WorkerAgent recording retrieved_bullet_ids for the audit trail)
+        need the id -- get_bullets() alone discards it.
+        """
         result = []
         for playbook in self._playbooks.values():
             for bullet in playbook.sections.get(section, []):
-                result.append(bullet.content)
+                result.append((bullet.id, bullet.content))
         return result
 
     def get_all_bullets(self, playbook_id: str) -> list[Bullet]:

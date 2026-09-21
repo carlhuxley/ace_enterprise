@@ -549,6 +549,34 @@ class TestRemoveBullet:
 
 
 # ---------------------------------------------------------------------------
+# get_bullets_with_ids -- get_bullets() alone discards bullet_id, which is
+# why nothing could ever correlate a retrieved bullet with a cycle outcome
+# (issue #65). This is the fix: same content, plus the id.
+# ---------------------------------------------------------------------------
+
+class TestGetBulletsWithIds:
+    def test_returns_id_and_content_pairs(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        bullet = _add(pm, "pb1", "strategies_and_hard_rules", "always validate inputs")
+        result = pm.get_bullets_with_ids("strategies_and_hard_rules")
+        assert result == [(bullet.id, "always validate inputs")]
+
+    def test_get_bullets_matches_content_of_get_bullets_with_ids(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        _add(pm, "pb1", "strategies_and_hard_rules", "one")
+        _add(pm, "pb1", "strategies_and_hard_rules", "two")
+        with_ids = pm.get_bullets_with_ids("strategies_and_hard_rules")
+        assert pm.get_bullets("strategies_and_hard_rules") == [c for _, c in with_ids]
+
+    def test_empty_section_returns_empty_list(self, tmp_path):
+        pm = _manager(tmp_path)
+        pm.get_or_create_playbook("pb1")
+        assert pm.get_bullets_with_ids("strategies_and_hard_rules") == []
+
+
+# ---------------------------------------------------------------------------
 # deprecate_bullet (playbook_uplift_and_deprecation.feature)
 # ---------------------------------------------------------------------------
 

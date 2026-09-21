@@ -150,14 +150,25 @@ class PythonLanguagePod:
                 self._record_usage(spec.cycle_number)
                 return PhaseResult(passed=False, output="", error=str(exc))
 
+        # getattr, not a direct attribute access: not every LanguagePod's
+        # worker is a real WorkerAgent (e.g. hand-rolled test doubles), so
+        # bullet tracking is optional, not guaranteed.
+        retrieved_bullet_ids = list(getattr(self._worker, "last_retrieved_bullet_ids", None) or [])
+
         try:
             _import_filter.check(impl_code)
         except ForbiddenImportError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+            return PhaseResult(
+                passed=False, output="", error=f"ForbiddenImport: {exc}",
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
         except Exception as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=str(exc))
+            return PhaseResult(
+                passed=False, output="", error=str(exc),
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
         files = self._sibling_files(spec)
         files[spec.test_file.name] = test_code
         files[spec.implementation_file.name] = impl_code
@@ -166,12 +177,16 @@ class PythonLanguagePod:
             result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+            return PhaseResult(
+                passed=False, output="", error=f"SecurityBreach: {exc}",
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
             self._patch_failure_counts[file_key] = 0
         self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = retrieved_bullet_ids
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:

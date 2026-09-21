@@ -43,6 +43,20 @@ class ControlledPod:
         return []
 
 
+class BulletTrackingPod(ControlledPod):
+    """GREEN reports which playbook bullets it "retrieved", like a real
+    WorkerAgent-backed pod does via PhaseResult.retrieved_bullet_ids."""
+
+    def __init__(self, bullet_ids, **kw):
+        super().__init__(**kw)
+        self._bullet_ids = bullet_ids
+
+    def run_green(self, spec: PodSpec) -> PhaseResult:
+        result = super().run_green(spec)
+        result.retrieved_bullet_ids = list(self._bullet_ids)
+        return result
+
+
 class AbortingRedPod(ControlledPod):
     """RED returns a forbidden import error → should abort cycle."""
 
@@ -722,6 +736,35 @@ def test_cycle_completed_never_fabricates_cost_or_quality_score(tmp_path):
     assert "cost" not in payload
     assert "quality_score" not in payload
     assert "complexity" not in payload
+
+
+def test_cycle_completed_payload_includes_retrieved_bullet_ids_and_green_attempts(tmp_path):
+    """PlaybookReliabilityAnalyzer.bullet_uplift() (#65) reads these two
+    fields straight off CYCLE_COMPLETED -- ExperimentLogger is never
+    populated by any live run, so this is the only real signal available."""
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(
+        BulletTrackingPod(bullet_ids=["b1", "b2"], green_pass_on=2),
+        audit_client=audit,
+    )
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    completed = [e for e in audit.events if e["event_type"] == AuditEventType.CYCLE_COMPLETED]
+    assert len(completed) == 1
+    payload = completed[0]["payload"]
+    assert payload["retrieved_bullet_ids"] == ["b1", "b2"]
+    assert payload["green_attempts"] == 2
+
+
+def test_cycle_completed_payload_bullet_ids_empty_when_pod_does_not_track_them(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(ControlledPod(), audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    completed = [e for e in audit.events if e["event_type"] == AuditEventType.CYCLE_COMPLETED]
+    assert completed[0]["payload"]["retrieved_bullet_ids"] == []
 
 
 def test_performance_aggregator_distinguishes_models_after_real_cycles(tmp_path):

@@ -191,6 +191,17 @@ class TestSiblingModuleInclusion:
 # ---------------------------------------------------------------------------
 
 class TestRunGreen:
+    def test_attaches_worker_last_retrieved_bullet_ids_to_result(self, tmp_path):
+        pod = make_pod(tmp_path)
+        pod._worker.last_retrieved_bullet_ids = ["b1", "b2"]
+        result = pod.run_green(spec(tmp_path))
+        assert result.retrieved_bullet_ids == ["b1", "b2"]
+
+    def test_retrieved_bullet_ids_empty_when_worker_tracked_none(self, tmp_path):
+        pod = make_pod(tmp_path)
+        result = pod.run_green(spec(tmp_path))
+        assert result.retrieved_bullet_ids == []
+
     def test_returns_phase_result(self, tmp_path):
         pod = make_pod(tmp_path)
         result = pod.run_green(spec(tmp_path))

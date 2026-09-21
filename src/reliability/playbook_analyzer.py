@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass
 
+from src.audit.schemas import AuditEventType, AuditQuery
+from src.audit.store import AuditStore
 from src.playbook.manager import PlaybookManager
-from src.storage.experiment_logger import ExperimentLogger
 
 
 @dataclass
@@ -29,15 +30,53 @@ class BulletUplift:
 
 
 class PlaybookReliabilityAnalyzer:
-    """Correlates bullet retrieval with first-pass GREEN outcomes."""
+    """Correlates bullet retrieval with first-pass GREEN outcomes.
+
+    Sourced from the real hash-chained audit log's CYCLE_COMPLETED events --
+    NOT ExperimentLogger. ExperimentLogger.log_tdd_cycle() is never called by
+    any live `ace tdd`/`ace project` run (its retrieved_bullet_ids param was
+    designed but never wired up), so that table is permanently empty in
+    practice; see issue #65. CYCLE_COMPLETED, by contrast, is emitted by
+    TDDCycleRunner on every real cycle and (as of the retrieved_bullet_ids/
+    green_attempts fields added alongside this analyzer) carries everything
+    both stats methods below need.
+    """
 
     def __init__(
         self,
-        experiment_logger: ExperimentLogger,
+        audit_store: AuditStore,
         playbook_manager: PlaybookManager,
     ) -> None:
-        self._logger = experiment_logger
+        self._audit_store = audit_store
         self._playbook_manager = playbook_manager
+
+    def _cycle_records(self, playbook_id: str) -> list[dict]:
+        """Fetch every CYCLE_COMPLETED event for a playbook, normalized into
+        the {result, retry_count, retrieved_bullet_ids} shape both stats
+        methods below share. Paginates past AuditQuery's 1000-row cap."""
+        records: list[dict] = []
+        offset = 0
+        while True:
+            page = self._audit_store.query(AuditQuery(
+                event_types=[AuditEventType.CYCLE_COMPLETED],
+                playbook_id=playbook_id,
+                limit=1000,
+                offset=offset,
+                order_by="id",
+                order_desc=False,
+            ))
+            for event in page.events:
+                payload = event.payload
+                green_attempts = payload.get("green_attempts") or 1
+                records.append({
+                    "result": "SUCCESS" if payload.get("success") else "FAILED",
+                    "retry_count": max(int(green_attempts) - 1, 0),
+                    "retrieved_bullet_ids": payload.get("retrieved_bullet_ids") or [],
+                })
+            offset += len(page.events)
+            if not page.events or not page.has_more:
+                break
+        return records
 
     def bullet_reliability(self, playbook_id: str) -> list[BulletReliability]:
         """For each bullet in the playbook, compute first-pass rate across cycles
@@ -46,7 +85,7 @@ class PlaybookReliabilityAnalyzer:
         Bullets with zero retrievals are excluded.
         Results are sorted by first_pass_rate descending.
         """
-        records = self._logger.get_tdd_cycle_records(playbook_id=playbook_id)
+        records = self._cycle_records(playbook_id)
 
         # Accumulate per-bullet stats
         times_retrieved: dict[str, int] = {}
@@ -90,7 +129,7 @@ class PlaybookReliabilityAnalyzer:
         Sorted worst-first (most negative uplift first, undefined-uplift
         bullets last) -- the order a pruning tool actually wants.
         """
-        records = self._logger.get_tdd_cycle_records(playbook_id=playbook_id)
+        records = self._cycle_records(playbook_id)
 
         all_bullet_ids: set[str] = set()
         for record in records:

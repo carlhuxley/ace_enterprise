@@ -37,6 +37,10 @@ class PhaseResult:
     # Deterministic reformatting of submitted files (e.g. gofmt for Go),
     # populated when the underlying toolchain auto-formats. None otherwise.
     formatted_files: dict[str, str] | None = None
+    # Playbook bullet IDs retrieved for this phase's generation (GREEN/patch
+    # strategy bullets). Only populated by pods that route through a
+    # WorkerAgent-style bullet retrieval; None for pods that don't track it.
+    retrieved_bullet_ids: list[str] | None = None
 
 
 @runtime_checkable

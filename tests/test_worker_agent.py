@@ -120,7 +120,7 @@ class TestGenerateImplementation:
 
     def test_playbook_bullets_injected_when_manager_set(self, tmp_path):
         pm = MagicMock()
-        pm.get_bullets.return_value = ["always validate inputs at boundaries"]
+        pm.get_bullets_with_ids.return_value = [("b1", "always validate inputs at boundaries")]
         w = WorkerAgent(_llm(), playbook_manager=pm)
         w.generate_implementation(_spec(tmp_path))
         assert "always validate inputs at boundaries" in _captured_prompt(w)
@@ -129,6 +129,18 @@ class TestGenerateImplementation:
         w = WorkerAgent(_llm())
         w.generate_implementation(_spec(tmp_path))
         assert "Playbook" not in _captured_prompt(w)
+
+    def test_records_last_retrieved_bullet_ids(self, tmp_path):
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("b1", "one"), ("b2", "two")]
+        w = WorkerAgent(_llm(), playbook_manager=pm)
+        w.generate_implementation(_spec(tmp_path))
+        assert w.last_retrieved_bullet_ids == ["b1", "b2"]
+
+    def test_last_retrieved_bullet_ids_empty_when_no_playbook(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(_spec(tmp_path))
+        assert w.last_retrieved_bullet_ids == []
 
     def test_prompt_warns_about_blocked_sandbox_imports(self, tmp_path):
         w = WorkerAgent(_llm())
@@ -270,7 +282,7 @@ class TestGeneratePatch:
 
     def test_prompt_includes_playbook_bullets(self, tmp_path):
         pm = MagicMock()
-        pm.get_bullets.return_value = ["always validate input"]
+        pm.get_bullets_with_ids.return_value = [("b1", "always validate input")]
         w = WorkerAgent(_llm(content=_SR_BLOCK), playbook_manager=pm)
         w.generate_patch(_spec(tmp_path), existing_code="x = 1")
         assert "always validate input" in _captured_prompt(w)
