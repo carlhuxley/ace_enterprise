@@ -96,6 +96,11 @@ class SimulationPod:
         # Last attempt's diagnosis per cycle, used to detect a retry loop
         # stuck reproducing the identical failure (see _with_stagnation_note).
         self._last_diagnostic: dict[int, str] = {}
+        # IDs from the most recent _get_bullets() call. _bullets_section() is
+        # shared by GREEN and REFACTOR prompts, but GREEN's own call is
+        # always the last one before run_green() reads this (mirrors
+        # WorkerAgent.last_retrieved_bullet_ids, src/agents/worker_agent.py).
+        self.last_retrieved_bullet_ids: list[str] = []
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -128,18 +133,23 @@ class SimulationPod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=_sanitize_error(exc))
 
+        retrieved_bullet_ids = list(self.last_retrieved_bullet_ids)
         archive_base = self._archive_attempt(spec, "green", controller_code)
 
         try:
             _import_filter.check(controller_code)
         except ForbiddenImportError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"ForbiddenImport: {exc}")
+            return PhaseResult(
+                passed=False, output="", error=f"ForbiddenImport: {exc}",
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
 
         result = self._run_oracle(spec, controller_code, invariants, archive_base)
         if result.passed:
             commit_to_disk(controller_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = retrieved_bullet_ids
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
@@ -277,14 +287,20 @@ class SimulationPod:
         Sections" prompt) -- there's no simulation-specific section name to
         target, so all of them are checked."""
         if self._playbook_manager is None:
+            self.last_retrieved_bullet_ids = []
             return []
-        bullets: list[str] = []
+        bullet_ids: list[str] = []
+        contents: list[str] = []
         for section in _BULLET_SECTIONS:
             try:
-                bullets.extend(self._playbook_manager.get_bullets(section))
+                pairs = self._playbook_manager.get_bullets_with_ids(section)
             except Exception:
                 continue
-        return bullets
+            for bullet_id, content in pairs:
+                bullet_ids.append(bullet_id)
+                contents.append(content)
+        self.last_retrieved_bullet_ids = bullet_ids
+        return contents
 
     def _record_usage(self, cycle_number: int) -> None:
         self._token_log.append(TokenUsage(

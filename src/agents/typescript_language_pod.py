@@ -104,6 +104,10 @@ class TypeScriptLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
+        # getattr, not a direct attribute access: not every worker this pod
+        # could be constructed with is a real TypeScriptWorkerAgent.
+        retrieved_bullet_ids = list(getattr(self._worker, "last_retrieved_bullet_ids", None) or [])
+
         files = {
             spec.test_file.name: test_code,
             spec.implementation_file.name: impl_code,
@@ -113,11 +117,15 @@ class TypeScriptLanguagePod:
             result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+            return PhaseResult(
+                passed=False, output="", error=f"SecurityBreach: {exc}",
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = retrieved_bullet_ids
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:

@@ -61,6 +61,12 @@ class TypeScriptWorkerAgent:
         self._fallback_client = fallback_client
         self._escalate_after = escalate_after
         self._impl_attempts: dict[str, int] = {}
+        # IDs from the most recent _get_hard_rules() call. _get_hard_rules()
+        # is shared by all three phase prompts, but GREEN's own call is
+        # always the last one before TypeScriptLanguagePod.run_green() reads
+        # this, so it correctly reflects that phase's retrieval (mirrors
+        # WorkerAgent.last_retrieved_bullet_ids, src/agents/worker_agent.py).
+        self.last_retrieved_bullet_ids: list[str] = []
 
     def generate_test(self, spec: PodSpec, existing_code: str = "") -> str:
         prompt = self._test_prompt(spec, existing_code)
@@ -167,12 +173,18 @@ class TypeScriptWorkerAgent:
 
     def _get_hard_rules(self) -> list[str]:
         if not self._playbook_manager:
+            self.last_retrieved_bullet_ids = []
             return _DEFAULT_HARD_RULES
         try:
-            bullets = self._playbook_manager.get_bullets("strategies_and_hard_rules") or []
-            return bullets if bullets else _DEFAULT_HARD_RULES
+            pairs = self._playbook_manager.get_bullets_with_ids("strategies_and_hard_rules") or []
         except Exception:
+            self.last_retrieved_bullet_ids = []
             return _DEFAULT_HARD_RULES
+        if not pairs:
+            self.last_retrieved_bullet_ids = []
+            return _DEFAULT_HARD_RULES
+        self.last_retrieved_bullet_ids = [bullet_id for bullet_id, _ in pairs]
+        return [content for _, content in pairs]
 
 
 _TS_CODE_START = re.compile(

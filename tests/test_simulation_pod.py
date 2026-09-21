@@ -269,9 +269,9 @@ class TestPlaybookBullets:
 
     def test_bullets_from_relevant_sections_are_included(self, tmp_path):
         playbook_manager = MagicMock()
-        playbook_manager.get_bullets.side_effect = lambda section: {
-            "strategies_and_hard_rules": ["retreat fully before repositioning"],
-            "domain_knowledge": ["static friction clamps sub-threshold velocity commands"],
+        playbook_manager.get_bullets_with_ids.side_effect = lambda section: {
+            "strategies_and_hard_rules": [("b1", "retreat fully before repositioning")],
+            "domain_knowledge": [("b2", "static friction clamps sub-threshold velocity commands")],
             "troubleshooting": [],
         }[section]
         llm_client = make_llm_client()
@@ -289,7 +289,7 @@ class TestPlaybookBullets:
 
     def test_playbook_lookup_failure_does_not_break_synthesis(self, tmp_path):
         playbook_manager = MagicMock()
-        playbook_manager.get_bullets.side_effect = RuntimeError("playbook unavailable")
+        playbook_manager.get_bullets_with_ids.side_effect = RuntimeError("playbook unavailable")
         llm_client = make_llm_client()
         oracle = MagicMock()
         oracle.run.return_value = make_telemetry(success=True)
@@ -299,10 +299,36 @@ class TestPlaybookBullets:
 
         assert result.passed is True
 
+    def test_attaches_retrieved_bullet_ids_to_result(self, tmp_path):
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets_with_ids.side_effect = lambda section: {
+            "strategies_and_hard_rules": [("b1", "retreat fully before repositioning")],
+            "domain_knowledge": [],
+            "troubleshooting": [],
+        }[section]
+        llm_client = make_llm_client()
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == ["b1"]
+
+    def test_retrieved_bullet_ids_empty_when_no_playbook(self, tmp_path):
+        llm_client = make_llm_client()
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=None)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == []
+
     def test_refactor_prompt_also_includes_bullets(self, tmp_path):
         playbook_manager = MagicMock()
-        playbook_manager.get_bullets.side_effect = lambda section: (
-            ["keep search speed above the friction threshold"] if section == "domain_knowledge" else []
+        playbook_manager.get_bullets_with_ids.side_effect = lambda section: (
+            [("b1", "keep search speed above the friction threshold")] if section == "domain_knowledge" else []
         )
         llm_client = make_llm_client(content="def compute_action(observation):\n    return {'vx': 0.0, 'vy': 0.0, 'vz': -0.01}\n")
         original_generate = llm_client.generate

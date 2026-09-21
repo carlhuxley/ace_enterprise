@@ -149,15 +149,27 @@ class TestRunGreen:
 
     def test_queries_playbook_for_go_bullets(self, tmp_path):
         pm = MagicMock()
-        pm.get_bullets.return_value = ["use errors.New for sentinel errors"]
+        pm.get_bullets_with_ids.return_value = [("b1", "use errors.New for sentinel errors")]
         pod = make_pod(tmp_path, playbook_manager=pm)
         pod.run_green(spec(tmp_path))
-        pm.get_bullets.assert_called_once_with("global-go-bullets")
+        pm.get_bullets_with_ids.assert_called_once_with("global-go-bullets")
 
     def test_no_error_when_no_playbook(self, tmp_path):
         pod = make_pod(tmp_path, playbook_manager=None)
         result = pod.run_green(spec(tmp_path))
         assert isinstance(result, PhaseResult)
+
+    def test_attaches_retrieved_bullet_ids_to_result(self, tmp_path):
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("b1", "use errors.New for sentinel errors")]
+        pod = make_pod(tmp_path, playbook_manager=pm)
+        result = pod.run_green(spec(tmp_path))
+        assert result.retrieved_bullet_ids == ["b1"]
+
+    def test_retrieved_bullet_ids_empty_when_no_playbook(self, tmp_path):
+        pod = make_pod(tmp_path, playbook_manager=None)
+        result = pod.run_green(spec(tmp_path))
+        assert result.retrieved_bullet_ids == []
 
 
 # ---------------------------------------------------------------------------

@@ -99,7 +99,7 @@ class GoLanguagePod:
         self._cycle_tokens = 0
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
         try:
-            bullets = self._get_go_bullets()
+            bullet_ids, bullets = self._get_go_bullets()
             prompt = self._green_prompt(spec, bullets, test_code)
             response = self._llm_client.generate(prompt)
             impl_code = _extract_code(response.get("content", ""))
@@ -116,11 +116,15 @@ class GoLanguagePod:
             result = self._orchestrator.pulse(files)
         except SecurityBreachError as exc:
             self._record_usage(spec.cycle_number)
-            return PhaseResult(passed=False, output="", error=f"SecurityBreach: {exc}")
+            return PhaseResult(
+                passed=False, output="", error=f"SecurityBreach: {exc}",
+                retrieved_bullet_ids=bullet_ids,
+            )
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
         self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = bullet_ids
         return result
 
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
@@ -195,14 +199,18 @@ class GoLanguagePod:
             f"matching the test file."
         )
 
-    def _get_go_bullets(self) -> list[str]:
+    def _get_go_bullets(self) -> tuple[list[str], list[str]]:
+        """Returns (bullet_ids, bullet_contents). IDs are empty when falling
+        back to _DEFAULT_GO_BULLETS -- those aren't real playbook bullets."""
         if self._playbook_manager is None:
-            return list(_DEFAULT_GO_BULLETS)
+            return [], list(_DEFAULT_GO_BULLETS)
         try:
-            bullets = self._playbook_manager.get_bullets(_GO_BULLETS_SECTION)
-            return bullets if bullets else list(_DEFAULT_GO_BULLETS)
+            pairs = self._playbook_manager.get_bullets_with_ids(_GO_BULLETS_SECTION)
         except Exception:
-            return list(_DEFAULT_GO_BULLETS)
+            return [], list(_DEFAULT_GO_BULLETS)
+        if not pairs:
+            return [], list(_DEFAULT_GO_BULLETS)
+        return [bullet_id for bullet_id, _ in pairs], [content for _, content in pairs]
 
     def _record_usage(self, cycle_number: int) -> None:
         self._token_log.append(TokenUsage(
