@@ -1405,10 +1405,7 @@
     },
     "src/reliability/__init__.py": {
       "provides": [],
-      "depends_on": [
-        "src/reliability/playbook_analyzer.py",
-        "src/reliability/tdd_cycle_analyzer.py"
-      ]
+      "depends_on": []
     },
     "src/reliability/playbook_analyzer.py": {
       "provides": [

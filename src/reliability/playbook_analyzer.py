@@ -1,10 +1,19 @@
 """Playbook reliability — which bullets correlate with first-pass GREEN success."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.audit.schemas import AuditEventType, AuditQuery
 from src.audit.store import AuditStore
-from src.playbook.manager import PlaybookManager
+
+if TYPE_CHECKING:
+    # Only used for a type hint (playbook_manager is unused at runtime, see
+    # __init__ below) -- importing it for real pulls in
+    # src.utils.embedding -> sentence_transformers/torch at module level, a
+    # ~6s cost callers that only need bullet_uplift() shouldn't have to pay.
+    from src.playbook.manager import PlaybookManager
 
 
 @dataclass
@@ -45,8 +54,15 @@ class PlaybookReliabilityAnalyzer:
     def __init__(
         self,
         audit_store: AuditStore,
-        playbook_manager: PlaybookManager,
+        playbook_manager: PlaybookManager | None = None,
     ) -> None:
+        # playbook_manager is accepted for construction-site symmetry with
+        # PlaybookManager.deprecate_bullet() callers, but neither
+        # bullet_uplift() nor bullet_reliability() below reads it -- both are
+        # audit-log-only computations. Optional so callers that only need
+        # uplift (e.g. scripts/reliability_cli.py's `uplift` subcommand)
+        # aren't forced to construct a real PlaybookManager just to satisfy
+        # this signature.
         self._audit_store = audit_store
         self._playbook_manager = playbook_manager
 

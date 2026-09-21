@@ -26,8 +26,15 @@ sys.path.insert(0, str(project_root))
 
 from src.audit.local_client import LocalAuditClient  # noqa: E402
 from src.audit.store import AuditStore  # noqa: E402
-from src.playbook.manager import PlaybookManager  # noqa: E402
 from src.reliability.playbook_analyzer import PlaybookReliabilityAnalyzer  # noqa: E402
+
+# PlaybookManager is imported lazily, inside cmd_deprecate only: it pulls in
+# src.utils.embedding -> sentence_transformers/torch at module level, a
+# ~6s import cost paid even if a PlaybookManager is never constructed.
+# `uplift` doesn't need one at all (see cmd_uplift below) and is called once
+# per playbook by dream_runner.py -- eating that cost unconditionally here
+# made every uplift subprocess call slow across a real project's full
+# playbook set.
 
 
 def _audit_url(ace_root: Path) -> str:
@@ -50,14 +57,20 @@ def cmd_uplift(args: argparse.Namespace) -> None:
     ace_root = Path(args.ace_root)
     _require_audit_db(ace_root)
 
+    # No PlaybookManager here: bullet_uplift() is audit-log-only (see
+    # PlaybookReliabilityAnalyzer's docstring) -- constructing one would
+    # load and parse every playbook file under data/playbooks/ for no
+    # reason, which is what made dream_runner.py's per-playbook uplift
+    # sweep slow against a real project with ~140 playbook files.
     store = AuditStore(_audit_url(ace_root))
-    manager = PlaybookManager(storage_path=str(ace_root / "data" / "playbooks"))
-    analyzer = PlaybookReliabilityAnalyzer(store, manager)
+    analyzer = PlaybookReliabilityAnalyzer(store)
     results = analyzer.bullet_uplift(args.playbook_id, min_samples=args.min_samples)
     print(json.dumps([dataclasses.asdict(r) for r in results]))
 
 
 def cmd_deprecate(args: argparse.Namespace) -> None:
+    from src.playbook.manager import PlaybookManager
+
     ace_root = Path(args.ace_root)
     _require_audit_db(ace_root)
 
