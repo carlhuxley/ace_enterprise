@@ -147,6 +147,17 @@ def test_diff_editing_read_from_config_file(tmp_path):
     assert config.diff_editing is True
 
 
+def test_cgr3_retrieval_defaults_to_false(tmp_path):
+    config = ProjectConfig.load(_project(tmp_path))
+    assert config.cgr3_retrieval is False
+
+
+def test_cgr3_retrieval_read_from_config_file(tmp_path):
+    project = _project(tmp_path, config_yaml="cgr3_retrieval: true\n")
+    config = ProjectConfig.load(project)
+    assert config.cgr3_retrieval is True
+
+
 # ---------------------------------------------------------------------------
 # candidate_models (AdaptiveBroker routing)
 # ---------------------------------------------------------------------------

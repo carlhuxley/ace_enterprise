@@ -871,6 +871,7 @@
         "src/core/curator/module.py",
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
+        "src/retrieval/service.py",
         "src/utils/claude_cli_client.py",
         "src/utils/context_map.py",
         "src/utils/llm_client.py"
@@ -920,6 +921,7 @@
         "src/core/curator/module.py",
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
+        "src/retrieval/service.py",
         "src/utils/context_map.py",
         "src/utils/dependency_graph.py",
         "src/utils/llm_client.py",

@@ -59,6 +59,19 @@ class TestBuildAgentWiring:
         handle = build_agent(config)
         assert handle.runner._pod._use_patch_mode is True
 
+    def test_cgr3_retrieval_off_by_default(self, config):
+        handle = build_agent(config)
+        assert handle.runner._pod._worker._retrieval_service is None
+
+    def test_cgr3_retrieval_true_wires_a_real_retrieval_service(self, config):
+        from src.retrieval.service import InstitutionalKnowledgeService
+
+        config.cgr3_retrieval = True
+        handle = build_agent(config)
+        service = handle.runner._pod._worker._retrieval_service
+        assert isinstance(service, InstitutionalKnowledgeService)
+        assert service.default_playbook_id == config.playbook_id
+
     def test_learn_enabled_by_default_wires_reflector_and_curator(self, config):
         handle = build_agent(config)
         kwargs = handle.runner._runner_kwargs

@@ -118,6 +118,7 @@ class ProjectBuilder:
         repair_model_id: str | None = None,
         escalation_llm: LLMClient | None = None,
         escalation_model_id: str | None = None,
+        cgr3_retrieval: bool = False,
     ) -> None:
         """`llm_client`/`model_id` are the architect-tier client (also what LEARN's
         Reflector/Curator use, per issue #40's scope decision). `worker_llm`,
@@ -136,6 +137,10 @@ class ProjectBuilder:
         self._repair_model_id = repair_model_id or self._worker_model_id
         self._escalation_llm = escalation_llm
         self._escalation_model_id = escalation_model_id
+        # #66: opt-in CGR3 retrieval, mirrors src/cli/config.py's
+        # ProjectConfig.cgr3_retrieval -- see that field's own comment for
+        # why this defaults off.
+        self._cgr3_retrieval = cgr3_retrieval
         # Test seams — default to the real sandboxed components.
         self._make_architect = architect_factory or self._default_architect
         self._make_builder = builder_factory or self._default_builder
@@ -215,8 +220,16 @@ class ProjectBuilder:
         from src.utils.context_map import ContextMapBuilder
 
         context_map = ContextMapBuilder().build(sorted(src_dir.rglob("*.py")))
+        retrieval_service = None
+        if self._cgr3_retrieval:
+            from src.retrieval.service import InstitutionalKnowledgeService
+
+            retrieval_service = InstitutionalKnowledgeService(
+                playbook_manager=self._playbook_manager, default_playbook_id=self._playbook_id,
+            )
         worker = WorkerAgent(
             self._worker_llm, playbook_manager=self._playbook_manager, context_map=context_map,
+            retrieval_service=retrieval_service,
         )
         planner = IncrementalPlanner(
             llm_client=self._worker_llm, test_dir=test_dir, src_dir=src_dir,

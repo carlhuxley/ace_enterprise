@@ -72,11 +72,20 @@ class WorkerAgent:
     and generate_refactor for REFACTOR. All methods return raw code strings.
     """
 
-    def __init__(self, llm_client, playbook_manager=None, context_map=None, temperature: float = 0.0) -> None:
+    def __init__(
+        self, llm_client, playbook_manager=None, context_map=None, temperature: float = 0.0,
+        retrieval_service=None,
+    ) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
         self._context_map = context_map
         self._temperature = temperature
+        # Optional src.retrieval.service.InstitutionalKnowledgeService (CGR3).
+        # When set, _get_bullets() asks it for context-ranked, verdict-filtered
+        # guidance instead of dumping every bullet in the section -- see
+        # ace_enterprise#66. None preserves the original unconditional-dump
+        # behavior exactly, so this is additive, not a breaking change.
+        self._retrieval_service = retrieval_service
         # IDs from the most recent _get_bullets() call (the GREEN/patch strategy
         # bullets, not test-rules bullets) -- pods read this right after calling
         # generate_implementation/generate_patch to attach it to the PhaseResult,
@@ -99,7 +108,7 @@ class WorkerAgent:
     ) -> str:
         if not module_context and self._context_map and failing_test_ids:
             module_context = self._context_from_map(failing_test_ids)
-        bullets = self._get_bullets()
+        bullets = self._get_bullets(spec.feature_requirement)
         prompt = self._impl_prompt(
             spec, error_output, module_context, bullets, test_code, existing_code
         )
@@ -123,7 +132,7 @@ class WorkerAgent:
         applies it deterministically, host-side) rather than a whole-file
         rewrite. Returns the raw response text -- not code-fence-extracted,
         since the payload is SEARCH/REPLACE markers, not a source file."""
-        bullets = self._get_bullets()
+        bullets = self._get_bullets(spec.feature_requirement)
         prompt = self._patch_prompt(spec, existing_code, error_output, test_code, bullets)
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return response.get("content", "")
@@ -258,7 +267,21 @@ class WorkerAgent:
 
     # --- context helpers ---
 
-    def _get_bullets(self) -> list[str]:
+    def _get_bullets(self, feature_requirement: str = "") -> list[str]:
+        if self._retrieval_service is not None:
+            try:
+                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
+            except Exception:
+                pairs = None
+            if pairs is not None:
+                # A genuinely empty result (CGR3 ran and found nothing that
+                # clears its verdict) is meaningful, not a failure -- return
+                # it as-is rather than falling through to the unconditional
+                # dump below. Only an exception (the retrieval call itself
+                # breaking) falls through, so a real answer is still given.
+                self.last_retrieved_bullet_ids = [bullet_id for bullet_id, _ in pairs]
+                return [content for _, content in pairs]
         if not self._playbook_manager:
             self.last_retrieved_bullet_ids = []
             return []

@@ -114,7 +114,20 @@ def build_agent(
     # prompts reference relevant functions without pasting whole files.
     context_map = ContextMapBuilder().build(sorted(config.src_dir.rglob("*.py")))
 
-    worker = WorkerAgent(llm_client, playbook_manager=playbook_manager, context_map=context_map)
+    # #66: opt-in CGR3 retrieval instead of WorkerAgent dumping every
+    # strategies_and_hard_rules bullet into every prompt unconditionally.
+    retrieval_service = None
+    if config.cgr3_retrieval:
+        from src.retrieval.service import InstitutionalKnowledgeService
+
+        retrieval_service = InstitutionalKnowledgeService(
+            playbook_manager=playbook_manager, default_playbook_id=config.playbook_id,
+        )
+
+    worker = WorkerAgent(
+        llm_client, playbook_manager=playbook_manager, context_map=context_map,
+        retrieval_service=retrieval_service,
+    )
     planner = IncrementalPlanner(
         llm_client=llm_client,
         test_dir=config.test_dir,

@@ -46,6 +46,15 @@ class ProjectConfig:
     # exists to patch against. Strictly additive -- False preserves today's
     # whole-file-regeneration behavior unchanged.
     diff_editing: bool = False
+    # #66: opt-in CGR3 context-aware retrieval (src/retrieval/service.py)
+    # instead of WorkerAgent dumping every strategies_and_hard_rules bullet
+    # into every prompt unconditionally. Off by default -- a real playbook
+    # (data/playbooks/dream_rsi.json) already has 99 bullets in that one
+    # section, so this is a real cost/latency tradeoff (an embedding-backed
+    # retrieval call per generation instead of a plain dict read), not a
+    # free win; an operator opts in once their playbook is large enough
+    # for it to matter.
+    cgr3_retrieval: bool = False
 
     def discover_features(self) -> list[Path]:
         """Return all .feature files in <project>/features/, falling back to project root."""
@@ -94,6 +103,7 @@ class ProjectConfig:
             repair_model=repair_model,
             escalation_model=escalation_model,
             diff_editing=bool(raw.get("diff_editing", False)),
+            cgr3_retrieval=bool(raw.get("cgr3_retrieval", False)),
         )
 
 

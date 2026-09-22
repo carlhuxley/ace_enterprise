@@ -446,6 +446,7 @@ def cmd_project(args: argparse.Namespace) -> int:
         worker_llm=worker_llm, worker_model_id=worker_model_id,
         repair_llm=repair_llm, repair_model_id=repair_model_id,
         escalation_llm=escalation_llm, escalation_model_id=escalation_model_id,
+        cgr3_retrieval=config.cgr3_retrieval,
     )
     result = builder.build(
         plan, project_root, config.src_dir, config.test_dir,
