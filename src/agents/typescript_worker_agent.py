@@ -54,6 +54,7 @@ class TypeScriptWorkerAgent:
         temperature: float = 0.0,
         fallback_client=None,
         escalate_after: int = 2,
+        retrieval_service=None,
     ) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
@@ -61,6 +62,10 @@ class TypeScriptWorkerAgent:
         self._fallback_client = fallback_client
         self._escalate_after = escalate_after
         self._impl_attempts: dict[str, int] = {}
+        # Optional src.retrieval.service.InstitutionalKnowledgeService (CGR3),
+        # mirrors WorkerAgent's own retrieval_service (ace_enterprise#66).
+        # None preserves the unconditional-dump behavior exactly.
+        self._retrieval_service = retrieval_service
         # IDs from the most recent _get_hard_rules() call. _get_hard_rules()
         # is shared by all three phase prompts, but GREEN's own call is
         # always the last one before TypeScriptLanguagePod.run_green() reads
@@ -114,7 +119,7 @@ class TypeScriptWorkerAgent:
                 f"\nAcceptance criteria (Gherkin — use exact values from relevant scenarios):\n"
                 f"```gherkin\n{spec.gherkin_context}\n```"
             )
-        hard_rules = self._get_hard_rules()
+        hard_rules = self._get_hard_rules(spec.feature_requirement)
         if hard_rules:
             parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         rules = self._get_test_rules()
@@ -136,7 +141,7 @@ class TypeScriptWorkerAgent:
             f"Implementation file: {spec.implementation_file.name}",
             "Use named exports. Strict TypeScript — all parameters and return types annotated.",
         ]
-        hard_rules = self._get_hard_rules()
+        hard_rules = self._get_hard_rules(spec.feature_requirement)
         if hard_rules:
             parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         if test_code:
@@ -154,7 +159,7 @@ class TypeScriptWorkerAgent:
             f"Feature: {spec.feature_requirement}",
             f"Implementation file: {spec.implementation_file.name}",
         ]
-        hard_rules = self._get_hard_rules()
+        hard_rules = self._get_hard_rules(spec.feature_requirement)
         if hard_rules:
             parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
         if current_code:
@@ -171,7 +176,25 @@ class TypeScriptWorkerAgent:
         except Exception:
             return _DEFAULT_TEST_RULES
 
-    def _get_hard_rules(self) -> list[str]:
+    def _get_hard_rules(self, feature_requirement: str = "") -> list[str]:
+        if self._retrieval_service is not None:
+            try:
+                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
+            except Exception:
+                pairs = None
+            if pairs is not None:
+                # A genuinely empty result (CGR3 ran, nothing cleared its
+                # verdict) is a real answer, not a failure -- only an
+                # exception from the retrieval call falls through below.
+                # Unlike WorkerAgent's strategies_and_hard_rules (no
+                # baseline at all when empty), _DEFAULT_HARD_RULES are
+                # universal TypeScript style/safety rules meant to apply
+                # regardless of task-specific relevance, so an empty CGR3
+                # result still falls back to them rather than leaving GREEN
+                # with zero hard constraints.
+                self.last_retrieved_bullet_ids = [bullet_id for bullet_id, _ in pairs]
+                return [content for _, content in pairs] or _DEFAULT_HARD_RULES
         if not self._playbook_manager:
             self.last_retrieved_bullet_ids = []
             return _DEFAULT_HARD_RULES

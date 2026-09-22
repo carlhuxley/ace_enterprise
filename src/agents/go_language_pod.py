@@ -58,11 +58,16 @@ class GoLanguagePod:
         project_root: Path,
         orchestrator: PodmanOrchestrator,
         playbook_manager=None,
+        retrieval_service=None,
     ) -> None:
         self._llm_client = llm_client
         self._project_root = project_root
         self._orchestrator = orchestrator
         self._playbook_manager = playbook_manager
+        # Optional src.retrieval.service.InstitutionalKnowledgeService (CGR3),
+        # mirrors WorkerAgent's own retrieval_service (ace_enterprise#66).
+        # None preserves the unconditional-dump behavior exactly.
+        self._retrieval_service = retrieval_service
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._actual_model: str | None = None
@@ -99,7 +104,7 @@ class GoLanguagePod:
         self._cycle_tokens = 0
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
         try:
-            bullet_ids, bullets = self._get_go_bullets()
+            bullet_ids, bullets = self._get_go_bullets(spec.feature_requirement)
             prompt = self._green_prompt(spec, bullets, test_code)
             response = self._llm_client.generate(prompt)
             impl_code = _extract_code(response.get("content", ""))
@@ -199,9 +204,25 @@ class GoLanguagePod:
             f"matching the test file."
         )
 
-    def _get_go_bullets(self) -> tuple[list[str], list[str]]:
+    def _get_go_bullets(self, feature_requirement: str = "") -> tuple[list[str], list[str]]:
         """Returns (bullet_ids, bullet_contents). IDs are empty when falling
         back to _DEFAULT_GO_BULLETS -- those aren't real playbook bullets."""
+        if self._retrieval_service is not None:
+            try:
+                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
+            except Exception:
+                pairs = None
+            if pairs is not None:
+                # A genuinely empty result (CGR3 ran, nothing cleared its
+                # verdict) is a real answer -- only an exception from the
+                # retrieval call falls through to the playbook/defaults
+                # path below. _DEFAULT_GO_BULLETS are universal idioms, so
+                # an empty result still falls back to them (same reasoning
+                # as TypeScriptWorkerAgent._get_hard_rules()).
+                if pairs:
+                    return [bid for bid, _ in pairs], [content for _, content in pairs]
+                return [], list(_DEFAULT_GO_BULLETS)
         if self._playbook_manager is None:
             return [], list(_DEFAULT_GO_BULLETS)
         try:

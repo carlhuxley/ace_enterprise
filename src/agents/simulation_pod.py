@@ -74,6 +74,7 @@ class SimulationPod:
         scenario: SimulationScenario,
         oracle: SimulationOracle | None = None,
         playbook_manager=None,
+        retrieval_service=None,
     ) -> None:
         self._llm_client = llm_client
         self._project_root = project_root
@@ -84,6 +85,10 @@ class SimulationPod:
         # learning have nowhere to re-enter synthesis -- see docs/adr/004
         # ("no playbook-injection point" gap).
         self._playbook_manager = playbook_manager
+        # Optional src.retrieval.service.InstitutionalKnowledgeService (CGR3),
+        # mirrors WorkerAgent's own retrieval_service (ace_enterprise#66).
+        # None preserves the unconditional-dump behavior exactly.
+        self._retrieval_service = retrieval_service
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._actual_model: str | None = None
@@ -162,7 +167,7 @@ class SimulationPod:
         )
 
         try:
-            prompt = self._refactor_prompt(current_code)
+            prompt = self._refactor_prompt(current_code, spec.feature_requirement)
             response = self._llm_client.generate(prompt)
             refactored_code = _extract_code(response.get("content", ""))
         except Exception as exc:
@@ -261,31 +266,46 @@ class SimulationPod:
         return (
             f"Feature: {spec.feature_requirement}\n\n"
             f"{self._scenario.controller_contract()}"
-            f"{self._bullets_section()}{gherkin_section}{error_section}"
+            f"{self._bullets_section(spec.feature_requirement)}{gherkin_section}{error_section}"
         )
 
-    def _refactor_prompt(self, current_code: str) -> str:
+    def _refactor_prompt(self, current_code: str, feature_requirement: str = "") -> str:
         return (
             f"Refactor this controller for clarity and smoother, more direct "
             f"motion, without changing its control strategy or breaking the "
             f"contract below.\n\n{self._scenario.controller_contract()}"
-            f"{self._bullets_section()}\n\n"
+            f"{self._bullets_section(feature_requirement)}\n\n"
             f"Current controller:\n```python\n{current_code}\n```"
         )
 
-    def _bullets_section(self) -> str:
-        bullets = self._get_bullets()
+    def _bullets_section(self, feature_requirement: str = "") -> str:
+        bullets = self._get_bullets(feature_requirement)
         if not bullets:
             return ""
         return "\n\nLearned guidance from previous cycles:\n" + "\n".join(f"- {b}" for b in bullets)
 
-    def _get_bullets(self) -> list[str]:
+    def _get_bullets(self, feature_requirement: str = "") -> list[str]:
         """Mirrors GoLanguagePod._get_go_bullets(): without this, whatever
         Curator writes from a previous cycle's Reflector analysis has no way
         back into synthesis. Curator's standard curate() call only ever
         chooses among these four sections (see Curator's "Available
         Sections" prompt) -- there's no simulation-specific section name to
         target, so all of them are checked."""
+        if self._retrieval_service is not None:
+            try:
+                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
+            except Exception:
+                pairs = None
+            if pairs is not None:
+                # A genuinely empty result (CGR3 ran, nothing cleared its
+                # verdict) is a real answer -- only an exception from the
+                # retrieval call falls through to the multi-section
+                # aggregation below. Unlike Go/TypeScript there's no
+                # universal-defaults fallback here (none existed before
+                # this change either), so empty stays empty.
+                self.last_retrieved_bullet_ids = [bullet_id for bullet_id, _ in pairs]
+                return [content for _, content in pairs]
         if self._playbook_manager is None:
             self.last_retrieved_bullet_ids = []
             return []

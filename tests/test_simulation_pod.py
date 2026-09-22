@@ -50,13 +50,14 @@ def make_llm_client(content="def compute_action(observation):\n    return {'vx':
     return client
 
 
-def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_manager=None):
+def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_manager=None, retrieval_service=None):
     return SimulationPod(
         llm_client=llm_client or make_llm_client(),
         project_root=tmp_path,
         scenario=scenario or make_scenario(),
         oracle=oracle or MagicMock(),
         playbook_manager=playbook_manager,
+        retrieval_service=retrieval_service,
     )
 
 
@@ -342,6 +343,109 @@ class TestPlaybookBullets:
 
         prompt = original_generate.call_args.args[0]
         assert "keep search speed above the friction threshold" in prompt
+
+    def test_retrieval_service_present_uses_its_apply_list_not_the_full_playbook(self, tmp_path):
+        # ace_enterprise#66: a configured retrieval_service (CGR3) takes
+        # priority over the unconditional multi-section dump, even when a
+        # playbook_manager is ALSO set.
+        from src.retrieval.schemas import KnowledgeResponse, RankedBullet
+        from src.storage.schemas import Bullet
+
+        applied_bullet = Bullet(
+            id="ctx-001", section="domain_knowledge", content="keep search speed above the friction threshold",
+            created_at="2026-01-01T00:00:00", tags=[],
+        )
+        response = KnowledgeResponse(
+            apply=[RankedBullet(bullet=applied_bullet, semantic_score=0.9, context_score=0.8, combined_score=0.85)],
+        )
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = response
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets_with_ids.return_value = [("ctx-999", "irrelevant bullet from the full dump")]
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager, retrieval_service=service)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == ["ctx-001"]
+        prompt = original_generate.call_args.args[0]
+        assert "keep search speed above the friction threshold" in prompt
+        assert "irrelevant bullet from the full dump" not in prompt
+        playbook_manager.get_bullets_with_ids.assert_not_called()
+
+    def test_retrieval_service_passes_the_feature_requirement_as_the_query(self, tmp_path):
+        from src.retrieval.schemas import KnowledgeResponse
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse()
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, retrieval_service=service)
+
+        pod.run_green(spec(tmp_path))
+
+        service.get_guidance_for_implementation.assert_called_once_with("Track a target without violating limits")
+
+    def test_retrieval_service_empty_apply_is_a_real_answer_not_a_fallback_trigger(self, tmp_path):
+        # Unlike Go/TypeScript there's no universal-defaults fallback for
+        # SimulationPod (none existed before this change either), so an
+        # empty CGR3 result stays empty.
+        from src.retrieval.schemas import KnowledgeResponse
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse(apply=[])
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets_with_ids.return_value = [("ctx-999", "should not be used")]
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager, retrieval_service=service)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == []
+        prompt = original_generate.call_args.args[0]
+        assert "should not be used" not in prompt
+        playbook_manager.get_bullets_with_ids.assert_not_called()
+
+    def test_retrieval_service_failure_falls_back_to_the_full_playbook_dump(self, tmp_path):
+        service = MagicMock()
+        service.get_guidance_for_implementation.side_effect = RuntimeError("embedding service down")
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets_with_ids.side_effect = lambda section: (
+            [("ctx-1", "fallback bullet")] if section == "strategies_and_hard_rules" else []
+        )
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager, retrieval_service=service)
+
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == ["ctx-1"]
+        prompt = original_generate.call_args.args[0]
+        assert "fallback bullet" in prompt
+
+    def test_no_retrieval_service_configured_uses_the_full_playbook_dump_unchanged(self, tmp_path):
+        playbook_manager = MagicMock()
+        playbook_manager.get_bullets_with_ids.side_effect = lambda section: (
+            [("ctx-1", "the old behavior")] if section == "strategies_and_hard_rules" else []
+        )
+        llm_client = make_llm_client()
+        original_generate = llm_client.generate
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, llm_client=llm_client, playbook_manager=playbook_manager)
+
+        pod.run_green(spec(tmp_path))
+
+        prompt = original_generate.call_args.args[0]
+        assert "the old behavior" in prompt
 
 
 # ---------------------------------------------------------------------------

@@ -26,16 +26,17 @@ def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
     return client
 
 
-def make_pod(tmp_path, playbook_manager=None, pulse_result=None):
+def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_service=None, llm_client=None):
     orchestrator = MagicMock()
     orchestrator.pulse.return_value = pulse_result or PhaseResult(
         passed=True, output="ok", error=None
     )
     return GoLanguagePod(
-        llm_client=make_llm_client(),
+        llm_client=llm_client or make_llm_client(),
         project_root=tmp_path,
         orchestrator=orchestrator,
         playbook_manager=playbook_manager,
+        retrieval_service=retrieval_service,
     )
 
 
@@ -170,6 +171,91 @@ class TestRunGreen:
         pod = make_pod(tmp_path, playbook_manager=None)
         result = pod.run_green(spec(tmp_path))
         assert result.retrieved_bullet_ids == []
+
+    def test_retrieval_service_present_uses_its_apply_list_not_the_full_playbook(self, tmp_path):
+        # ace_enterprise#66: a configured retrieval_service (CGR3) takes
+        # priority over the unconditional get_bullets_with_ids() dump, even
+        # when a playbook_manager is ALSO set.
+        from src.retrieval.schemas import KnowledgeResponse, RankedBullet
+        from src.storage.schemas import Bullet
+
+        applied_bullet = Bullet(
+            id="ctx-001", section="global-go-bullets", content="use context.Context for cancellation",
+            created_at="2026-01-01T00:00:00", tags=[],
+        )
+        response = KnowledgeResponse(
+            apply=[RankedBullet(bullet=applied_bullet, semantic_score=0.9, context_score=0.8, combined_score=0.85)],
+        )
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = response
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("ctx-999", "irrelevant bullet from the full dump")]
+
+        client = make_llm_client()
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, playbook_manager=pm, retrieval_service=service, llm_client=client)
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == ["ctx-001"]
+        prompt = original_generate.call_args[0][0]
+        assert "use context.Context for cancellation" in prompt
+        assert "irrelevant bullet from the full dump" not in prompt
+        pm.get_bullets_with_ids.assert_not_called()
+
+    def test_retrieval_service_passes_the_feature_requirement_as_the_query(self, tmp_path):
+        from src.retrieval.schemas import KnowledgeResponse
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse()
+        pod = make_pod(tmp_path, retrieval_service=service)
+        pod.run_green(spec(tmp_path))
+        service.get_guidance_for_implementation.assert_called_once_with("User authentication with JWT")
+
+    def test_retrieval_service_empty_apply_falls_back_to_default_bullets(self, tmp_path):
+        # Unlike SimulationPod, _DEFAULT_GO_BULLETS are universal idioms
+        # meant to apply regardless of task-specific relevance, so an empty
+        # CGR3 result still falls back to them.
+        from src.retrieval.schemas import KnowledgeResponse
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse(apply=[])
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("ctx-999", "should not be used")]
+
+        client = make_llm_client()
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, playbook_manager=pm, retrieval_service=service, llm_client=client)
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == []
+        prompt = original_generate.call_args[0][0]
+        assert "should not be used" not in prompt
+        pm.get_bullets_with_ids.assert_not_called()
+
+    def test_retrieval_service_failure_falls_back_to_the_full_playbook_dump(self, tmp_path):
+        service = MagicMock()
+        service.get_guidance_for_implementation.side_effect = RuntimeError("embedding service down")
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("ctx-1", "fallback bullet")]
+
+        client = make_llm_client()
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, playbook_manager=pm, retrieval_service=service, llm_client=client)
+        result = pod.run_green(spec(tmp_path))
+
+        assert result.retrieved_bullet_ids == ["ctx-1"]
+        prompt = original_generate.call_args[0][0]
+        assert "fallback bullet" in prompt
+
+    def test_no_retrieval_service_configured_uses_the_full_playbook_dump_unchanged(self, tmp_path):
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("ctx-1", "the old behavior")]
+        client = make_llm_client()
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, playbook_manager=pm, llm_client=client)
+        pod.run_green(spec(tmp_path))
+        prompt = original_generate.call_args[0][0]
+        assert "the old behavior" in prompt
 
 
 # ---------------------------------------------------------------------------
