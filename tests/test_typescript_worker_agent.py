@@ -149,3 +149,75 @@ class TestGetHardRules:
         w = TypeScriptWorkerAgent(_llm(), playbook_manager=pm)
         w.generate_implementation(_spec(tmp_path))
         assert "the old behavior" in _captured_prompt(w)
+
+
+# ---------------------------------------------------------------------------
+# generate_multi_file_patch (follow-up to ace_enterprise#64/#68)
+# ---------------------------------------------------------------------------
+
+_MULTI_FILE_TS_SR_BLOCK = (
+    "### FILE: order.ts\n"
+    "<<<<<<< SEARCH\n"
+    "export function foo(): void {}\n"
+    "=======\n"
+    "export function foo(): void { bar(); }\n"
+    ">>>>>>> REPLACE"
+)
+
+
+class TestGenerateMultiFilePatch:
+    def test_returns_raw_content_not_code_extracted(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        result = w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"order.ts": "export function foo(): void {}\n"},
+        )
+        assert result == _MULTI_FILE_TS_SR_BLOCK
+
+    def test_calls_llm_once(self, tmp_path):
+        client = _llm(content=_MULTI_FILE_TS_SR_BLOCK)
+        w = TypeScriptWorkerAgent(client)
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"order.ts": "export function foo(): void {}\n"},
+        )
+        client.generate.assert_called_once()
+
+    def test_prompt_includes_every_files_existing_content(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path),
+            existing_by_file={
+                "order.ts": "export function foo(): void {}\n",
+                "helpers.ts": "export {};\n",
+            },
+        )
+        prompt = _captured_prompt(w)
+        assert "export function foo" in prompt
+        assert "order.ts" in prompt
+        assert "helpers.ts" in prompt
+
+    def test_prompt_includes_error_output_when_provided(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"a.ts": "x"}, error_output="expect(received).toBe(1)",
+        )
+        assert "expect(received).toBe(1)" in _captured_prompt(w)
+
+    def test_prompt_includes_test_code_when_provided(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"a.ts": "x"}, test_code="expect(foo()).toBe(1);",
+        )
+        assert "expect(foo()).toBe(1);" in _captured_prompt(w)
+
+    def test_prompt_instructs_file_marker_format(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        w.generate_multi_file_patch(_spec(tmp_path), existing_by_file={"a.ts": "x"})
+        prompt = _captured_prompt(w)
+        assert "### FILE:" in prompt
+        assert "SEARCH/REPLACE" in prompt
+        assert "do NOT output" in prompt
+
+    def test_prompt_includes_hard_rules(self, tmp_path):
+        w = TypeScriptWorkerAgent(_llm(content=_MULTI_FILE_TS_SR_BLOCK))
+        w.generate_multi_file_patch(_spec(tmp_path), existing_by_file={"a.ts": "x"})
+        assert "camelCase" in _captured_prompt(w)

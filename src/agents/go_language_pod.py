@@ -19,6 +19,7 @@ from pathlib import Path
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+from src.utils.patcher import apply_multi_file_patch
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class GoLanguagePod:
         retrieval_service=None,
         team_id: str | None = None,
         project_id: str | None = None,
+        patch_escalation_threshold: int = 2,
     ) -> None:
         self._llm_client = llm_client
         self._project_root = project_root
@@ -77,6 +79,15 @@ class GoLanguagePod:
         # project_path comes from project_root, already tracked above.
         self._team_id = team_id
         self._project_id = project_id
+        # Multi-file GREEN only (follow-up to ace_enterprise#64/#68) -- there
+        # is no general single-file patch mode here; a coordinated multi-file
+        # edit is inherently patch-shaped (no whole-file multi-file
+        # alternative to fall back to), so spec.extra_target_files alone is
+        # sufficient to trigger it. After patch_escalation_threshold
+        # consecutive failures on the same file combination, gives up rather
+        # than retrying indefinitely.
+        self._patch_escalation_threshold = patch_escalation_threshold
+        self._patch_failure_counts: dict[str, int] = {}
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._actual_model: str | None = None
@@ -112,6 +123,10 @@ class GoLanguagePod:
     def run_green(self, spec: PodSpec) -> PhaseResult:
         self._cycle_tokens = 0
         test_code = spec.test_file.read_text(encoding="utf-8") if spec.test_file.exists() else ""
+
+        if spec.extra_target_files:
+            return self._run_multi_file_green(spec, test_code)
+
         try:
             bullet_ids, bullets = self._get_go_bullets(spec.feature_requirement)
             prompt = self._green_prompt(spec, bullets, test_code)
@@ -137,6 +152,75 @@ class GoLanguagePod:
 
         if result.passed:
             commit_to_disk(impl_code, spec.implementation_file)
+        self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = bullet_ids
+        return result
+
+    def _run_multi_file_green(self, spec: PodSpec, test_code: str) -> PhaseResult:
+        """Coordinated GREEN across implementation_file + extra_target_files
+        in one atomic patch (follow-up to ace_enterprise#64/#68) -- e.g. a
+        change spanning a new sentinel error in one file and a function
+        using it in another. Every target file must already exist -- this
+        edits existing files, it doesn't create new ones. REFACTOR still
+        only touches implementation_file; multi-file refactor is out of
+        scope.
+        """
+        self._cycle_tokens = 0
+        all_targets = [spec.implementation_file, *spec.extra_target_files]
+        missing = [str(p) for p in all_targets if not p.exists()]
+        if missing:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(
+                passed=False, output="",
+                error=f"MULTI_FILE_GREEN_MISSING_FILES: target file(s) don't exist yet: "
+                      f"{', '.join(missing)} -- multi-file GREEN edits existing files.",
+            )
+
+        file_key = "|".join(str(p) for p in all_targets)
+        if self._patch_failure_counts.get(file_key, 0) >= self._patch_escalation_threshold:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(
+                passed=False, output="",
+                error="MULTI_FILE_GREEN_ESCALATED: repeated patch failures across these "
+                      "files -- multi-file GREEN has no whole-file fallback.",
+            )
+
+        existing_by_file = {p.name: p.read_text(encoding="utf-8") for p in all_targets}
+
+        try:
+            bullet_ids, bullets = self._get_go_bullets(spec.feature_requirement)
+            prompt = self._multi_file_green_prompt(spec, bullets, existing_by_file, test_code)
+            response = self._llm_client.generate(prompt)
+            patch_text = response.get("content", "")
+        except Exception as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=str(exc))
+
+        patch_result = apply_multi_file_patch(existing_by_file, patch_text)
+        if not patch_result.success:
+            self._patch_failure_counts[file_key] = self._patch_failure_counts.get(file_key, 0) + 1
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(
+                passed=False, output="", error=f"PATCH_APPLY_FAILED: {patch_result.error}",
+                retrieved_bullet_ids=bullet_ids,
+            )
+
+        files = dict(patch_result.patched)
+        files[spec.test_file.name] = test_code
+
+        try:
+            result = self._orchestrator.pulse(files)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(
+                passed=False, output="", error=f"SecurityBreach: {exc}",
+                retrieved_bullet_ids=bullet_ids,
+            )
+
+        if result.passed:
+            for target in all_targets:
+                commit_to_disk(patch_result.patched[target.name], target)
+            self._patch_failure_counts[file_key] = 0
         self._record_usage(spec.cycle_number)
         result.retrieved_bullet_ids = bullet_ids
         return result
@@ -211,6 +295,54 @@ class GoLanguagePod:
             f"Output only valid Go code. "
             f"The file must declare 'package {_PACKAGE_NAME}' as its package, "
             f"matching the test file."
+        )
+
+    def _multi_file_green_prompt(
+        self, spec: PodSpec, bullets: list[str], existing_by_file: dict[str, str], test_code: str,
+    ) -> str:
+        bullets_section = ""
+        if bullets:
+            bullets_section = "\n\nGo idioms to apply:\n" + "\n".join(f"- {b}" for b in bullets)
+        files_section = "".join(
+            f"\n\nExisting file ({filename}):\n```go\n{content}\n```"
+            for filename, content in existing_by_file.items()
+        )
+        test_section = f"\n\nTest file to satisfy ({spec.test_file.name}):\n```go\n{test_code}\n```" if test_code else ""
+        error_section = f"\n\nPrevious attempt's build/test failure output:\n{spec.error_output}" if spec.error_output else ""
+        return (
+            "Modify the EXISTING Go files below so the tests pass, using "
+            "SEARCH/REPLACE blocks -- do NOT output whole files. This "
+            "change spans multiple files; coordinate the edits across all "
+            "of them as needed, but only touch a file if it actually needs to change.\n"
+            f"Feature: {spec.feature_requirement}"
+            f"{files_section}"
+            f"{test_section}"
+            f"{bullets_section}"
+            f"{error_section}\n\n"
+            "Output ONLY one or more '### FILE: <filename>' sections, each "
+            "followed by one or more SEARCH/REPLACE blocks, in this EXACT "
+            "format, nothing else -- no prose, no markdown fence:\n\n"
+            "### FILE: <filename>\n"
+            "<<<<<<< SEARCH\n"
+            "<exact existing lines to find, copied verbatim from that file above>\n"
+            "=======\n"
+            "<the replacement lines>\n"
+            ">>>>>>> REPLACE\n\n"
+            "Rules:\n"
+            "- <filename> must be EXACTLY one of the file names given above.\n"
+            "- The SEARCH text must match a contiguous block of lines EXACTLY "
+            "as they appear in that file above -- copy it, don't retype it "
+            "from memory.\n"
+            "- Keep each block minimal: only the lines that change, plus "
+            "just enough surrounding context to make the match unambiguous "
+            "within that file (it must match exactly once).\n"
+            f"- Every file must declare 'package {_PACKAGE_NAME}' as its "
+            "package, matching the existing convention -- do not change the "
+            "package name.\n"
+            "- Output multiple '### FILE:' sections to edit multiple files, "
+            "and multiple SEARCH/REPLACE blocks within one section for "
+            "multiple separate edits to that file.\n"
+            "- Do not include a '### FILE:' section for a file that needs no change."
         )
 
     def _get_go_bullets(self, feature_requirement: str = "") -> tuple[list[str], list[str]]:

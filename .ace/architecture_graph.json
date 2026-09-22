@@ -73,7 +73,8 @@
       "depends_on": [
         "src/agents/language_pod.py",
         "src/agents/podman_orchestrator.py",
-        "src/retrieval/schemas.py"
+        "src/retrieval/schemas.py",
+        "src/utils/patcher.py"
       ]
     },
     "src/agents/go_runner.py": {
@@ -405,7 +406,8 @@
       ],
       "depends_on": [
         "src/agents/language_pod.py",
-        "src/agents/podman_orchestrator.py"
+        "src/agents/podman_orchestrator.py",
+        "src/utils/patcher.py"
       ]
     },
     "src/agents/typescript_runner.py": {

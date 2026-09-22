@@ -27,7 +27,7 @@ def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
 
 
 def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_service=None, llm_client=None,
-             team_id=None, project_id=None):
+             team_id=None, project_id=None, patch_escalation_threshold=2):
     orchestrator = MagicMock()
     orchestrator.pulse.return_value = pulse_result or PhaseResult(
         passed=True, output="ok", error=None
@@ -40,6 +40,7 @@ def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_servi
         retrieval_service=retrieval_service,
         team_id=team_id,
         project_id=project_id,
+        patch_escalation_threshold=patch_escalation_threshold,
     )
 
 
@@ -278,6 +279,141 @@ class TestRunGreen:
         pod.run_green(spec(tmp_path))
         prompt = original_generate.call_args[0][0]
         assert "the old behavior" in prompt
+
+
+# ---------------------------------------------------------------------------
+# run_green — multi-file GREEN (follow-up to ace_enterprise#64/#68)
+#
+# spec.extra_target_files lets one GREEN cycle apply a coordinated patch
+# across implementation_file + one or more already-existing sibling files.
+# No general single-file patch mode exists for Go -- multi-file GREEN is
+# inherently patch-shaped, so extra_target_files alone triggers it.
+# ---------------------------------------------------------------------------
+
+_MULTI_FILE_GO_SR_BLOCK = (
+    "### FILE: auth.go\n"
+    "<<<<<<< SEARCH\n"
+    "func Foo() {}\n"
+    "=======\n"
+    "func Foo() { Bar() }\n"
+    ">>>>>>> REPLACE\n\n"
+    "### FILE: errors.go\n"
+    "<<<<<<< SEARCH\n"
+    "package pulse\n"
+    "=======\n"
+    "package pulse\n\nfunc Bar() {}\n"
+    ">>>>>>> REPLACE"
+)
+
+
+def make_multi_file_spec(tmp_path, cycle=1):
+    s = spec(tmp_path, cycle=cycle)
+    s.extra_target_files = [tmp_path / "errors.go"]
+    return s
+
+
+def _write_multi_file_go_targets(s: PodSpec) -> None:
+    s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+    s.implementation_file.write_text("package pulse\n\nfunc Foo() {}\n")
+    for extra in s.extra_target_files:
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("package pulse\n")
+
+
+class TestRunGreenMultiFile:
+    def test_all_target_files_must_already_exist(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("package pulse\n\nfunc Foo() {}\n")
+        # extra_target_files[0] (errors.go) never written.
+        pod = make_pod(tmp_path)
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("MULTI_FILE_GREEN_MISSING_FILES:")
+        assert "errors.go" in result.error
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_successful_patch_is_pulsed_and_both_files_committed(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        pod = make_pod(tmp_path, llm_client=make_llm_client(content=_MULTI_FILE_GO_SR_BLOCK))
+        result = pod.run_green(s)
+        assert result.passed
+        assert "Bar()" in s.implementation_file.read_text()
+        assert "func Bar() {}" in s.extra_target_files[0].read_text()
+
+    def test_pulse_receives_both_patched_files(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        pod = make_pod(tmp_path, llm_client=make_llm_client(content=_MULTI_FILE_GO_SR_BLOCK))
+        pod.run_green(s)
+        pulsed = pod._orchestrator.pulse.call_args[0][0]
+        assert "Bar()" in pulsed["auth.go"]
+        assert "func Bar() {}" in pulsed["errors.go"]
+
+    def test_failed_pulse_commits_nothing(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        pod = make_pod(
+            tmp_path, llm_client=make_llm_client(content=_MULTI_FILE_GO_SR_BLOCK),
+            pulse_result=PhaseResult(passed=False, output="", error="boom"),
+        )
+        result = pod.run_green(s)
+        assert not result.passed
+        assert "Bar()" not in s.implementation_file.read_text()
+        assert "func Bar() {}" not in s.extra_target_files[0].read_text()
+
+    def test_patch_that_fails_to_apply_never_reaches_the_sandbox(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        bad_patch = "### FILE: auth.go\n<<<<<<< SEARCH\nnever matches this\n=======\nx\n>>>>>>> REPLACE"
+        pod = make_pod(tmp_path, llm_client=make_llm_client(content=bad_patch))
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_repeated_failures_escalate_with_no_whole_file_fallback(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        bad_patch = "### FILE: auth.go\n<<<<<<< SEARCH\nnever matches this\n=======\nx\n>>>>>>> REPLACE"
+        client = make_llm_client(content=bad_patch)
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, llm_client=client, patch_escalation_threshold=2)
+
+        pod.run_green(s)
+        pod.run_green(s)
+        result = pod.run_green(s)
+        assert result.error.startswith("MULTI_FILE_GREEN_ESCALATED:")
+        assert original_generate.call_count == 2  # not called a 3rd time
+
+    def test_success_resets_the_escalation_counter(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        bad_patch = "### FILE: auth.go\n<<<<<<< SEARCH\nnever matches this\n=======\nx\n>>>>>>> REPLACE"
+        client = make_llm_client(content=bad_patch)
+        original_generate = client.generate  # _intercept_tokens replaces client.generate itself
+        pod = make_pod(tmp_path, llm_client=client, patch_escalation_threshold=2)
+
+        pod.run_green(s)  # 1 failure
+        original_generate.return_value = {
+            "content": _MULTI_FILE_GO_SR_BLOCK, "tokens_used": 100, "latency_ms": 40, "model": "gpt-4o",
+        }
+        pod.run_green(s)  # succeeds, resets counter
+        original_generate.return_value = {
+            "content": bad_patch, "tokens_used": 100, "latency_ms": 40, "model": "gpt-4o",
+        }
+        result = pod.run_green(s)  # still under threshold again -- patch attempt, not escalated
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+
+    def test_retrieved_bullet_ids_attached_to_result(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_go_targets(s)
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("b1", "use errors.New for sentinel errors")]
+        pod = make_pod(tmp_path, playbook_manager=pm, llm_client=make_llm_client(content=_MULTI_FILE_GO_SR_BLOCK))
+        result = pod.run_green(s)
+        assert result.retrieved_bullet_ids == ["b1"]
 
 
 # ---------------------------------------------------------------------------

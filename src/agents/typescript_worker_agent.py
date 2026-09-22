@@ -111,6 +111,25 @@ class TypeScriptWorkerAgent:
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return _extract_code(response.get("content", ""))
 
+    def generate_multi_file_patch(
+        self,
+        spec: PodSpec,
+        *,
+        existing_by_file: dict[str, str],
+        error_output: str = "",
+        test_code: str = "",
+    ) -> str:
+        """Coordinated SEARCH/REPLACE edit across multiple existing
+        TypeScript files in one GREEN (follow-up to ace_enterprise#64).
+        `existing_by_file` maps filename (as it must be referenced in the
+        response's '### FILE:' markers) to that file's current content;
+        src/utils/patcher.py's apply_multi_file_patch() applies the result.
+        Returns the raw response text -- not code-fence-extracted, since
+        the payload is SEARCH/REPLACE markers, not a source file."""
+        prompt = self._multi_file_patch_prompt(spec, existing_by_file, error_output, test_code)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
+        return response.get("content", "")
+
     # --- prompt builders ---
 
     def _test_prompt(self, spec: PodSpec, existing_code: str) -> str:
@@ -175,6 +194,57 @@ class TypeScriptWorkerAgent:
         if current_code:
             parts.append(f"\nCurrent code:\n{current_code}")
         parts.append("Output only the refactored TypeScript code.")
+        return "\n".join(parts)
+
+    def _multi_file_patch_prompt(
+        self,
+        spec: PodSpec,
+        existing_by_file: dict[str, str],
+        error_output: str,
+        test_code: str,
+    ) -> str:
+        parts = [
+            "Modify the EXISTING TypeScript files below so the whole test "
+            "file passes, using SEARCH/REPLACE blocks -- do NOT output "
+            "whole files. This change spans multiple files; coordinate the "
+            "edits across all of them as needed, but only touch a file if "
+            "it actually needs to change.",
+            f"Feature: {spec.feature_requirement}",
+        ]
+        hard_rules = self._get_hard_rules(spec.feature_requirement)
+        if hard_rules:
+            parts.append("\nHard constraints (violations cause automatic rejection):\n" + "\n".join(f"- {r}" for r in hard_rules))
+        for filename, content in existing_by_file.items():
+            parts.append(f"\nExisting file ({filename}):\n```typescript\n{content}\n```")
+        if test_code:
+            parts.append(f"\nTest file to satisfy:\n```typescript\n{test_code}\n```")
+        if error_output:
+            truncated = error_output[:3000] + "\n[truncated]" if len(error_output) > 3000 else error_output
+            parts.append(f"\nTest failure output:\n{truncated}")
+        parts.append(
+            "\nOutput ONLY one or more '### FILE: <filename>' sections, "
+            "each followed by one or more SEARCH/REPLACE blocks, in this "
+            "EXACT format, nothing else -- no prose, no markdown fence:\n\n"
+            "### FILE: <filename>\n"
+            "<<<<<<< SEARCH\n"
+            "<exact existing lines to find, copied verbatim from that file above>\n"
+            "=======\n"
+            "<the replacement lines>\n"
+            ">>>>>>> REPLACE\n\n"
+            "Rules:\n"
+            "- <filename> must be EXACTLY one of the file names given above, "
+            "e.g. \"schemas.ts\" — not a path, not invented.\n"
+            "- The SEARCH text must match a contiguous block of lines EXACTLY "
+            "as they appear in that file above (same whitespace/indentation) -- "
+            "copy it, don't retype it from memory.\n"
+            "- Keep each block minimal: only the lines that change, plus just "
+            "enough surrounding context to make the match unambiguous within "
+            "that file (it must match exactly once).\n"
+            "- Output multiple '### FILE:' sections to edit multiple files, "
+            "and multiple SEARCH/REPLACE blocks within one section for "
+            "multiple separate edits to that file.\n"
+            "- Do not include a '### FILE:' section for a file that needs no change."
+        )
         return "\n".join(parts)
 
     def _get_test_rules(self) -> list[str]:
