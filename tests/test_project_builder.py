@@ -821,3 +821,43 @@ class TestIterativePathRouting:
         )
         result = pb.build(plan, root, src, tests)
         assert result.outcomes[0].status is ModuleStatus.BUILT
+
+
+class TestDefaultIterativeRunnerCGR3Wiring:
+    """ace_enterprise#66: WorkerAgent's retrieval_service (gap 1) and
+    RetrievalContext signal (gap 2), as wired by ProjectBuilder's own
+    _default_iterative_runner -- mirrors src/cli/factory.py::build_agent's
+    equivalent tests in tests/test_cli_factory.py."""
+
+    def _worker(self, pb, dirs):
+        _, src, tests = dirs
+        pb._project_root = dirs[0]
+        runner, _orchestrator = pb._default_iterative_runner(src, tests)
+        return runner._pod._worker
+
+    def test_cgr3_retrieval_off_by_default(self, dirs):
+        pb = ProjectBuilder(llm_client=MagicMock())
+        worker = self._worker(pb, dirs)
+        assert worker._retrieval_service is None
+
+    def test_cgr3_retrieval_true_wires_a_real_retrieval_service(self, dirs):
+        from src.retrieval.service import InstitutionalKnowledgeService
+
+        pb = ProjectBuilder(llm_client=MagicMock(), playbook_id="checkout-svc", cgr3_retrieval=True)
+        worker = self._worker(pb, dirs)
+        assert isinstance(worker._retrieval_service, InstitutionalKnowledgeService)
+        assert worker._retrieval_service.default_playbook_id == "checkout-svc"
+
+    def test_worker_receives_team_id_project_id_and_project_path(self, dirs):
+        root, _, _ = dirs
+        pb = ProjectBuilder(llm_client=MagicMock(), playbook_id="checkout-svc", team_id="payments")
+        worker = self._worker(pb, dirs)
+        assert worker._team_id == "payments"
+        assert worker._project_id == "checkout-svc"
+        assert worker._project_path == str(root)
+
+    def test_worker_context_fields_default_to_none_without_team_or_playbook_id(self, dirs):
+        pb = ProjectBuilder(llm_client=MagicMock())
+        worker = self._worker(pb, dirs)
+        assert worker._team_id is None
+        assert worker._project_id is None

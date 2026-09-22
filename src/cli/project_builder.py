@@ -111,6 +111,7 @@ class ProjectBuilder:
         iterative_runner_factory=None,
         assembler=None,
         playbook_id: str | None = None,
+        team_id: str | None = None,
         skip_learn: bool = False,
         worker_llm: LLMClient | None = None,
         worker_model_id: str | None = None,
@@ -157,6 +158,10 @@ class ProjectBuilder:
         # unless the caller opted out. Bullets written by each module's build
         # are visible to the modules that follow it and to the next run.
         self._playbook_id = playbook_id
+        # RetrievalContext signal (ace_enterprise#66 gap 2) -- ProjectConfig's
+        # own field of the same name; unlike build_agent(), ProjectBuilder had
+        # no team_id concept at all before this.
+        self._team_id = team_id
         self._playbook_manager = None
         self._reflector = None
         self._curator = None
@@ -229,7 +234,8 @@ class ProjectBuilder:
             )
         worker = WorkerAgent(
             self._worker_llm, playbook_manager=self._playbook_manager, context_map=context_map,
-            retrieval_service=retrieval_service,
+            retrieval_service=retrieval_service, team_id=self._team_id,
+            project_id=self._playbook_id, project_path=str(self._project_root),
         )
         planner = IncrementalPlanner(
             llm_client=self._worker_llm, test_dir=test_dir, src_dir=src_dir,

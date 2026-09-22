@@ -70,7 +70,8 @@
       ],
       "depends_on": [
         "src/agents/language_pod.py",
-        "src/agents/podman_orchestrator.py"
+        "src/agents/podman_orchestrator.py",
+        "src/retrieval/schemas.py"
       ]
     },
     "src/agents/go_runner.py": {
@@ -256,7 +257,8 @@
         "src/agents/simulation_invariants.py",
         "src/agents/simulation_oracle.py",
         "src/agents/simulation_runner.py",
-        "src/agents/simulation_scenario.py"
+        "src/agents/simulation_scenario.py",
+        "src/retrieval/schemas.py"
       ]
     },
     "src/agents/simulation_podman_runner.py": {
@@ -419,7 +421,8 @@
         "TypeScriptWorkerAgent"
       ],
       "depends_on": [
-        "src/agents/language_pod.py"
+        "src/agents/language_pod.py",
+        "src/retrieval/schemas.py"
       ]
     },
     "src/agents/worker_agent.py": {
@@ -428,7 +431,8 @@
       ],
       "depends_on": [
         "src/agents/import_filter.py",
-        "src/agents/language_pod.py"
+        "src/agents/language_pod.py",
+        "src/retrieval/schemas.py"
       ]
     },
     "src/analytics/__init__.py": {

@@ -22,6 +22,8 @@ _DEFAULT_HARD_RULES = [
     "The test harness only has vitest and Node built-ins. Never import express, hono, fastify, supertest, axios, or any HTTP framework/client. Implement HTTP-style routes as plain exported functions taking typed request objects; tests call them directly.",
 ]
 
+_TECH_STACK = {"language": "typescript", "testing": "vitest"}
+
 _DEFAULT_TEST_RULES = [
     (
         "Assert PROPERTIES not exact value when multiple correct outputs exist "
@@ -55,6 +57,9 @@ class TypeScriptWorkerAgent:
         fallback_client=None,
         escalate_after: int = 2,
         retrieval_service=None,
+        team_id: str | None = None,
+        project_id: str | None = None,
+        project_path: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
@@ -66,6 +71,11 @@ class TypeScriptWorkerAgent:
         # mirrors WorkerAgent's own retrieval_service (ace_enterprise#66).
         # None preserves the unconditional-dump behavior exactly.
         self._retrieval_service = retrieval_service
+        # Real signal for RetrievalContext (ace_enterprise#66 gap 2) -- see
+        # WorkerAgent's own fields of the same name for the full rationale.
+        self._team_id = team_id
+        self._project_id = project_id
+        self._project_path = project_path
         # IDs from the most recent _get_hard_rules() call. _get_hard_rules()
         # is shared by all three phase prompts, but GREEN's own call is
         # always the last one before TypeScriptLanguagePod.run_green() reads
@@ -179,7 +189,17 @@ class TypeScriptWorkerAgent:
     def _get_hard_rules(self, feature_requirement: str = "") -> list[str]:
         if self._retrieval_service is not None:
             try:
-                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                from src.retrieval.schemas import RetrievalContext
+
+                context = RetrievalContext(
+                    team_id=self._team_id,
+                    project_id=self._project_id,
+                    project_path=self._project_path,
+                    tech_stack=dict(_TECH_STACK),
+                )
+                response = self._retrieval_service.get_guidance_for_implementation(
+                    feature_requirement, context=context,
+                )
                 pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
             except Exception:
                 pairs = None

@@ -45,6 +45,10 @@ _import_filter = ImportFilter()
 # since Curator has no notion of one to target.
 _BULLET_SECTIONS = ("strategies_and_hard_rules", "domain_knowledge", "troubleshooting")
 
+# The "implementation" is always a Python controller script verified by a
+# PyBullet oracle, not a CLI test runner (see module docstring).
+_TECH_STACK = {"language": "python", "testing": "pybullet-oracle"}
+
 
 def commit_to_disk(code: str, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -75,6 +79,8 @@ class SimulationPod:
         oracle: SimulationOracle | None = None,
         playbook_manager=None,
         retrieval_service=None,
+        team_id: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         self._llm_client = llm_client
         self._project_root = project_root
@@ -89,6 +95,11 @@ class SimulationPod:
         # mirrors WorkerAgent's own retrieval_service (ace_enterprise#66).
         # None preserves the unconditional-dump behavior exactly.
         self._retrieval_service = retrieval_service
+        # Real signal for RetrievalContext (ace_enterprise#66 gap 2) -- see
+        # WorkerAgent's own fields of the same name for the full rationale.
+        # project_path comes from project_root, already tracked above.
+        self._team_id = team_id
+        self._project_id = project_id
         self._token_log: list[TokenUsage] = []
         self._cycle_tokens: int = 0
         self._actual_model: str | None = None
@@ -293,7 +304,17 @@ class SimulationPod:
         target, so all of them are checked."""
         if self._retrieval_service is not None:
             try:
-                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                from src.retrieval.schemas import RetrievalContext
+
+                context = RetrievalContext(
+                    team_id=self._team_id,
+                    project_id=self._project_id,
+                    project_path=str(self._project_root),
+                    tech_stack=dict(_TECH_STACK),
+                )
+                response = self._retrieval_service.get_guidance_for_implementation(
+                    feature_requirement, context=context,
+                )
                 pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
             except Exception:
                 pairs = None

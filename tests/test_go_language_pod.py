@@ -26,7 +26,8 @@ def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
     return client
 
 
-def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_service=None, llm_client=None):
+def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_service=None, llm_client=None,
+             team_id=None, project_id=None):
     orchestrator = MagicMock()
     orchestrator.pulse.return_value = pulse_result or PhaseResult(
         passed=True, output="ok", error=None
@@ -37,6 +38,8 @@ def make_pod(tmp_path, playbook_manager=None, pulse_result=None, retrieval_servi
         orchestrator=orchestrator,
         playbook_manager=playbook_manager,
         retrieval_service=retrieval_service,
+        team_id=team_id,
+        project_id=project_id,
     )
 
 
@@ -209,7 +212,26 @@ class TestRunGreen:
         service.get_guidance_for_implementation.return_value = KnowledgeResponse()
         pod = make_pod(tmp_path, retrieval_service=service)
         pod.run_green(spec(tmp_path))
-        service.get_guidance_for_implementation.assert_called_once_with("User authentication with JWT")
+        service.get_guidance_for_implementation.assert_called_once()
+        args, kwargs = service.get_guidance_for_implementation.call_args
+        assert args[0] == "User authentication with JWT"
+
+    def test_retrieval_service_receives_a_populated_retrieval_context(self, tmp_path):
+        # ace_enterprise#66 gap 2: context=None meant CGR3's team/tech_stack/
+        # project scoring dimensions never had anything real to score against.
+        from src.retrieval.schemas import KnowledgeResponse, RetrievalContext
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse()
+        pod = make_pod(tmp_path, retrieval_service=service, team_id="payments", project_id="checkout-svc")
+        pod.run_green(spec(tmp_path))
+        _, kwargs = service.get_guidance_for_implementation.call_args
+        context = kwargs["context"]
+        assert isinstance(context, RetrievalContext)
+        assert context.team_id == "payments"
+        assert context.project_id == "checkout-svc"
+        assert context.project_path == str(tmp_path)
+        assert context.tech_stack == {"language": "go", "testing": "go-test"}
 
     def test_retrieval_service_empty_apply_falls_back_to_default_bullets(self, tmp_path):
         # Unlike SimulationPod, _DEFAULT_GO_BULLETS are universal idioms

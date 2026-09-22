@@ -50,7 +50,8 @@ def make_llm_client(content="def compute_action(observation):\n    return {'vx':
     return client
 
 
-def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_manager=None, retrieval_service=None):
+def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_manager=None, retrieval_service=None,
+             team_id=None, project_id=None):
     return SimulationPod(
         llm_client=llm_client or make_llm_client(),
         project_root=tmp_path,
@@ -58,6 +59,8 @@ def make_pod(tmp_path, oracle=None, llm_client=None, scenario=None, playbook_man
         oracle=oracle or MagicMock(),
         playbook_manager=playbook_manager,
         retrieval_service=retrieval_service,
+        team_id=team_id,
+        project_id=project_id,
     )
 
 
@@ -387,7 +390,30 @@ class TestPlaybookBullets:
 
         pod.run_green(spec(tmp_path))
 
-        service.get_guidance_for_implementation.assert_called_once_with("Track a target without violating limits")
+        service.get_guidance_for_implementation.assert_called_once()
+        args, kwargs = service.get_guidance_for_implementation.call_args
+        assert args[0] == "Track a target without violating limits"
+
+    def test_retrieval_service_receives_a_populated_retrieval_context(self, tmp_path):
+        # ace_enterprise#66 gap 2: context=None meant CGR3's team/tech_stack/
+        # project scoring dimensions never had anything real to score against.
+        from src.retrieval.schemas import KnowledgeResponse, RetrievalContext
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse()
+        oracle = MagicMock()
+        oracle.run.return_value = make_telemetry(success=True)
+        pod = make_pod(tmp_path, oracle=oracle, retrieval_service=service, team_id="robotics", project_id="peg-insert")
+
+        pod.run_green(spec(tmp_path))
+
+        _, kwargs = service.get_guidance_for_implementation.call_args
+        context = kwargs["context"]
+        assert isinstance(context, RetrievalContext)
+        assert context.team_id == "robotics"
+        assert context.project_id == "peg-insert"
+        assert context.project_path == str(tmp_path)
+        assert context.tech_stack == {"language": "python", "testing": "pybullet-oracle"}
 
     def test_retrieval_service_empty_apply_is_a_real_answer_not_a_fallback_trigger(self, tmp_path):
         # Unlike Go/TypeScript there's no universal-defaults fallback for

@@ -16,6 +16,11 @@ from src.agents.language_pod import PodSpec
 _PLAYBOOK_SECTION = "strategies_and_hard_rules"
 _TEST_RULES_SECTION = "test_assertion_rules"
 
+# WorkerAgent always generates for pytest-run Python (see PodmanRunner's
+# `python -m pytest` invocation) -- fixed by this class's own design, not
+# something a caller configures.
+_TECH_STACK = {"language": "python", "testing": "pytest"}
+
 # The sandbox's static import filter rejects these outright and does NOT retry,
 # so every prompt has to warn the model up front (see src/agents/import_filter.py).
 _SANDBOX_IMPORT_RULE = (
@@ -74,7 +79,8 @@ class WorkerAgent:
 
     def __init__(
         self, llm_client, playbook_manager=None, context_map=None, temperature: float = 0.0,
-        retrieval_service=None,
+        retrieval_service=None, team_id: str | None = None, project_id: str | None = None,
+        project_path: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._playbook_manager = playbook_manager
@@ -86,6 +92,16 @@ class WorkerAgent:
         # ace_enterprise#66. None preserves the original unconditional-dump
         # behavior exactly, so this is additive, not a breaking change.
         self._retrieval_service = retrieval_service
+        # Real signal for RetrievalContext (ace_enterprise#66 gap 2) -- until
+        # now every retrieval_service call passed context=None, so CGR3's
+        # team/tech_stack/project scoring dimensions (src/retrieval/
+        # context_scorer.py) never had anything to score against. team_id
+        # and project_id mirror ProjectConfig's own fields of the same name
+        # (src/cli/config.py); tech_stack is this pod's own fixed toolchain,
+        # not caller-configurable.
+        self._team_id = team_id
+        self._project_id = project_id
+        self._project_path = project_path
         # IDs from the most recent _get_bullets() call (the GREEN/patch strategy
         # bullets, not test-rules bullets) -- pods read this right after calling
         # generate_implementation/generate_patch to attach it to the PhaseResult,
@@ -270,7 +286,17 @@ class WorkerAgent:
     def _get_bullets(self, feature_requirement: str = "") -> list[str]:
         if self._retrieval_service is not None:
             try:
-                response = self._retrieval_service.get_guidance_for_implementation(feature_requirement)
+                from src.retrieval.schemas import RetrievalContext
+
+                context = RetrievalContext(
+                    team_id=self._team_id,
+                    project_id=self._project_id,
+                    project_path=self._project_path,
+                    tech_stack=dict(_TECH_STACK),
+                )
+                response = self._retrieval_service.get_guidance_for_implementation(
+                    feature_requirement, context=context,
+                )
                 pairs = [(rb.bullet.id, rb.bullet.content) for rb in response.apply]
             except Exception:
                 pairs = None

@@ -88,7 +88,29 @@ class TestGetHardRules:
         service.get_guidance_for_implementation.return_value = KnowledgeResponse()
         w = TypeScriptWorkerAgent(_llm(), retrieval_service=service)
         w.generate_implementation(_spec(tmp_path))
-        service.get_guidance_for_implementation.assert_called_once_with("Process an order")
+        service.get_guidance_for_implementation.assert_called_once()
+        args, kwargs = service.get_guidance_for_implementation.call_args
+        assert args[0] == "Process an order"
+
+    def test_retrieval_service_receives_a_populated_retrieval_context(self, tmp_path):
+        # ace_enterprise#66 gap 2: context=None meant CGR3's team/tech_stack/
+        # project scoring dimensions never had anything real to score against.
+        from src.retrieval.schemas import KnowledgeResponse, RetrievalContext
+
+        service = MagicMock()
+        service.get_guidance_for_implementation.return_value = KnowledgeResponse()
+        w = TypeScriptWorkerAgent(
+            _llm(), retrieval_service=service,
+            team_id="payments", project_id="checkout-svc", project_path="/repo/checkout-svc",
+        )
+        w.generate_implementation(_spec(tmp_path))
+        _, kwargs = service.get_guidance_for_implementation.call_args
+        context = kwargs["context"]
+        assert isinstance(context, RetrievalContext)
+        assert context.team_id == "payments"
+        assert context.project_id == "checkout-svc"
+        assert context.project_path == "/repo/checkout-svc"
+        assert context.tech_stack == {"language": "typescript", "testing": "vitest"}
 
     def test_retrieval_service_empty_apply_falls_back_to_default_hard_rules(self, tmp_path):
         # _DEFAULT_HARD_RULES are universal TypeScript style/safety rules,

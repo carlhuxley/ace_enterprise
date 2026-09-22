@@ -442,7 +442,7 @@ def cmd_project(args: argparse.Namespace) -> int:
 
     builder = ProjectBuilder(
         architect_llm, audit_client=audit, model_id=architect_model_id,
-        playbook_id=config.playbook_id, skip_learn=args.no_learn,
+        playbook_id=config.playbook_id, team_id=config.team_id, skip_learn=args.no_learn,
         worker_llm=worker_llm, worker_model_id=worker_model_id,
         repair_llm=repair_llm, repair_model_id=repair_model_id,
         escalation_llm=escalation_llm, escalation_model_id=escalation_model_id,

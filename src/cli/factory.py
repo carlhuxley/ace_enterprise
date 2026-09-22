@@ -126,7 +126,8 @@ def build_agent(
 
     worker = WorkerAgent(
         llm_client, playbook_manager=playbook_manager, context_map=context_map,
-        retrieval_service=retrieval_service,
+        retrieval_service=retrieval_service, team_id=config.team_id,
+        project_id=config.playbook_id, project_path=str(config.project_root),
     )
     planner = IncrementalPlanner(
         llm_client=llm_client,

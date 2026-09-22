@@ -72,6 +72,20 @@ class TestBuildAgentWiring:
         assert isinstance(service, InstitutionalKnowledgeService)
         assert service.default_playbook_id == config.playbook_id
 
+    def test_worker_receives_team_id_project_id_and_project_path(self, config):
+        # ace_enterprise#66 gap 2: RetrievalContext was never populated with
+        # real team_id/tech_stack/project_id -- these are the source fields.
+        config.team_id = "payments"
+        handle = build_agent(config)
+        worker = handle.runner._pod._worker
+        assert worker._team_id == "payments"
+        assert worker._project_id == config.playbook_id
+        assert worker._project_path == str(config.project_root)
+
+    def test_worker_team_id_defaults_to_none(self, config):
+        handle = build_agent(config)
+        assert handle.runner._pod._worker._team_id is None
+
     def test_learn_enabled_by_default_wires_reflector_and_curator(self, config):
         handle = build_agent(config)
         kwargs = handle.runner._runner_kwargs
