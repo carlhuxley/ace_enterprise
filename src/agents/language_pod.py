@@ -6,7 +6,7 @@ The LEARN phase (playbook bullets, ensemble voting) remains in the harness.
 
 See docs/adr/002-language-pod-interface.md for design rationale.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -25,6 +25,14 @@ class PodSpec:
     cycle_number: int
     error_output: str = ""  # feedback from a previous failed GREEN, set by TDDCycleRunner
     gherkin_context: str | None = None  # full feature file text when driving from Gherkin
+    # ace_enterprise#64: additional EXISTING files a coordinated GREEN-phase
+    # edit must also touch, beyond implementation_file -- e.g. a small change
+    # that spans an enum in one module and a method using it in another.
+    # Empty by default, so every existing single-file caller is unaffected.
+    # Support is pod-specific (currently PythonLanguagePod, patch-mode only);
+    # a pod that doesn't support it should treat a non-empty list as an
+    # error, not silently ignore it.
+    extra_target_files: list[Path] = field(default_factory=list)
 
 
 @dataclass

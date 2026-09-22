@@ -1676,7 +1676,10 @@
         "PatchResult",
         "parse_search_replace_blocks",
         "apply_search_replace_blocks",
-        "apply_patch"
+        "apply_patch",
+        "MultiFilePatchResult",
+        "parse_multi_file_blocks",
+        "apply_multi_file_patch"
       ],
       "depends_on": []
     },

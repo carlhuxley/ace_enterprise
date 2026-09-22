@@ -365,6 +365,179 @@ class TestRunGreenPatchMode:
 
 
 # ---------------------------------------------------------------------------
+# run_green — multi-file GREEN (ace_enterprise#64)
+#
+# spec.extra_target_files lets one GREEN cycle apply a coordinated patch
+# across implementation_file + one or more already-existing sibling files
+# (e.g. an enum added in one module and a method using it in another).
+# Patch-mode only; every target file must already exist.
+# ---------------------------------------------------------------------------
+
+_MULTI_FILE_SR_BLOCK = (
+    "### FILE: order.py\n"
+    "<<<<<<< SEARCH\n"
+    "    return 1\n"
+    "=======\n"
+    "    return 2\n"
+    ">>>>>>> REPLACE\n\n"
+    "### FILE: schemas.py\n"
+    "<<<<<<< SEARCH\n"
+    "    OLD = 1\n"
+    "=======\n"
+    "    OLD = 1\n"
+    "    NEW = 2\n"
+    ">>>>>>> REPLACE"
+)
+
+
+def make_multi_file_spec(tmp_path, cycle=1):
+    s = spec(tmp_path, cycle=cycle)
+    s.extra_target_files = [tmp_path / "src" / "schemas.py"]
+    return s
+
+
+def make_multi_file_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2, use_patch_mode=True):
+    worker = MagicMock()
+    worker.llm_client = MagicMock()
+    worker.llm_client.generate.return_value = {
+        "content": "x", "prompt_tokens": 10, "completion_tokens": 0,
+        "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o",
+    }
+
+    def _generate_multi_file_patch(*args, **kwargs):
+        worker.llm_client.generate("multi-file patch prompt")
+        return _MULTI_FILE_SR_BLOCK
+
+    worker.generate_multi_file_patch.side_effect = _generate_multi_file_patch
+    worker.last_retrieved_bullet_ids = ["b1"]
+
+    orchestrator = MagicMock()
+    orchestrator.pulse.return_value = pulse_result or PhaseResult(
+        passed=True, output="1 passed", error=None
+    )
+    return PythonLanguagePod(
+        worker, tmp_path, orchestrator,
+        use_patch_mode=use_patch_mode, patch_escalation_threshold=patch_escalation_threshold,
+    )
+
+
+def _write_multi_file_targets(s: PodSpec) -> None:
+    s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+    s.implementation_file.write_text("def foo():\n    return 1\n")
+    for extra in s.extra_target_files:
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("class E:\n    OLD = 1\n")
+
+
+class TestRunGreenMultiFile:
+    def test_requires_patch_mode(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path, use_patch_mode=False)
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("MULTI_FILE_GREEN_REQUIRES_PATCH_MODE:")
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_all_target_files_must_already_exist(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        # extra_target_files[0] (schemas.py) never written.
+        pod = make_multi_file_pod(tmp_path)
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("MULTI_FILE_GREEN_MISSING_FILES:")
+        assert "schemas.py" in result.error
+        pod._worker.generate_multi_file_patch.assert_not_called()
+
+    def test_uses_generate_multi_file_patch_not_the_single_file_methods(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path)
+        pod.run_green(s)
+        pod._worker.generate_multi_file_patch.assert_called_once()
+        pod._worker.generate_patch.assert_not_called()
+        pod._worker.generate_implementation.assert_not_called()
+
+    def test_successful_patch_is_pulsed_and_both_files_committed(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path)
+        result = pod.run_green(s)
+        assert result.passed
+        assert "return 2" in s.implementation_file.read_text()
+        assert "NEW = 2" in s.extra_target_files[0].read_text()
+
+    def test_pulse_receives_both_patched_files_not_stale_disk_content(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path)
+        pod.run_green(s)
+        pulsed = pod._orchestrator.pulse.call_args[0][0]
+        assert "return 2" in pulsed["order.py"]
+        assert "NEW = 2" in pulsed["schemas.py"]
+
+    def test_failed_pulse_commits_nothing(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path, pulse_result=PhaseResult(passed=False, output="", error="boom"))
+        result = pod.run_green(s)
+        assert not result.passed
+        assert "return 2" not in s.implementation_file.read_text()
+        assert "NEW = 2" not in s.extra_target_files[0].read_text()
+
+    def test_retrieved_bullet_ids_attached_to_result(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path)
+        result = pod.run_green(s)
+        assert result.retrieved_bullet_ids == ["b1"]
+
+    def test_patch_that_fails_to_apply_never_reaches_the_sandbox(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path)
+        pod._worker.generate_multi_file_patch.side_effect = (
+            lambda *a, **kw: "### FILE: order.py\n<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        )
+        result = pod.run_green(s)
+        assert not result.passed
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_repeated_failures_escalate_with_no_whole_file_fallback(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path, patch_escalation_threshold=2)
+        bad_patch = "### FILE: order.py\n<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        pod._worker.generate_multi_file_patch.side_effect = lambda *a, **kw: bad_patch
+
+        pod.run_green(s)
+        pod.run_green(s)
+        assert pod._worker.generate_multi_file_patch.call_count == 2
+
+        result = pod.run_green(s)
+        assert result.error.startswith("MULTI_FILE_GREEN_ESCALATED:")
+        assert pod._worker.generate_multi_file_patch.call_count == 2  # not called a 3rd time
+        pod._worker.generate_implementation.assert_not_called()
+
+    def test_success_resets_the_escalation_counter(self, tmp_path):
+        s = make_multi_file_spec(tmp_path)
+        _write_multi_file_targets(s)
+        pod = make_multi_file_pod(tmp_path, patch_escalation_threshold=2)
+        bad_patch = "### FILE: order.py\n<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+
+        pod._worker.generate_multi_file_patch.side_effect = lambda *a, **kw: bad_patch
+        pod.run_green(s)  # 1 failure
+        pod._worker.generate_multi_file_patch.side_effect = lambda *a, **kw: _MULTI_FILE_SR_BLOCK
+        pod.run_green(s)  # succeeds, resets counter
+        pod._worker.generate_multi_file_patch.side_effect = lambda *a, **kw: bad_patch
+        result = pod.run_green(s)  # still under threshold again -- patch attempt, not escalated
+        assert result.error.startswith("PATCH_APPLY_FAILED:")
+
+
+# ---------------------------------------------------------------------------
 # run_refactor
 #
 # Calls worker.generate_refactor(spec, current_code=...) to produce a

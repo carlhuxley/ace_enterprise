@@ -26,6 +26,10 @@ _BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
+# ace_enterprise#64: multi-file patches prefix each file's SEARCH/REPLACE
+# blocks with a "### FILE: <name>" marker line.
+_FILE_MARKER_RE = re.compile(r"^\s*###\s*FILE:\s*(\S+)\s*$", re.MULTILINE)
+
 
 class PatchError(Exception):
     """A SEARCH/REPLACE block failed to parse or apply. Carries enough
@@ -121,6 +125,85 @@ def apply_patch(
             return PatchResult(success=False, error=f"patched module has a syntax error: {exc}")
 
     return PatchResult(success=True, code=patched, blocks_applied=len(blocks))
+
+
+@dataclass
+class MultiFilePatchResult:
+    success: bool
+    patched: dict[str, str] | None = None  # filename -> new content, only set on success
+    error: str | None = None
+    blocks_applied: int = 0
+
+
+def parse_multi_file_blocks(text: str) -> dict[str, list[SearchReplaceBlock]]:
+    """Split `text` on '### FILE: <name>' marker lines and parse each
+    section's SEARCH/REPLACE blocks. A filename referenced by more than one
+    marker has its sections' blocks concatenated in encounter order (all
+    applied to that one file). Empty when no marker is found."""
+    markers = list(_FILE_MARKER_RE.finditer(text))
+    result: dict[str, list[SearchReplaceBlock]] = {}
+    for i, m in enumerate(markers):
+        filename = m.group(1)
+        start = m.end()
+        end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
+        result.setdefault(filename, []).extend(parse_search_replace_blocks(text[start:end]))
+    return result
+
+
+def apply_multi_file_patch(
+    files: dict[str, str],
+    patch_text: str,
+    *,
+    validate_python: bool = True,
+    fuzzy_threshold: float = 0.85,
+) -> MultiFilePatchResult:
+    """Coordinated edit across multiple files in one response (ace_enterprise#64).
+
+    `files` maps filename -> current content for every file the edit is
+    allowed to touch, keyed exactly as the model must reference them in
+    '### FILE: <name>' markers. All-or-nothing: if any referenced file's
+    blocks fail to apply, or any patched .py file fails to parse, nothing is
+    considered patched -- a coordinated edit that only partially lands is
+    not a success. Never raises; failures come back as
+    MultiFilePatchResult(success=False, error=...).
+    """
+    by_file = parse_multi_file_blocks(patch_text)
+    if not by_file:
+        return MultiFilePatchResult(
+            success=False,
+            error="no '### FILE: <name>' sections with SEARCH/REPLACE blocks found in the response",
+        )
+
+    unknown = sorted(set(by_file) - set(files))
+    if unknown:
+        return MultiFilePatchResult(
+            success=False,
+            error=f"patch referenced file(s) not in the target set: {', '.join(unknown)} "
+                  f"(expected one of: {', '.join(sorted(files))})",
+        )
+
+    patched: dict[str, str] = dict(files)
+    total_blocks = 0
+    for filename, blocks in by_file.items():
+        try:
+            patched[filename] = apply_search_replace_blocks(
+                files[filename], blocks, fuzzy_threshold=fuzzy_threshold,
+            )
+        except PatchError as exc:
+            return MultiFilePatchResult(success=False, error=f"{filename}: {exc}")
+        total_blocks += len(blocks)
+
+    if validate_python:
+        for filename in by_file:
+            if filename.endswith(".py"):
+                try:
+                    ast.parse(patched[filename])
+                except SyntaxError as exc:
+                    return MultiFilePatchResult(
+                        success=False, error=f"{filename}: patched module has a syntax error: {exc}",
+                    )
+
+    return MultiFilePatchResult(success=True, patched=patched, blocks_applied=total_blocks)
 
 
 def _best_fuzzy_match(text: str, search: str) -> tuple[int | None, int | None, float]:

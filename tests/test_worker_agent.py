@@ -399,6 +399,82 @@ class TestGeneratePatch:
 
 
 # ---------------------------------------------------------------------------
+# WorkerAgent — generate_multi_file_patch (ace_enterprise#64)
+# ---------------------------------------------------------------------------
+
+_MULTI_FILE_SR_BLOCK = (
+    "### FILE: schemas.py\n"
+    "<<<<<<< SEARCH\n"
+    "    OLD = \"old\"\n"
+    "=======\n"
+    "    OLD = \"old\"\n"
+    "    NEW = \"new\"\n"
+    ">>>>>>> REPLACE"
+)
+
+
+class TestGenerateMultiFilePatch:
+    def test_returns_raw_content_not_code_extracted(self, tmp_path):
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK))
+        result = w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"schemas.py": "class E:\n    OLD = \"old\"\n"},
+        )
+        assert result == _MULTI_FILE_SR_BLOCK
+
+    def test_calls_llm_once(self, tmp_path):
+        client = _llm(content=_MULTI_FILE_SR_BLOCK)
+        w = WorkerAgent(client)
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"schemas.py": "class E:\n    OLD = \"old\"\n"},
+        )
+        client.generate.assert_called_once()
+
+    def test_prompt_includes_every_files_existing_content(self, tmp_path):
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path),
+            existing_by_file={
+                "schemas.py": "class E:\n    OLD = \"old\"\n",
+                "manager.py": "def use_it():\n    pass\n",
+            },
+        )
+        prompt = _captured_prompt(w)
+        assert "class E:" in prompt
+        assert "def use_it():" in prompt
+        assert "schemas.py" in prompt
+        assert "manager.py" in prompt
+
+    def test_prompt_includes_error_output_when_provided(self, tmp_path):
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"a.py": "x = 1"}, error_output="AssertionError: boom",
+        )
+        assert "AssertionError: boom" in _captured_prompt(w)
+
+    def test_prompt_includes_test_code_when_provided(self, tmp_path):
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK))
+        w.generate_multi_file_patch(
+            _spec(tmp_path), existing_by_file={"a.py": "x = 1"}, test_code="def test_x(): assert x == 1",
+        )
+        assert "def test_x(): assert x == 1" in _captured_prompt(w)
+
+    def test_prompt_instructs_file_marker_format(self, tmp_path):
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK))
+        w.generate_multi_file_patch(_spec(tmp_path), existing_by_file={"a.py": "x = 1"})
+        prompt = _captured_prompt(w)
+        assert "### FILE:" in prompt
+        assert "SEARCH/REPLACE" in prompt
+        assert "do NOT output whole files" in prompt
+
+    def test_prompt_includes_playbook_bullets(self, tmp_path):
+        pm = MagicMock()
+        pm.get_bullets_with_ids.return_value = [("b1", "always validate input")]
+        w = WorkerAgent(_llm(content=_MULTI_FILE_SR_BLOCK), playbook_manager=pm)
+        w.generate_multi_file_patch(_spec(tmp_path), existing_by_file={"a.py": "x = 1"})
+        assert "always validate input" in _captured_prompt(w)
+
+
+# ---------------------------------------------------------------------------
 # PythonLanguagePod (worker + orchestrator construction)
 # ---------------------------------------------------------------------------
 

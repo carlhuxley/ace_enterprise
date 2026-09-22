@@ -153,6 +153,26 @@ class WorkerAgent:
         response = self.llm_client.generate(prompt, temperature=self._temperature)
         return response.get("content", "")
 
+    def generate_multi_file_patch(
+        self,
+        spec: PodSpec,
+        *,
+        existing_by_file: dict[str, str],
+        error_output: str = "",
+        test_code: str = "",
+    ) -> str:
+        """Coordinated SEARCH/REPLACE edit across multiple existing files in
+        one GREEN (ace_enterprise#64) -- e.g. a change that spans an enum in
+        one module and a method using it in another. `existing_by_file` maps
+        filename (as it must be referenced in the response's '### FILE:'
+        markers) to that file's current content; src/utils/patcher.py's
+        apply_multi_file_patch() applies the result. Returns the raw
+        response text, same as generate_patch()."""
+        bullets = self._get_bullets(spec.feature_requirement)
+        prompt = self._multi_file_patch_prompt(spec, existing_by_file, error_output, test_code, bullets)
+        response = self.llm_client.generate(prompt, temperature=self._temperature)
+        return response.get("content", "")
+
     # --- prompt builders ---
 
     def _test_prompt(self, spec: PodSpec, existing_code: str) -> str:
@@ -265,6 +285,60 @@ class WorkerAgent:
             "- To add new code with nothing to anchor it to, SEARCH for the "
             "last line of the existing module and REPLACE it with itself plus "
             "the new code appended after."
+        )
+        return "\n".join(parts)
+
+    def _multi_file_patch_prompt(
+        self,
+        spec: PodSpec,
+        existing_by_file: dict[str, str],
+        error_output: str,
+        test_code: str,
+        bullets: list[str],
+    ) -> str:
+        parts = [
+            "Modify the EXISTING files below so the whole test file passes, "
+            "using SEARCH/REPLACE blocks -- do NOT output whole files. This "
+            "change spans multiple files; coordinate the edits across all of "
+            "them as needed, but only touch a file if it actually needs to change.",
+            f"Feature: {spec.feature_requirement}",
+            _SANDBOX_IMPORT_RULE,
+            _flat_import_rule(spec),
+        ]
+        for filename, content in existing_by_file.items():
+            parts.append(f"\nExisting file ({filename}):\n```python\n{content}\n```")
+        if test_code:
+            parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
+        if error_output:
+            parts.append(f"\nTest failure output:\n{error_output}")
+        if bullets:
+            parts.append("\nPlaybook guidance:\n" + "\n".join(f"- {b}" for b in bullets))
+        parts.append(
+            "\nOutput ONLY one or more '### FILE: <filename>' sections, each "
+            "followed by one or more SEARCH/REPLACE blocks, in this EXACT "
+            "format, nothing else -- no prose, no markdown fence:\n\n"
+            "### FILE: <filename>\n"
+            "<<<<<<< SEARCH\n"
+            "<exact existing lines to find, copied verbatim from that file above>\n"
+            "=======\n"
+            "<the replacement lines>\n"
+            ">>>>>>> REPLACE\n\n"
+            "Rules:\n"
+            "- <filename> must be EXACTLY one of the file names given above, "
+            "e.g. \"schemas.py\" — not a path, not invented.\n"
+            "- The SEARCH text must match a contiguous block of lines EXACTLY "
+            "as they appear in that file above (same whitespace/indentation) -- "
+            "copy it, don't retype it from memory.\n"
+            "- Keep each block minimal: only the lines that change, plus just "
+            "enough surrounding context to make the match unambiguous within "
+            "that file (it must match exactly once).\n"
+            "- Output multiple '### FILE:' sections to edit multiple files, "
+            "and multiple SEARCH/REPLACE blocks within one section for "
+            "multiple separate edits to that file.\n"
+            "- To add new code with nothing to anchor it to, SEARCH for the "
+            "last line of that file and REPLACE it with itself plus the new "
+            "code appended after.\n"
+            "- Do not include a '### FILE:' section for a file that needs no change."
         )
         return "\n".join(parts)
 

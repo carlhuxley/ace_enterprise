@@ -9,7 +9,7 @@ import os
 from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
-from src.utils.patcher import apply_patch
+from src.utils.patcher import apply_multi_file_patch, apply_patch
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,9 @@ class PythonLanguagePod:
             else ""
         )
 
+        if spec.extra_target_files:
+            return self._run_multi_file_green(spec, test_code, existing_impl)
+
         file_key = str(spec.implementation_file)
         use_patch = (
             self._use_patch_mode
@@ -189,6 +192,98 @@ class PythonLanguagePod:
         result.retrieved_bullet_ids = retrieved_bullet_ids
         return result
 
+    def _run_multi_file_green(self, spec: PodSpec, test_code: str, existing_impl: str) -> PhaseResult:
+        """Coordinated GREEN across implementation_file + extra_target_files
+        in one atomic patch (ace_enterprise#64) -- e.g. an enum added in one
+        module and a method using it in another. Patch-mode only (a brand
+        new file always fits the single-file whole-file path above) and
+        every target file must already exist -- this edits existing files,
+        it doesn't create new ones. REFACTOR still only touches
+        implementation_file; multi-file refactor is out of scope for now.
+        """
+        all_targets = [spec.implementation_file, *spec.extra_target_files]
+
+        if not self._use_patch_mode:
+            return PhaseResult(
+                passed=False, output="",
+                error="MULTI_FILE_GREEN_REQUIRES_PATCH_MODE: spec.extra_target_files is "
+                      "set but use_patch_mode=False; multi-file GREEN only supports "
+                      "coordinated SEARCH/REPLACE edits to existing files.",
+            )
+        missing = [str(p) for p in all_targets if not p.exists()]
+        if missing:
+            return PhaseResult(
+                passed=False, output="",
+                error=f"MULTI_FILE_GREEN_MISSING_FILES: target file(s) don't exist yet: "
+                      f"{', '.join(missing)} -- multi-file GREEN edits existing files.",
+            )
+
+        file_key = "|".join(str(p) for p in all_targets)
+        if self._patch_failure_counts.get(file_key, 0) >= self._patch_escalation_threshold:
+            return PhaseResult(
+                passed=False, output="",
+                error="MULTI_FILE_GREEN_ESCALATED: repeated patch failures across these "
+                      "files -- multi-file GREEN has no whole-file fallback.",
+            )
+
+        existing_by_file: dict[str, str] = {spec.implementation_file.name: existing_impl}
+        for extra in spec.extra_target_files:
+            existing_by_file[extra.name] = extra.read_text()
+
+        try:
+            patch_text = self._worker.generate_multi_file_patch(
+                spec, existing_by_file=existing_by_file,
+                error_output=spec.error_output, test_code=test_code,
+            )
+        except Exception as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=str(exc))
+
+        patch_result = apply_multi_file_patch(existing_by_file, patch_text)
+        if not patch_result.success:
+            self._patch_failure_counts[file_key] = self._patch_failure_counts.get(file_key, 0) + 1
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(passed=False, output="", error=f"PATCH_APPLY_FAILED: {patch_result.error}")
+
+        retrieved_bullet_ids = list(getattr(self._worker, "last_retrieved_bullet_ids", None) or [])
+
+        for filename, code in patch_result.patched.items():
+            try:
+                _import_filter.check(code)
+            except ForbiddenImportError as exc:
+                self._record_usage(spec.cycle_number)
+                return PhaseResult(
+                    passed=False, output="", error=f"ForbiddenImport ({filename}): {exc}",
+                    retrieved_bullet_ids=retrieved_bullet_ids,
+                )
+            except Exception as exc:
+                self._record_usage(spec.cycle_number)
+                return PhaseResult(
+                    passed=False, output="", error=f"{filename}: {exc}",
+                    retrieved_bullet_ids=retrieved_bullet_ids,
+                )
+
+        files = self._sibling_files(spec, exclude={p.name for p in all_targets})
+        files[spec.test_file.name] = test_code
+        files.update(patch_result.patched)
+
+        try:
+            result = self._orchestrator.pulse(files)
+        except SecurityBreachError as exc:
+            self._record_usage(spec.cycle_number)
+            return PhaseResult(
+                passed=False, output="", error=f"SecurityBreach: {exc}",
+                retrieved_bullet_ids=retrieved_bullet_ids,
+            )
+
+        if result.passed:
+            for target in all_targets:
+                commit_to_disk(patch_result.patched[target.name], target)
+            self._patch_failure_counts[file_key] = 0
+        self._record_usage(spec.cycle_number)
+        result.retrieved_bullet_ids = retrieved_bullet_ids
+        return result
+
     def run_refactor(self, spec: PodSpec) -> PhaseResult:
         test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
         current_code = spec.implementation_file.read_text() if spec.implementation_file.exists() else ""
@@ -237,18 +332,22 @@ class PythonLanguagePod:
 
         self._worker.llm_client.generate = _tracking_generate
 
-    def _sibling_files(self, spec: PodSpec) -> dict[str, str]:
+    def _sibling_files(self, spec: PodSpec, exclude: set[str] | None = None) -> dict[str, str]:
         """Already-built sibling project modules to pulse alongside the
         target module, so `from <sibling> import ...` resolves during
         RED/GREEN/REFACTOR instead of failing at collection every cycle
         (#61) -- mirrors module_architect.validate_module's `extra_files`
         mechanism for the batch `ace project` path (#28), which this
         iterative path never had. Keyed by filename, matching the flat
-        namespace PodmanRunner mounts pulsed files into; excludes the
-        target module's own implementation file, whose freshly generated
-        content the caller sets separately and must win over any stale
-        on-disk copy this glob would otherwise pick up.
+        namespace PodmanRunner mounts pulsed files into; excludes `exclude`
+        (defaults to just the target module's own implementation file --
+        ace_enterprise#64's multi-file GREEN passes every target file's name
+        here too), whose freshly generated/patched content the caller sets
+        separately and must win over any stale on-disk copy this glob would
+        otherwise pick up.
         """
+        if exclude is None:
+            exclude = {spec.implementation_file.name}
         src_dir = self._project_root / "src"
         if not src_dir.is_dir():
             src_dir = self._project_root / "lib"
@@ -256,7 +355,7 @@ class PythonLanguagePod:
             src_dir = self._project_root
         files: dict[str, str] = {}
         for path in sorted(src_dir.rglob("*.py")):
-            if path == spec.implementation_file:
+            if path.name in exclude:
                 continue
             files[path.name] = path.read_text()
         return files

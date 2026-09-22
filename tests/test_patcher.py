@@ -4,14 +4,20 @@ import pytest
 
 from src.utils.patcher import (
     PatchError,
+    apply_multi_file_patch,
     apply_patch,
     apply_search_replace_blocks,
+    parse_multi_file_blocks,
     parse_search_replace_blocks,
 )
 
 
 def _block(search: str, replace: str) -> str:
     return f"<<<<<<< SEARCH\n{search}\n=======\n{replace}\n>>>>>>> REPLACE"
+
+
+def _file_section(filename: str, *blocks: str) -> str:
+    return f"### FILE: {filename}\n" + "\n\n".join(blocks)
 
 
 class TestParseBlocks:
@@ -120,4 +126,121 @@ class TestApplyPatchEndToEnd:
     def test_never_raises_on_malformed_input(self):
         # Garbage input must come back as a PatchResult, not propagate.
         result = apply_patch("", "<<<<<<< SEARCH\nfoo\n>>>>>>> REPLACE")  # missing =======
+        assert result.success is False
+
+
+class TestParseMultiFileBlocks:
+    def test_single_file_single_block(self):
+        text = _file_section("a.py", _block("x = 1", "x = 2"))
+        by_file = parse_multi_file_blocks(text)
+        assert set(by_file) == {"a.py"}
+        assert by_file["a.py"][0].search == "x = 1"
+
+    def test_multiple_files(self):
+        text = (
+            _file_section("a.py", _block("x = 1", "x = 2"))
+            + "\n\n"
+            + _file_section("b.py", _block("y = 1", "y = 2"))
+        )
+        by_file = parse_multi_file_blocks(text)
+        assert set(by_file) == {"a.py", "b.py"}
+        assert by_file["a.py"][0].replace == "x = 2"
+        assert by_file["b.py"][0].replace == "y = 2"
+
+    def test_multiple_blocks_within_one_file(self):
+        text = _file_section("a.py", _block("x = 1", "x = 2"), _block("y = 1", "y = 2"))
+        by_file = parse_multi_file_blocks(text)
+        assert len(by_file["a.py"]) == 2
+
+    def test_same_file_referenced_twice_concatenates_blocks(self):
+        text = (
+            _file_section("a.py", _block("x = 1", "x = 2"))
+            + "\n\n"
+            + _file_section("a.py", _block("y = 1", "y = 2"))
+        )
+        by_file = parse_multi_file_blocks(text)
+        assert len(by_file["a.py"]) == 2
+
+    def test_no_file_markers_returns_empty_dict(self):
+        assert parse_multi_file_blocks(_block("x = 1", "x = 2")) == {}
+
+    def test_no_content_returns_empty_dict(self):
+        assert parse_multi_file_blocks("just some prose, no markers here") == {}
+
+
+class TestApplyMultiFilePatch:
+    def test_successful_patch_across_two_files(self):
+        files = {"a.py": "x = 1\n", "b.py": "y = 1\n"}
+        patch_text = (
+            _file_section("a.py", _block("x = 1", "x = 2"))
+            + "\n\n"
+            + _file_section("b.py", _block("y = 1", "y = 2"))
+        )
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is True
+        assert result.patched == {"a.py": "x = 2\n", "b.py": "y = 2\n"}
+        assert result.blocks_applied == 2
+
+    def test_untouched_file_keeps_its_original_content(self):
+        files = {"a.py": "x = 1\n", "b.py": "y = 1\n"}
+        patch_text = _file_section("a.py", _block("x = 1", "x = 2"))
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is True
+        assert result.patched == {"a.py": "x = 2\n", "b.py": "y = 1\n"}
+        assert result.blocks_applied == 1
+
+    def test_no_sections_in_response_is_a_clean_failure(self):
+        result = apply_multi_file_patch({"a.py": "x = 1\n"}, "sorry, I can't help with that")
+        assert result.success is False
+        assert result.patched is None
+        assert "no '### FILE:" in result.error
+
+    def test_unknown_filename_is_rejected(self):
+        files = {"a.py": "x = 1\n"}
+        patch_text = _file_section("nope.py", _block("x = 1", "x = 2"))
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is False
+        assert "nope.py" in result.error
+        assert "a.py" in result.error
+
+    def test_a_failing_block_in_one_file_fails_the_whole_patch(self):
+        # All-or-nothing: a coordinated edit that only partially lands is
+        # not a success, even if the other file's block would have applied
+        # cleanly.
+        files = {"a.py": "x = 1\n", "b.py": "y = 1\n"}
+        patch_text = (
+            _file_section("a.py", _block("x = 999", "x = 2"))  # search text absent
+            + "\n\n"
+            + _file_section("b.py", _block("y = 1", "y = 2"))
+        )
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is False
+        assert "a.py" in result.error
+        assert result.patched is None
+
+    def test_syntax_error_in_one_patched_file_fails_the_whole_patch(self):
+        files = {"a.py": "x = 1\n", "b.py": "y = 1\n"}
+        patch_text = (
+            _file_section("a.py", _block("x = 1", "x = 2 +"))  # syntax error
+            + "\n\n"
+            + _file_section("b.py", _block("y = 1", "y = 2"))
+        )
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is False
+        assert "a.py" in result.error
+        assert "syntax error" in result.error
+
+    def test_non_python_file_is_not_syntax_checked(self):
+        files = {"a.py": "x = 1\n", "notes.md": "# hi\n"}
+        patch_text = (
+            _file_section("a.py", _block("x = 1", "x = 2"))
+            + "\n\n"
+            + _file_section("notes.md", _block("# hi", "# bye ((("))
+        )
+        result = apply_multi_file_patch(files, patch_text)
+        assert result.success is True
+        assert result.patched["notes.md"] == "# bye (((\n"
+
+    def test_never_raises_on_malformed_input(self):
+        result = apply_multi_file_patch({"a.py": ""}, "### FILE: a.py\n<<<<<<< SEARCH\nfoo\n>>>>>>> REPLACE")
         assert result.success is False
