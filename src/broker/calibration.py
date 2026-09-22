@@ -99,7 +99,17 @@ def _build_sandboxed_calibration_runner(
     audit_database_url: str,
     max_cycles: int,
 ):
-    """Build a real PolyglotTDDRunner for one candidate model (Python only)."""
+    """Build a real PolyglotTDDRunner for one candidate model (Python only).
+
+    Deliberately does NOT wire playbook_manager/retrieval_service
+    (ace_enterprise#67 considered this and rejected it): CALIBRATION_PLAYBOOK_ID
+    is a dedicated, permanently-empty playbook that exists solely to give a
+    cold-start model one real audit data point on a fixed trivial task -- the
+    generated code's *content* is irrelevant to what's being measured. CGR3
+    retrieval against a playbook with nothing in it would only add an
+    embedding-backed call's latency to every cold-start probe for zero
+    behavioral difference.
+    """
     from src.agents.polyglot_pod_builder import build_pod_kwargs
     from src.agents.polyglot_tdd_runner import PodFactory, PolyglotTDDRunner
     from src.audit.local_client import LocalAuditClient

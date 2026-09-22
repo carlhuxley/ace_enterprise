@@ -466,3 +466,88 @@ def test_go_blind_evaluation_uses_the_go_output_type(project, audit, tmp_path):
     r = _lang_runner(project, audit, "go", builders=builders, evaluator=ev, scratch=tmp_path / "s")
     r.run("do a thing", ["a/m", "b/m"], "thing")
     assert {s.output_type for s in ev.seen_submissions} == {"code_go"}
+
+
+def test_cgr3_retrieval_defaults_to_false_and_is_forwarded_to_the_candidate_builder(project, audit, tmp_path):
+    # ace_enterprise#67: EnsembleBuildRunner had no cgr3_retrieval concept at
+    # all before this.
+    root, src, tests = project
+    seen_kwargs = []
+
+    def candidate_builder(**kwargs):
+        seen_kwargs.append(kwargs)
+        return FakeCandidateRunner("def thing(): return 1\n", "def test_x(): pass\n", True, True, 1)
+
+    r = EnsembleBuildRunner(
+        project_path=root, language="python", src_dir=src, test_dir=tests,
+        playbook_id="pb", audit_client=audit, scratch_root=tmp_path / "s",
+        candidate_builder=candidate_builder, evaluator=FakeEvaluator({}),
+    )
+    r.run("do a thing", ["a/m", "b/m"], "thing")
+    assert all(kw["cgr3_retrieval"] is False for kw in seen_kwargs)
+
+
+def test_cgr3_retrieval_true_is_forwarded_to_every_candidate(project, audit, tmp_path):
+    root, src, tests = project
+    seen_kwargs = []
+
+    def candidate_builder(**kwargs):
+        seen_kwargs.append(kwargs)
+        return FakeCandidateRunner("def thing(): return 1\n", "def test_x(): pass\n", True, True, 1)
+
+    r = EnsembleBuildRunner(
+        project_path=root, language="python", src_dir=src, test_dir=tests,
+        playbook_id="pb", audit_client=audit, scratch_root=tmp_path / "s",
+        candidate_builder=candidate_builder, evaluator=FakeEvaluator({}),
+        cgr3_retrieval=True,
+    )
+    r.run("do a thing", ["a/m", "b/m"], "thing")
+    assert len(seen_kwargs) == 2
+    assert all(kw["cgr3_retrieval"] is True for kw in seen_kwargs)
+
+
+class TestBuildSandboxedCandidateRunnerRealWiring:
+    """ace_enterprise#67: _build_sandboxed_candidate_runner never wired a
+    playbook_manager into any candidate at all before this -- every
+    candidate got zero playbook bullets, unlike an equivalent single-model
+    `ace tdd` run. Exercises the real (non-faked) default builder."""
+
+    def test_candidates_share_a_playbook_manager_by_default(self, tmp_path):
+        from src.agents.ensemble_build import _build_sandboxed_candidate_runner
+
+        runner = _build_sandboxed_candidate_runner(
+            model_ref="anthropic/claude-haiku-4-5", language="python",
+            project_path=tmp_path, src_dir=tmp_path, playbook_id="checkout-svc",
+            audit_client=None, team_id="payments", max_cycles=3,
+        )
+        worker = runner._pod_kwargs["python"]["worker"]
+        assert worker._playbook_manager is not None
+        assert worker._retrieval_service is None
+        assert worker._team_id == "payments"
+        assert worker._project_id == "checkout-svc"
+
+    def test_cgr3_retrieval_true_wires_a_real_retrieval_service(self, tmp_path):
+        from src.agents.ensemble_build import _build_sandboxed_candidate_runner
+        from src.retrieval.service import InstitutionalKnowledgeService
+
+        runner = _build_sandboxed_candidate_runner(
+            model_ref="anthropic/claude-haiku-4-5", language="python",
+            project_path=tmp_path, src_dir=tmp_path, playbook_id="checkout-svc",
+            audit_client=None, team_id="payments", max_cycles=3, cgr3_retrieval=True,
+        )
+        worker = runner._pod_kwargs["python"]["worker"]
+        assert isinstance(worker._retrieval_service, InstitutionalKnowledgeService)
+        assert worker._retrieval_service.default_playbook_id == "checkout-svc"
+
+    def test_go_candidate_receives_playbook_manager_and_context_fields(self, tmp_path):
+        from src.agents.ensemble_build import _build_sandboxed_candidate_runner
+
+        runner = _build_sandboxed_candidate_runner(
+            model_ref="anthropic/claude-haiku-4-5", language="go",
+            project_path=tmp_path, src_dir=tmp_path, playbook_id="checkout-svc",
+            audit_client=None, team_id="payments", max_cycles=3,
+        )
+        go_kwargs = runner._pod_kwargs["go"]
+        assert go_kwargs["playbook_manager"] is not None
+        assert go_kwargs["team_id"] == "payments"
+        assert go_kwargs["project_id"] == "checkout-svc"

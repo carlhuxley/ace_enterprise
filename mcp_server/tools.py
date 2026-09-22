@@ -349,6 +349,10 @@ class ACETools:
                             "type": "string",
                             "description": "Team producing this pattern -- stamped onto any Playbook bullets learned from this build, so CGR3's team-locality ranking has real data to score against.",
                         },
+                        "cgr3_retrieval": {
+                            "type": "boolean",
+                            "description": "Use CGR3 context-aware retrieval instead of dumping every playbook bullet into every prompt. Off by default -- a real cost/latency tradeoff (an embedding-backed retrieval call per generation), worth it once the playbook is large.",
+                        },
                         "model": {
                             "type": "string",
                             "description": "LLM model to use (must be open-source). Examples: qwen/qwen3-coder:free, meta-llama/llama-3.3-70b-instruct:free. Omit to use the local Claude Code session (no API key needed).",
@@ -405,6 +409,10 @@ class ACETools:
                         "team_id": {
                             "type": "string",
                             "description": "Team producing this pattern -- stamped onto any Playbook bullets learned from this build.",
+                        },
+                        "cgr3_retrieval": {
+                            "type": "boolean",
+                            "description": "Use CGR3 context-aware retrieval for every candidate instead of dumping every playbook bullet into every prompt. All candidates share the same playbook access either way -- 'blind' means candidates never see each other, not that they're blind to institutional knowledge.",
                         },
                         "learn": {
                             "type": "boolean",
@@ -893,8 +901,25 @@ class ACETools:
                 llm_client = LLMClient(provider=provider, model=model_name)
             else:
                 llm_client = self._resolve_llm_client(args)
+
+            # #67: opt-in CGR3 retrieval, mirrors ace tdd's --cgr3-retrieval
+            # (ProjectConfig.cgr3_retrieval). playbook_manager is wired in
+            # either way -- this pipeline never gave any language a
+            # playbook_manager at all before this, so every generated bullet
+            # was invisible to build_feature regardless of CGR3.
+            playbook_manager = self._get_playbook_manager()
+            retrieval_service = None
+            if args.get("cgr3_retrieval") and playbook_manager is not None:
+                from src.retrieval.service import InstitutionalKnowledgeService
+                retrieval_service = InstitutionalKnowledgeService(
+                    playbook_manager=playbook_manager, default_playbook_id=playbook_id,
+                )
             pod_kwargs = {
-                language: build_pod_kwargs(language, project_path, llm_client, src_dir=src_dir)
+                language: build_pod_kwargs(
+                    language, project_path, llm_client, src_dir=src_dir,
+                    playbook_manager=playbook_manager, retrieval_service=retrieval_service,
+                    team_id=args.get("team_id"), project_id=playbook_id,
+                )
             }
             # Same pipeline extensions as ace tdd's build_agent(): audit trail,
             # AST redundancy pre-check. (ContextMap injection happens inside
@@ -995,6 +1020,7 @@ class ACETools:
                 audit_client=self._audit,
                 team_id=args.get("team_id"),
                 max_cycles=args.get("max_cycles", 5),
+                cgr3_retrieval=bool(args.get("cgr3_retrieval", False)),
             )
             result = runner.run(
                 requirement, [str(m) for m in models], name,

@@ -32,6 +32,8 @@
         "src/ensemble/consensus.py",
         "src/ensemble/learner.py",
         "src/ensemble/models.py",
+        "src/playbook/manager.py",
+        "src/retrieval/service.py",
         "src/storage/schemas.py",
         "src/utils/llm_client.py"
       ]

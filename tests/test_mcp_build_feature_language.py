@@ -235,6 +235,44 @@ class TestParityWithSandboxedCLIEngine:
         assert kwargs["src_dir"] == tmp_path / "lib"
 
 
+class TestCGR3Wiring:
+    """ace_enterprise#67: build_feature never wired playbook_manager or
+    retrieval_service into build_pod_kwargs() at all before this."""
+
+    def test_playbook_manager_always_passed_to_build_pod_kwargs(self, tools, stub_runner_cls, tmp_path):
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        with patch("src.agents.polyglot_pod_builder.build_pod_kwargs", return_value={}) as build:
+            tools._handle_build_feature({"feature": "User logs in", "project_path": str(tmp_path)})
+        _, kwargs = build.call_args
+        assert kwargs["playbook_manager"] is not None
+
+    def test_project_id_defaults_to_the_resolved_playbook_id(self, tools, stub_runner_cls, tmp_path):
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        with patch("src.agents.polyglot_pod_builder.build_pod_kwargs", return_value={}) as build:
+            tools._handle_build_feature({"feature": "User logs in", "project_path": str(tmp_path)})
+        _, kwargs = build.call_args
+        assert kwargs["project_id"] == "pb1"
+
+    def test_cgr3_retrieval_off_by_default_means_no_retrieval_service(self, tools, stub_runner_cls, tmp_path):
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        with patch("src.agents.polyglot_pod_builder.build_pod_kwargs", return_value={}) as build:
+            tools._handle_build_feature({"feature": "User logs in", "project_path": str(tmp_path)})
+        _, kwargs = build.call_args
+        assert kwargs["retrieval_service"] is None
+
+    def test_cgr3_retrieval_true_wires_a_real_retrieval_service(self, tools, stub_runner_cls, tmp_path):
+        from src.retrieval.service import InstitutionalKnowledgeService
+
+        stub_runner_cls.return_value.run.return_value = _fake_polyglot_result("python")
+        with patch("src.agents.polyglot_pod_builder.build_pod_kwargs", return_value={}) as build:
+            tools._handle_build_feature({
+                "feature": "User logs in", "project_path": str(tmp_path), "cgr3_retrieval": True,
+            })
+        _, kwargs = build.call_args
+        assert isinstance(kwargs["retrieval_service"], InstitutionalKnowledgeService)
+        assert kwargs["retrieval_service"].default_playbook_id == "pb1"
+
+
 class TestPolyglotPodBuilderContextMap:
     """build_pod_kwargs (used by both ace tdd and build_feature) wires a
     ContextMap into the Python worker, scanning src_dir specifically.

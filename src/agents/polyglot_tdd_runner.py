@@ -68,6 +68,9 @@ class PodFactory:
                 project_root=kwargs["project_root"],
                 orchestrator=kwargs["orchestrator"],
                 playbook_manager=kwargs.get("playbook_manager"),
+                retrieval_service=kwargs.get("retrieval_service"),
+                team_id=kwargs.get("team_id"),
+                project_id=kwargs.get("project_id"),
             )
         if language == "typescript":
             from src.agents.typescript_language_pod import TypeScriptLanguagePod

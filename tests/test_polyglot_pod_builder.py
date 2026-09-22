@@ -57,3 +57,76 @@ class TestBuildAllPodKwargs:
         for lang, kwargs in all_kwargs.items():
             pod = PodFactory.create(lang, **kwargs)
             assert pod is not None
+
+
+class TestPlaybookAndRetrievalWiring:
+    """ace_enterprise#67: build_pod_kwargs()/PodFactory.create() never wired
+    playbook_manager or retrieval_service into any language before this."""
+
+    def test_python_worker_receives_playbook_manager_and_retrieval_service(self, tmp_path):
+        pm = MagicMock()
+        service = MagicMock()
+        kwargs = build_pod_kwargs(
+            "python", tmp_path, llm_client=MagicMock(),
+            playbook_manager=pm, retrieval_service=service,
+            team_id="payments", project_id="checkout-svc",
+        )
+        pod = PodFactory.create("python", **kwargs)
+        worker = pod._worker
+        assert worker._playbook_manager is pm
+        assert worker._retrieval_service is service
+        assert worker._team_id == "payments"
+        assert worker._project_id == "checkout-svc"
+        assert worker._project_path == str(tmp_path)
+
+    def test_typescript_worker_receives_playbook_manager_and_retrieval_service(self, tmp_path):
+        pm = MagicMock()
+        service = MagicMock()
+        kwargs = build_pod_kwargs(
+            "typescript", tmp_path, llm_client=MagicMock(),
+            playbook_manager=pm, retrieval_service=service,
+            team_id="payments", project_id="checkout-svc",
+        )
+        pod = PodFactory.create("typescript", **kwargs)
+        worker = pod._worker
+        assert worker._playbook_manager is pm
+        assert worker._retrieval_service is service
+        assert worker._team_id == "payments"
+        assert worker._project_id == "checkout-svc"
+        assert worker._project_path == str(tmp_path)
+
+    def test_go_pod_receives_playbook_manager_and_retrieval_service(self, tmp_path):
+        pm = MagicMock()
+        service = MagicMock()
+        kwargs = build_pod_kwargs(
+            "go", tmp_path, llm_client=MagicMock(),
+            playbook_manager=pm, retrieval_service=service,
+            team_id="payments", project_id="checkout-svc",
+        )
+        pod = PodFactory.create("go", **kwargs)
+        assert pod._playbook_manager is pm
+        assert pod._retrieval_service is service
+        assert pod._team_id == "payments"
+        assert pod._project_id == "checkout-svc"
+
+    def test_none_by_default_for_every_language(self, tmp_path):
+        for lang in ("python", "typescript", "go"):
+            kwargs = build_pod_kwargs(lang, tmp_path, llm_client=MagicMock())
+            pod = PodFactory.create(lang, **kwargs)
+            worker_or_pod = pod._worker if lang != "go" else pod
+            assert worker_or_pod._playbook_manager is None
+            assert worker_or_pod._retrieval_service is None
+
+    def test_build_all_pod_kwargs_shares_the_same_playbook_manager_and_service(self, tmp_path):
+        # One playbook/service per build, not re-created per language.
+        pm = MagicMock()
+        service = MagicMock()
+        all_kwargs = build_all_pod_kwargs(
+            ["python", "typescript", "go"], tmp_path, llm_client=MagicMock(),
+            playbook_manager=pm, retrieval_service=service,
+        )
+        for lang, kwargs in all_kwargs.items():
+            pod = PodFactory.create(lang, **kwargs)
+            worker_or_pod = pod._worker if lang != "go" else pod
+            assert worker_or_pod._playbook_manager is pm
+            assert worker_or_pod._retrieval_service is service

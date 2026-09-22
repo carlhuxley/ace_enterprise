@@ -62,3 +62,24 @@ def test_learning_summary_is_surfaced_in_the_response(tools, tmp_path):
             "learn": True,
         })
     assert payload["learning"] == learning
+
+
+def test_cgr3_retrieval_defaults_to_false(tools, tmp_path):
+    # ace_enterprise#67: build_feature_ensemble had no cgr3_retrieval concept
+    # at all before this.
+    patcher, runner = _fake_runner(_result())
+    with patcher as cls:
+        tools._handle_build_feature_ensemble({
+            "project_path": str(tmp_path), "models": ["a/m", "b/m"], "feature": "do a thing",
+        })
+    assert cls.call_args.kwargs["cgr3_retrieval"] is False
+
+
+def test_cgr3_retrieval_true_is_threaded_to_the_runner(tools, tmp_path):
+    patcher, runner = _fake_runner(_result())
+    with patcher as cls:
+        tools._handle_build_feature_ensemble({
+            "project_path": str(tmp_path), "models": ["a/m", "b/m"], "feature": "do a thing",
+            "cgr3_retrieval": True,
+        })
+    assert cls.call_args.kwargs["cgr3_retrieval"] is True

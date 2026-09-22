@@ -138,6 +138,7 @@ class EnsembleBuildRunner:
         team_id: str | None = None,
         max_cycles: int = 5,
         scratch_root: Path | None = None,
+        cgr3_retrieval: bool = False,
         candidate_builder=None,
         evaluator=None,
         consensus_builder=None,
@@ -151,6 +152,16 @@ class EnsembleBuildRunner:
         self._audit = audit_client
         self._team_id = team_id
         self._max_cycles = max_cycles
+        # #67: opt-in CGR3 retrieval for candidate generation, mirrors
+        # ProjectConfig.cgr3_retrieval (src/cli/config.py). Every candidate
+        # model still gets equal access to the same shared playbook either
+        # way ("blind" here means candidates never see each other, not that
+        # they're blind to institutional knowledge) -- this was in fact a
+        # real, separate gap even without CGR3: _build_sandboxed_candidate_
+        # runner never wired a playbook_manager into any candidate at all
+        # before this, so candidates got zero playbook bullets, unlike an
+        # equivalent single-model `ace tdd` run.
+        self._cgr3_retrieval = cgr3_retrieval
         self._scratch_root = scratch_root
         # Seams for tests: default to the real sandboxed implementations.
         self._candidate_builder = candidate_builder or _build_sandboxed_candidate_runner
@@ -270,6 +281,7 @@ class EnsembleBuildRunner:
                     audit_client=self._audit,
                     team_id=self._team_id,
                     max_cycles=self._max_cycles,
+                    cgr3_retrieval=self._cgr3_retrieval,
                 )
                 result: PolyglotRunResult = runner.run(
                     feature_requirement=requirement,
@@ -509,14 +521,21 @@ def _build_sandboxed_candidate_runner(
     audit_client,
     team_id: str | None,
     max_cycles: int,
+    cgr3_retrieval: bool = False,
 ):
     """Build a real PolyglotTDDRunner for one candidate model.
 
     `model_ref` is "<provider>/<model>"; the model half may contain slashes.
+
+    Every candidate shares the same playbook_manager (and, if cgr3_retrieval
+    is set, the same retrieval_service) -- "blind" only means candidates
+    never see each other's generated code, not that they're blind to
+    institutional knowledge (ace_enterprise#67).
     """
     from src.agents.polyglot_pod_builder import build_pod_kwargs
     from src.agents.polyglot_tdd_runner import PodFactory, PolyglotTDDRunner
     from src.agents.redundancy_checker import RedundancyPreChecker
+    from src.playbook.manager import PlaybookManager
     from src.utils.llm_client import LLMClient
 
     provider, _, model = model_ref.partition("/")
@@ -524,8 +543,21 @@ def _build_sandboxed_candidate_runner(
         raise ValueError(f"candidate model {model_ref!r} must be '<provider>/<model>'")
     llm_client = LLMClient(provider=provider, model=model)
 
+    playbook_manager = PlaybookManager()
+    playbook_manager.get_or_create_playbook(playbook_id)
+    retrieval_service = None
+    if cgr3_retrieval:
+        from src.retrieval.service import InstitutionalKnowledgeService
+        retrieval_service = InstitutionalKnowledgeService(
+            playbook_manager=playbook_manager, default_playbook_id=playbook_id,
+        )
+
     pod_kwargs = {
-        language: build_pod_kwargs(language, project_path, llm_client, src_dir=src_dir)
+        language: build_pod_kwargs(
+            language, project_path, llm_client, src_dir=src_dir,
+            playbook_manager=playbook_manager, retrieval_service=retrieval_service,
+            team_id=team_id, project_id=playbook_id,
+        )
     }
     return PolyglotTDDRunner(
         PodFactory,
