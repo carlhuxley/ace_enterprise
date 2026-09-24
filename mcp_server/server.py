@@ -112,8 +112,11 @@ class ACEMCPServer:
         # Handle MCP protocol methods
         if method == "initialize":
             return self._handle_initialize(params, request_id)
-        elif method == "initialized":
-            # Notification, no response needed
+        elif method in ("initialized", "notifications/initialized"):
+            # Notification (the MCP spec's real method name is
+            # "notifications/initialized"; "initialized" is kept too for
+            # backwards compatibility with any existing caller using it) --
+            # one-way, no response needed.
             return None
         elif method == "tools/list":
             return self._handle_tools_list(request_id)
