@@ -41,6 +41,83 @@ def _resolve_model_id(llm_client) -> str:
     return f"{provider}/{model}" if provider else model
 
 
+# evaluate_candidate scoring convention -- deliberately mirrors the sibling
+# dream_rsi repo's ace_harness._extract_json_payload / ACETaskEvaluator.evaluate
+# exactly (same regex, same score formula, same fail-soft semantics), so a
+# candidate scored via this MCP tool and one scored via dream_rsi's own
+# in-process pulse_fn/render_harness path are numerically identical. This
+# repo has no other use for this convention -- it exists purely to satisfy
+# dream_rsi's task_runner.TaskRunner protocol as an external backend.
+_EVALUATE_INCORRECT_SCORE = -1.0
+_EVALUATE_CRASH_SCORE = -2.0
+
+
+def _extract_assertion_json_payload(output: str) -> dict | None:
+    """Find the LAST 'AssertionError:' line's trailing JSON object in output
+    and json.loads it. Returns None if no such JSON is found, it fails to
+    parse, or it does not parse to a dict. Never raises."""
+    import re
+
+    try:
+        if not isinstance(output, str) or not output:
+            return None
+        matches = list(re.finditer(r"AssertionError:\s*(\{.*\})\s*$", output, re.MULTILINE))
+        if not matches:
+            return None
+        try:
+            parsed = json.loads(matches[-1].group(1))
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _score_phase_result(phase_result) -> dict:
+    """Maps a src.agents.language_pod.PhaseResult to
+    {"score": float, "status": "success"|"partial"|"error", "diagnostics": str|None}.
+
+    phase_result.passed is deliberately never consulted: dream_rsi's
+    test_eval() convention always raises AssertionError by design (the real
+    verdict rides inside it as JSON), so `passed` is essentially always False
+    for a well-formed candidate regardless of correctness -- exactly how
+    ace_harness.ACETaskEvaluator.evaluate already behaves (it only ever reads
+    .output text). A missing/unparseable payload (a genuine crash, timeout,
+    or security-gate rejection) maps to status="error" and
+    _EVALUATE_CRASH_SCORE, never to a wrong-answer score.
+    """
+    output = getattr(phase_result, "output", "") or ""
+    payload = _extract_assertion_json_payload(output)
+
+    if payload is None:
+        diagnostics = getattr(phase_result, "error", None) or output[-2000:]
+        return {"score": _EVALUATE_CRASH_SCORE, "status": "error", "diagnostics": diagnostics}
+
+    n_total = payload.get("n_total", 1)
+    if not isinstance(n_total, (int, float)) or isinstance(n_total, bool) or n_total <= 0:
+        n_total = 1
+    if "n_valid" in payload:
+        n_valid = payload.get("n_valid", 0)
+        if not isinstance(n_valid, (int, float)) or isinstance(n_valid, bool):
+            n_valid = 0
+    else:
+        n_valid = n_total if payload.get("correct") else 0
+    pass_ratio = max(0.0, min(1.0, n_valid / n_total))
+
+    if not payload.get("correct"):
+        score = _EVALUATE_INCORRECT_SCORE * (1.0 - pass_ratio)
+        return {"score": score, "status": "partial", "diagnostics": payload.get("notes")}
+
+    latency = payload.get("latency_ns")
+    if isinstance(latency, bool) or not isinstance(latency, (int, float)) or latency != latency or latency <= 0:
+        # Guards non-numeric, NaN, zero, and negative latency alike -- any of
+        # these would otherwise divide-by-zero or produce a nonsensical
+        # (negative/inf) score below.
+        latency = 1.0
+    score = pass_ratio * (1e9 / max(latency, 1.0))
+    return {"score": score, "status": "success", "diagnostics": payload.get("notes")}
+
+
 class ACETools:
     """
     Tool definitions and handlers for ACE MCP server.
@@ -456,6 +533,55 @@ class ACETools:
                     "required": ["project_path"],
                 },
             })
+            tools.append({
+                "name": "evaluate_candidate",
+                "description": (
+                    "Run a candidate's source code against a caller-supplied pytest test "
+                    "file inside ACE's rootless Podman sandbox (network-isolated, "
+                    "resource-capped, Bandit-scanned) and return a standardized "
+                    "score/status/telemetry payload. Task-agnostic -- the caller renders "
+                    "its own test harness and supplies both files directly, so this tool "
+                    "has no built-in notion of what task is being evaluated. The verdict is "
+                    "read from a JSON payload carried in a trailing AssertionError (the "
+                    "test is expected to always raise; the JSON encodes the real result) -- "
+                    "a clean pytest pass, an uncaught exception, or a timeout are all "
+                    "reported as status='error' since there is no payload to score."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_code": {
+                            "type": "string",
+                            "description": "The candidate's full source code (written to candidate.py in the sandbox).",
+                        },
+                        "test_code": {
+                            "type": "string",
+                            "description": (
+                                "The test file's full source code (written to test_eval.py in the "
+                                "sandbox). Must raise AssertionError(json.dumps({'correct': bool, "
+                                "'n_valid': int, 'n_total': int, 'latency_ns': number, 'notes': str})) "
+                                "to report a real verdict."
+                            ),
+                        },
+                        "timeout_seconds": {
+                            "type": "number",
+                            "description": "Pytest execution timeout inside the sandbox.",
+                            "default": 10,
+                        },
+                        "cpus": {
+                            "type": "string",
+                            "description": "Podman --cpus limit.",
+                            "default": "0.5",
+                        },
+                        "memory": {
+                            "type": "string",
+                            "description": "Podman --memory limit.",
+                            "default": "256m",
+                        },
+                    },
+                    "required": ["candidate_code", "test_code"],
+                },
+            })
 
         return tools
 
@@ -482,6 +608,7 @@ class ACETools:
             "build_feature": self._handle_build_feature,
             "build_feature_ensemble": self._handle_build_feature_ensemble,
             "build_project": self._handle_build_project,
+            "evaluate_candidate": self._handle_evaluate_candidate,
             "list_providers": self._handle_list_providers,
         }
 
@@ -1089,6 +1216,59 @@ class ACETools:
         except Exception as e:
             logger.exception(f"build_project failed: {e}")
             return {"success": False, "error": str(e)}
+
+    def _handle_evaluate_candidate(self, args: dict) -> dict:
+        """Run one candidate + test file through the Podman sandbox once and
+        score it via _score_phase_result. One-shot lifecycle -- constructs a
+        fresh PodmanOrchestrator/PodmanRunner per call and always stops it in
+        `finally`, mirroring the existing single-shot pattern in
+        src/benchmark/rubrics/code.py's CodeRubric._score_tests and
+        src/benchmark/blind_evaluation.py's BlindEvaluator._run_tests, rather
+        than build_feature's long-lived-container-via-PolyglotTDDRunner path.
+        Container reuse/pooling across calls is deliberately deferred -- see
+        ace_enterprise#69.
+        """
+        if not self.enable_tdd:
+            return {"error": "TDD tools not enabled"}
+
+        empty_telemetry = {
+            "wall_clock_ms": 0.0, "cpu_seconds": 0.0,
+            "tokens_prompt": 0, "tokens_completion": 0, "cost": 0.0,
+        }
+
+        import time
+
+        from src.agents.podman_orchestrator import PodmanOrchestrator
+        from src.agents.podman_runner import PodmanRunner
+
+        candidate_code = args["candidate_code"]
+        test_code = args["test_code"]
+        timeout_seconds = args.get("timeout_seconds", 10)
+        cpus = args.get("cpus", "0.5")
+        memory = args.get("memory", "256m")
+
+        orchestrator = PodmanOrchestrator(
+            PodmanRunner(cpus=cpus, memory=memory, test_timeout=int(timeout_seconds))
+        )
+        try:
+            start = time.monotonic()
+            phase_result = orchestrator.pulse({
+                "candidate.py": candidate_code,
+                "test_eval.py": test_code,
+            })
+            wall_clock_ms = (time.monotonic() - start) * 1000.0
+
+            result = _score_phase_result(phase_result)
+            result["telemetry"] = {**empty_telemetry, "wall_clock_ms": wall_clock_ms}
+            return result
+        except Exception as e:
+            logger.exception(f"evaluate_candidate failed: {e}")
+            return {
+                "score": _EVALUATE_CRASH_SCORE, "status": "error",
+                "telemetry": empty_telemetry, "diagnostics": str(e),
+            }
+        finally:
+            orchestrator.stop()
 
     def _route_model(self, args: dict, task_type: str, playbook_id: str):
         """Route this build among args['models'] via the AdaptiveBroker.
