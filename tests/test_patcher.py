@@ -1,5 +1,7 @@
 """Tests for src/utils/patcher.py -- deterministic SEARCH/REPLACE patching."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.utils.patcher import (
@@ -244,3 +246,103 @@ class TestApplyMultiFilePatch:
     def test_never_raises_on_malformed_input(self):
         result = apply_multi_file_patch({"a.py": ""}, "### FILE: a.py\n<<<<<<< SEARCH\nfoo\n>>>>>>> REPLACE")
         assert result.success is False
+
+
+class TestApplyPatchProtectedShape:
+    """#70: apply_patch's optional protected_shape param rejects a patch
+    that changes a pre-scaffolded signature, but allows a pure body change
+    or an added method -- and its rejection is a normal, non-abort
+    PatchResult error, so it flows through the existing retry-with-feedback
+    loop exactly like a syntax error does."""
+
+    def _shape(self, source: str):
+        from src.utils.ast_shape import extract_protected_shape
+
+        return extract_protected_shape(source)
+
+    def test_body_only_change_is_accepted(self):
+        original = "class Thing:\n    def run(self) -> int:\n        raise NotImplementedError\n"
+        shape = self._shape(original)
+        patch_text = _block(
+            "        raise NotImplementedError", "        return 42",
+        )
+        result = apply_patch(original, patch_text, protected_shape=shape)
+        assert result.success is True
+        assert "return 42" in result.code
+
+    def test_changed_method_signature_is_rejected(self):
+        original = "class Thing:\n    def run(self, x: int) -> int:\n        return x\n"
+        shape = self._shape(original)
+        patch_text = _block(
+            "    def run(self, x: int) -> int:", "    def run(self, x: str) -> int:",
+        )
+        result = apply_patch(original, patch_text, protected_shape=shape)
+        assert result.success is False
+        assert "PROTECTED_SIGNATURE_CHANGED" in result.error
+        assert "run" in result.error
+
+    def test_rejection_is_not_an_abort_error(self):
+        """A protected-shape rejection must retry-with-feedback like
+        PATCH_APPLY_FAILED, never hard-stop like ForbiddenImport."""
+        from src.agents.tdd_cycle_runner import _is_abort
+
+        original = "class Thing:\n    def run(self, x: int) -> int:\n        return x\n"
+        shape = self._shape(original)
+        patch_text = _block(
+            "    def run(self, x: int) -> int:", "    def run(self, x: str) -> int:",
+        )
+        result = apply_patch(original, patch_text, protected_shape=shape)
+        phase_result = SimpleNamespace(error=f"PATCH_APPLY_FAILED: {result.error}")
+        assert _is_abort(phase_result) is False
+
+    def test_added_method_is_accepted(self):
+        original = "class Thing:\n    def run(self) -> int:\n        return 1\n"
+        shape = self._shape(original)
+        patch_text = _block(
+            "class Thing:\n    def run(self) -> int:\n        return 1",
+            "class Thing:\n    def run(self) -> int:\n        return 1\n\n"
+            "    def helper(self) -> None:\n        pass",
+        )
+        result = apply_patch(original, patch_text, protected_shape=shape)
+        assert result.success is True
+
+    def test_no_protected_shape_means_no_new_restriction(self):
+        original = "class Thing:\n    def run(self, x: int) -> int:\n        return x\n"
+        patch_text = _block(
+            "    def run(self, x: int) -> int:", "    def run(self, x: str) -> int:",
+        )
+        result = apply_patch(original, patch_text)
+        assert result.success is True
+
+
+class TestApplyMultiFilePatchProtectedShape:
+    def test_protected_file_rejected_unprotected_file_ignored(self):
+        from src.utils.ast_shape import extract_protected_shape
+
+        files = {
+            "a.py": "class Thing:\n    def run(self, x: int) -> int:\n        return x\n",
+            "b.py": "y = 1\n",
+        }
+        shape = extract_protected_shape(files["a.py"])
+        patch_text = (
+            _file_section("a.py", _block(
+                "    def run(self, x: int) -> int:", "    def run(self, x: str) -> int:",
+            ))
+            + "\n\n"
+            + _file_section("b.py", _block("y = 1", "y = 2"))
+        )
+        result = apply_multi_file_patch(files, patch_text, protected_shapes={"a.py": shape})
+        assert result.success is False
+        assert "a.py" in result.error
+        assert "PROTECTED_SIGNATURE_CHANGED" in result.error
+
+    def test_compatible_change_to_protected_file_succeeds(self):
+        from src.utils.ast_shape import extract_protected_shape
+
+        files = {"a.py": "class Thing:\n    def run(self) -> int:\n        raise NotImplementedError\n"}
+        shape = extract_protected_shape(files["a.py"])
+        patch_text = _file_section(
+            "a.py", _block("        raise NotImplementedError", "        return 1"),
+        )
+        result = apply_multi_file_patch(files, patch_text, protected_shapes={"a.py": shape})
+        assert result.success is True

@@ -9,6 +9,7 @@ import os
 from src.agents.import_filter import ForbiddenImportError, ImportFilter
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator, SecurityBreachError
+from src.utils.ast_shape import ProtectedShape, diff_protected_shapes, extract_protected_shape
 from src.utils.patcher import apply_multi_file_patch, apply_patch
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class PythonLanguagePod:
         *,
         use_patch_mode: bool = False,
         patch_escalation_threshold: int = 2,
+        protected_shape: ProtectedShape | None = None,
     ) -> None:
         self._worker = worker_agent
         self._orchestrator = orchestrator
@@ -62,6 +64,12 @@ class PythonLanguagePod:
         self._use_patch_mode = use_patch_mode
         self._patch_escalation_threshold = patch_escalation_threshold
         self._patch_failure_counts: dict[str, int] = {}
+        # Set only for a module pre-seeded by module_contract_scaffold's
+        # scaffold_module -- locks that scaffold's signatures against being
+        # silently rewritten by a SEARCH/REPLACE patch (see apply_patch's
+        # own protected_shape parameter). None everywhere else, unchanged
+        # behavior.
+        self._protected_shape = protected_shape
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -129,7 +137,7 @@ class PythonLanguagePod:
             except Exception as exc:
                 self._record_usage(spec.cycle_number)
                 return PhaseResult(passed=False, output="", error=str(exc))
-            patch_result = apply_patch(existing_impl, patch_text)
+            patch_result = apply_patch(existing_impl, patch_text, protected_shape=self._protected_shape)
             if not patch_result.success:
                 # Deterministic, host-side rejection -- never reaches the
                 # sandbox. Counted toward escalation and fed back as normal
@@ -152,6 +160,25 @@ class PythonLanguagePod:
             except Exception as exc:
                 self._record_usage(spec.cycle_number)
                 return PhaseResult(passed=False, output="", error=str(exc))
+
+            # A scaffolded module reaches this whole-file path only after
+            # patch_escalation_threshold consecutive patch failures on this
+            # file (existing_impl is never empty for one on cycle 1, so
+            # use_patch is only ever False here once escalated) -- apply_patch's
+            # own protected_shape check never runs for a whole-file rewrite,
+            # so it must be re-checked here too, or escalation becomes a
+            # backdoor around the lock.
+            if self._protected_shape is not None:
+                try:
+                    violations = diff_protected_shapes(self._protected_shape, extract_protected_shape(impl_code))
+                except SyntaxError:
+                    violations = []  # surfaces as a normal test/sandbox failure instead
+                if violations:
+                    self._record_usage(spec.cycle_number)
+                    return PhaseResult(
+                        passed=False, output="",
+                        error="PROTECTED_SIGNATURE_CHANGED: " + "; ".join(violations),
+                    )
 
         # getattr, not a direct attribute access: not every LanguagePod's
         # worker is a real WorkerAgent (e.g. hand-rolled test doubles), so
@@ -239,7 +266,12 @@ class PythonLanguagePod:
             self._record_usage(spec.cycle_number)
             return PhaseResult(passed=False, output="", error=str(exc))
 
-        patch_result = apply_multi_file_patch(existing_by_file, patch_text)
+        protected_shapes = (
+            {spec.implementation_file.name: self._protected_shape}
+            if self._protected_shape is not None
+            else None
+        )
+        patch_result = apply_multi_file_patch(existing_by_file, patch_text, protected_shapes=protected_shapes)
         if not patch_result.success:
             self._patch_failure_counts[file_key] = self._patch_failure_counts.get(file_key, 0) + 1
             self._record_usage(spec.cycle_number)

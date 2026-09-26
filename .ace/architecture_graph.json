@@ -211,6 +211,7 @@
         "src/agents/import_filter.py",
         "src/agents/language_pod.py",
         "src/agents/podman_orchestrator.py",
+        "src/utils/ast_shape.py",
         "src/utils/patcher.py"
       ]
     },
@@ -924,12 +925,14 @@
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/contracts/module_architect.py",
+        "src/contracts/module_contract_scaffold.py",
         "src/contracts/module_tdd_builder.py",
         "src/contracts/project_architect.py",
         "src/core/curator/module.py",
         "src/core/reflector/module.py",
         "src/playbook/manager.py",
         "src/retrieval/service.py",
+        "src/utils/ast_shape.py",
         "src/utils/context_map.py",
         "src/utils/dependency_graph.py",
         "src/utils/llm_client.py",
@@ -1039,6 +1042,26 @@
         "src/utils/third_party_imports.py"
       ]
     },
+    "src/contracts/module_contract_scaffold.py": {
+      "provides": [
+        "scaffold_module"
+      ],
+      "depends_on": [
+        "src/contracts/module_contract_schema.py"
+      ]
+    },
+    "src/contracts/module_contract_schema.py": {
+      "provides": [
+        "RaisesSpec",
+        "FieldSpec",
+        "ParamSpec",
+        "ConstructorSpec",
+        "MethodSpec",
+        "ApiEntry",
+        "ContractDocument"
+      ],
+      "depends_on": []
+    },
     "src/contracts/module_tdd_builder.py": {
       "provides": [
         "FunctionBuildResult",
@@ -1069,6 +1092,7 @@
         "src/agents/gherkin_feature_bridge.py",
         "src/audit/local_client.py",
         "src/audit/schemas.py",
+        "src/contracts/module_contract_schema.py",
         "src/utils/llm_client.py",
         "src/utils/topo.py"
       ]
@@ -1575,6 +1599,19 @@
       "provides": [],
       "depends_on": []
     },
+    "src/utils/ast_shape.py": {
+      "provides": [
+        "FieldShape",
+        "MethodShape",
+        "ConstantShape",
+        "ImportShape",
+        "ClassShape",
+        "ProtectedShape",
+        "extract_protected_shape",
+        "diff_protected_shapes"
+      ],
+      "depends_on": []
+    },
     "src/utils/claude_cli_client.py": {
       "provides": [
         "ClaudeCliClient"
@@ -1683,7 +1720,9 @@
         "parse_multi_file_blocks",
         "apply_multi_file_patch"
       ],
-      "depends_on": []
+      "depends_on": [
+        "src/utils/ast_shape.py"
+      ]
     },
     "src/utils/playbook_enforcer.py": {
       "provides": [

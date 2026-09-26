@@ -22,6 +22,7 @@ import yaml
 
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
+from src.contracts.module_contract_schema import ContractDocument
 from src.utils.llm_client import LLMClient
 from src.utils.topo import DependencyError, topo_order
 
@@ -53,6 +54,15 @@ class ModuleSpec:
     depends_on: tuple[str, ...] = ()
     contract_yaml: str | None = None
     feature_path: Path | None = None
+    # Set only when contract_yaml validates against the formal
+    # module_contract_schema.ContractDocument (issue #70's scaffolding
+    # support) -- most existing spec dirs use a plainer, schema-less
+    # contract.yml and this stays None for them, which is not an error.
+    # ProjectBuilder consults this (and each dependency's own
+    # parsed_contract, via ProjectPlan.by_name) to decide whether to
+    # pre-seed this module's implementation file with a deterministic
+    # scaffold before its first IterativeTDDRunner cycle.
+    parsed_contract: ContractDocument | None = None
 
 
 @dataclass
@@ -80,8 +90,12 @@ class ProjectPlan:
             raise ProjectPlanError(str(exc)) from exc
 
     @property
+    def by_name(self) -> dict[str, ModuleSpec]:
+        return {m.name: m for m in self.modules}
+
+    @property
     def ordered_modules(self) -> list[ModuleSpec]:
-        by_name = {m.name: m for m in self.modules}
+        by_name = self.by_name
         return [by_name[n] for n in self.build_order]
 
     @property
@@ -150,10 +164,24 @@ class ProjectPlan:
                     depends_on=tuple(str(d).strip() for d in depends_on_raw if str(d).strip()),
                     feature_path=_iterative_feature_path(features_dir, module_name),
                     contract_yaml=raw_text,
+                    parsed_contract=_try_parse_contract_document(path, raw_text),
                 )
             )
 
         return cls(spec=f"structured spec dir: {spec_dir}", modules=modules)
+
+
+def _try_parse_contract_document(path: Path, raw_text: str) -> ContractDocument | None:
+    """None whenever raw_text doesn't validate against the formal module
+    contract schema -- most existing spec dirs use a plainer, schema-less
+    convention (just module/description/depends_on) and must keep planning
+    exactly as before. This is a graceful degrade, never a ProjectPlanError:
+    only from_spec_dir's own three required-key checks above are fatal."""
+    try:
+        return ContractDocument.from_yaml(raw_text)
+    except Exception as exc:  # noqa: BLE001 -- any schema/YAML-shape mismatch degrades silently
+        logger.debug("%s: does not validate against ContractDocument (%s) -- no scaffolding for this module", path, exc)
+        return None
 
 
 def _iterative_feature_path(features_dir: Path, module_name: str) -> Path | None:

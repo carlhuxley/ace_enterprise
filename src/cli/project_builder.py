@@ -27,6 +27,7 @@ from pathlib import Path
 from src.audit.local_client import LocalAuditClient
 from src.audit.schemas import AuditEventType
 from src.contracts.project_architect import ModuleSpec, ProjectPlan
+from src.utils.ast_shape import ProtectedShape
 from src.utils.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -211,10 +212,17 @@ class ProjectBuilder:
             escalation_model_id=self._escalation_model_id,
         )
 
-    def _default_iterative_runner(self, src_dir: Path, test_dir: Path):
+    def _default_iterative_runner(
+        self, src_dir: Path, test_dir: Path,
+        *, use_patch_mode: bool = False, protected_shape: ProtectedShape | None = None,
+    ):
         """Mirrors src/cli/factory.py::build_agent's wiring, reusing this
         ProjectBuilder's already-configured LLM clients/playbook/reflector/
-        curator instead of constructing a second, separately-scoped set."""
+        curator instead of constructing a second, separately-scoped set.
+
+        `use_patch_mode`/`protected_shape` are set only for a module
+        `_try_scaffold_module` pre-seeded (#70) -- every other module keeps
+        today's whole-file-regeneration-only behavior."""
         from src.agents.incremental_planner import IncrementalPlanner
         from src.agents.iterative_tdd_runner import IterativeTDDRunner
         from src.agents.podman_orchestrator import PodmanOrchestrator
@@ -242,7 +250,10 @@ class ProjectBuilder:
             playbook_manager=self._playbook_manager, playbook_id=self._playbook_id,
         )
         orchestrator = PodmanOrchestrator(runner=PodmanRunner())
-        pod = PythonLanguagePod(worker, self._project_root, orchestrator)
+        pod = PythonLanguagePod(
+            worker, self._project_root, orchestrator,
+            use_patch_mode=use_patch_mode, protected_shape=protected_shape,
+        )
         runner = IterativeTDDRunner(
             pod=pod,
             planner=planner,
@@ -396,7 +407,7 @@ class ProjectBuilder:
         # without one (the common case -- schema/adapter/DTO shapes) are
         # completely unaffected by this branch.
         if module.feature_path is not None:
-            return self._build_module_iterative(module, impl_path, test_path)
+            return self._build_module_iterative(module, impl_path, test_path, by_name)
 
         from src.contracts.module_tdd_builder import render_integration_tests
 
@@ -448,8 +459,44 @@ class ProjectBuilder:
             cycles=build.total_cycles, learned=learned,
         )
 
+    def _try_scaffold_module(
+        self, module: ModuleSpec, by_name: dict[str, ModuleSpec],
+    ) -> tuple[str, ProtectedShape] | None:
+        """None unless `module.parsed_contract` validated against the formal
+        module contract schema (issue #70). When it did: resolve each name in
+        `module.depends_on` to that dependency's own `parsed_contract` (via
+        `by_name`) and, for every dependency that ALSO validated, collect its
+        `public_api` entry names to import for real -- every dependency is
+        already fully built on disk by this point (topological build order),
+        and PythonLanguagePod._sibling_files (#61) already pulses its real
+        source into the sandbox, so the import genuinely resolves. A
+        dependency that didn't validate is skipped, not an error -- its
+        types stay unresolved, exactly like today's status quo.
+
+        Returns (scaffold_source, protected_shape), or None when this module
+        isn't schema-driven -- callers must leave today's behavior (no
+        pre-seed, no forced patch mode, no lock) completely unchanged in
+        that case.
+        """
+        if module.parsed_contract is None:
+            return None
+
+        from src.contracts.module_contract_scaffold import scaffold_module
+        from src.utils.ast_shape import extract_protected_shape
+
+        dependency_exports: dict[str, list[str]] = {}
+        for dep_name in module.depends_on:
+            dep = by_name.get(dep_name)
+            if dep is None or dep.parsed_contract is None:
+                continue
+            dependency_exports[dep_name] = [e.name for e in dep.parsed_contract.public_api]
+
+        source = scaffold_module(module.parsed_contract, dependency_exports=dependency_exports)
+        return source, extract_protected_shape(source)
+
     def _build_module_iterative(
         self, module: ModuleSpec, impl_path: Path, test_path: Path,
+        by_name: dict[str, ModuleSpec],
     ) -> ModuleOutcome:
         """#59: drive `module.feature_path` through IterativeTDDRunner, one
         Gherkin scenario per RED/GREEN/REFACTOR cycle, instead of
@@ -458,6 +505,15 @@ class ProjectBuilder:
         wiring -- every already-built sibling module already lives on disk
         under src_dir by the time this runs, and PythonLanguagePod resolves
         those for free (#61).
+
+        #70: when `module.parsed_contract` validates against the formal
+        module contract schema, this module's implementation file is
+        pre-seeded with a deterministic scaffold (type/Protocol/dataclass/
+        ABC "corners", cross-module imports resolved via `by_name`) before
+        the first cycle, patch mode is forced on for this module specifically
+        (so the scaffold gets patched, not silently regenerated whole-file),
+        and a ProtectedShape lock rejects any patch that changes a scaffolded
+        signature. Every other module is completely unaffected.
         """
         from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
 
@@ -471,11 +527,26 @@ class ProjectBuilder:
         impl_path.unlink(missing_ok=True)
         test_path.unlink(missing_ok=True)
 
+        scaffold = self._try_scaffold_module(module, by_name)
+        if scaffold is not None:
+            source, protected_shape = scaffold
+            impl_path.write_text(source)
+        else:
+            protected_shape = None
+
         src_dir, test_dir = impl_path.parent, test_path.parent
         feature_text = module.feature_path.read_text(encoding="utf-8")
         spec = GherkinFeatureBridge.parse(module.feature_path)
 
-        runner, orchestrator = self._make_iterative_runner(src_dir, test_dir)
+        # Only scaffolded modules pass the new kwargs -- every other call
+        # site (including every existing test's iterative_runner_factory
+        # fake, which takes exactly (src_dir, test_dir)) is untouched.
+        if scaffold is not None:
+            runner, orchestrator = self._make_iterative_runner(
+                src_dir, test_dir, use_patch_mode=True, protected_shape=protected_shape,
+            )
+        else:
+            runner, orchestrator = self._make_iterative_runner(src_dir, test_dir)
         try:
             result = runner.run(
                 requirement=spec.as_requirement(),

@@ -21,6 +21,8 @@ import difflib
 import re
 from dataclasses import dataclass
 
+from src.utils.ast_shape import ProtectedShape, diff_protected_shapes, extract_protected_shape
+
 _BLOCK_RE = re.compile(
     r"<<<<<<<\s*SEARCH\s*\r?\n(.*?)\r?\n=======\s*\r?\n(.*?)\r?\n>>>>>>>\s*REPLACE",
     re.DOTALL,
@@ -100,17 +102,40 @@ def apply_search_replace_blocks(
     return text
 
 
+def _protected_shape_violation(patched: str, protected_shape: ProtectedShape | None) -> str | None:
+    """None if `protected_shape` is absent or `patched` preserves every
+    symbol it records; otherwise one combined error message naming every
+    violation. A `patched` that fails to `ast.parse` is never passed here --
+    callers only call this after the existing syntax check succeeds."""
+    if protected_shape is None:
+        return None
+    violations = diff_protected_shapes(protected_shape, extract_protected_shape(patched))
+    if not violations:
+        return None
+    return "PROTECTED_SIGNATURE_CHANGED: " + "; ".join(violations)
+
+
 def apply_patch(
     original: str,
     patch_text: str,
     *,
     validate_python: bool = True,
     fuzzy_threshold: float = 0.85,
+    protected_shape: ProtectedShape | None = None,
 ) -> PatchResult:
     """Parse `patch_text` for SEARCH/REPLACE blocks, apply them to
     `original`, and (by default) reject the result immediately with
     `ast.parse` if it isn't valid Python -- before any sandbox involvement.
     Never raises; failures come back as `PatchResult(success=False, error=...)`.
+
+    `protected_shape`, when given (only for a module pre-seeded by
+    `module_contract_scaffold.scaffold_module`), additionally rejects a
+    patch that changes or removes any symbol it records -- a method/function
+    signature, a dataclass field, a class's bases/decorators, a constant, or
+    a type alias. The LLM may still fill in bodies freely and add entirely
+    new symbols; this only locks what was already there. A non-abort error
+    (same as a syntax-error rejection), so it flows into the normal
+    retry-with-feedback loop rather than aborting the cycle.
     """
     try:
         blocks = parse_search_replace_blocks(patch_text)
@@ -123,6 +148,10 @@ def apply_patch(
             ast.parse(patched)
         except SyntaxError as exc:
             return PatchResult(success=False, error=f"patched module has a syntax error: {exc}")
+
+        violation = _protected_shape_violation(patched, protected_shape)
+        if violation is not None:
+            return PatchResult(success=False, error=violation)
 
     return PatchResult(success=True, code=patched, blocks_applied=len(blocks))
 
@@ -156,6 +185,7 @@ def apply_multi_file_patch(
     *,
     validate_python: bool = True,
     fuzzy_threshold: float = 0.85,
+    protected_shapes: dict[str, ProtectedShape] | None = None,
 ) -> MultiFilePatchResult:
     """Coordinated edit across multiple files in one response (ace_enterprise#64).
 
@@ -166,6 +196,11 @@ def apply_multi_file_patch(
     considered patched -- a coordinated edit that only partially lands is
     not a success. Never raises; failures come back as
     MultiFilePatchResult(success=False, error=...).
+
+    `protected_shapes`, when given, maps a subset of `files`' filenames to
+    the `ProtectedShape` that filename's pre-seeded scaffold must keep --
+    see `apply_patch`'s own `protected_shape` parameter. A filename absent
+    from `protected_shapes` is never checked.
     """
     by_file = parse_multi_file_blocks(patch_text)
     if not by_file:
@@ -202,6 +237,12 @@ def apply_multi_file_patch(
                     return MultiFilePatchResult(
                         success=False, error=f"{filename}: patched module has a syntax error: {exc}",
                     )
+
+                violation = _protected_shape_violation(
+                    patched[filename], (protected_shapes or {}).get(filename),
+                )
+                if violation is not None:
+                    return MultiFilePatchResult(success=False, error=f"{filename}: {violation}")
 
     return MultiFilePatchResult(success=True, patched=patched, blocks_applied=total_blocks)
 

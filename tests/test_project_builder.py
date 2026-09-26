@@ -16,6 +16,7 @@ from src.cli.project_builder import (
     _run_assembly,
 )
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
+from src.contracts.module_contract_schema import ContractDocument
 from src.contracts.project_architect import ModuleSpec, ProjectPlan
 
 
@@ -861,3 +862,145 @@ class TestDefaultIterativeRunnerCGR3Wiring:
         worker = self._worker(pb, dirs)
         assert worker._team_id is None
         assert worker._project_id is None
+
+
+_SIMPLE_CONTRACT = """
+module: widget
+public_api:
+  - name: Widget
+    kind: frozen_dataclass
+    fields:
+      - name: size
+        type: int
+"""
+
+_DEPENDENT_CONTRACT = """
+module: gadget
+depends_on: [widget]
+public_api:
+  - name: Gadget
+    kind: concrete_class
+    constructor:
+      params:
+        - name: widget
+          type: Widget
+"""
+
+
+def _scaffolded_module(name, contract_yaml, feature_path, depends_on=()):
+    return ModuleSpec(
+        name, f"the {name} module", depends_on=depends_on, feature_path=feature_path,
+        contract_yaml=contract_yaml, parsed_contract=ContractDocument.from_yaml(contract_yaml),
+    )
+
+
+class TestContractScaffoldingIntegration:
+    """#70: a module whose contract_yaml validates against
+    module_contract_schema.ContractDocument gets pre-seeded with a
+    deterministic scaffold, forced patch mode, and a ProtectedShape lock --
+    every module without one is byte-for-byte unaffected (already covered by
+    TestIterativePathRouting above, which uses plain ModuleSpecs with no
+    parsed_contract and keeps passing unchanged)."""
+
+    def test_impl_file_is_pre_seeded_with_the_scaffold_before_the_first_cycle(self, dirs):
+        root, src, tests = dirs
+        feature_path = root / "widget.feature"
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, feature_path)
+        plan = _plan(module)
+        seen_impl_source = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            seen_impl_source["text"] = (src_dir / "widget.py").read_text()
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert "class Widget:" in seen_impl_source["text"]
+        assert "@dataclass(frozen=True)" in seen_impl_source["text"]
+
+    def test_scaffolded_module_forces_patch_mode_and_a_protected_shape(self, dirs):
+        root, src, tests = dirs
+        feature_path = root / "widget.feature"
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, feature_path)
+        plan = _plan(module)
+        seen_kwargs = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            seen_kwargs.update(kwargs)
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert seen_kwargs["use_patch_mode"] is True
+        assert seen_kwargs["protected_shape"] is not None
+        assert "Widget" in seen_kwargs["protected_shape"].classes
+
+    def test_non_scaffolded_module_calls_factory_with_no_new_kwargs(self, dirs):
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        calls = []
+
+        def factory(src_dir, test_dir):
+            calls.append((src_dir, test_dir))
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+        assert calls == [(src, tests)]
+
+    def test_cross_module_dependency_exports_are_resolved_into_real_imports(self, dirs):
+        root, src, tests = dirs
+        widget_feature = root / "widget.feature"
+        widget_feature.write_text(_TWO_SCENARIO_FEATURE)
+        gadget_feature = root / "gadget.feature"
+        gadget_feature.write_text(_TWO_SCENARIO_FEATURE.replace("widget", "gadget"))
+
+        widget = _scaffolded_module("widget", _SIMPLE_CONTRACT, widget_feature)
+        gadget = _scaffolded_module(
+            "gadget", _DEPENDENT_CONTRACT, gadget_feature, depends_on=("widget",),
+        )
+        plan = _plan(widget, gadget)
+        seen_impl_source = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            impl_path = src_dir / "gadget.py"
+            if impl_path.exists():
+                seen_impl_source["text"] = impl_path.read_text()
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert "from widget import Widget" in seen_impl_source["text"]
+
+    def test_dependency_that_does_not_validate_is_skipped_not_an_error(self, dirs):
+        root, src, tests = dirs
+        widget_feature = root / "widget.feature"
+        widget_feature.write_text(_TWO_SCENARIO_FEATURE)
+        gadget_feature = root / "gadget.feature"
+        gadget_feature.write_text(_TWO_SCENARIO_FEATURE.replace("widget", "gadget"))
+
+        # feature_path set (stays on the iterative path, no architect/builder
+        # involved) but no parsed_contract -- models a plain, schema-less
+        # contract_yaml that doesn't validate.
+        plain_widget = ModuleSpec("widget", "the widget module", feature_path=widget_feature)
+        gadget = _scaffolded_module(
+            "gadget", _DEPENDENT_CONTRACT, gadget_feature, depends_on=("widget",),
+        )
+        plan = _plan(plain_widget, gadget)
+        seen_impl_source = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            impl_path = src_dir / "gadget.py"
+            if impl_path.exists():
+                seen_impl_source["text"] = impl_path.read_text()
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert "from widget import" not in seen_impl_source["text"]

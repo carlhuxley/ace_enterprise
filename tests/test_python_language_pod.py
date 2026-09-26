@@ -258,7 +258,7 @@ class TestRunGreen:
 _SR_BLOCK = "<<<<<<< SEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE"
 
 
-def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2):
+def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2, protected_shape=None):
     worker = MagicMock()
     worker.llm_client = MagicMock()
     worker.llm_client.generate.return_value = {
@@ -284,6 +284,7 @@ def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2)
     return PythonLanguagePod(
         worker, tmp_path, orchestrator,
         use_patch_mode=True, patch_escalation_threshold=patch_escalation_threshold,
+        protected_shape=protected_shape,
     )
 
 
@@ -362,6 +363,77 @@ class TestRunGreenPatchMode:
         result = pod.run_green(s)  # still under threshold again -- patch mode, not fallback
         pod._worker.generate_patch.assert_called()
         assert result.error.startswith("PATCH_APPLY_FAILED:")
+
+
+class TestRunGreenProtectedShape:
+    """#70: a scaffolded module's ProtectedShape locks its signatures against
+    both the normal patch path (apply_patch's own check) AND the whole-file
+    escalation fallback -- a real end-to-end run found that a signature
+    change rejected by apply_patch could still slip through once
+    patch_escalation_threshold was reached and generate_implementation's
+    whole-file output was committed with no check at all. Both paths must
+    reject it."""
+
+    def _shape(self, source: str):
+        from src.utils.ast_shape import extract_protected_shape
+
+        return extract_protected_shape(source)
+
+    def test_patch_path_rejects_a_protected_signature_change(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        original = "class Foo:\n    def run(self, x: int) -> int:\n        return 1\n"
+        s.implementation_file.write_text(original)
+        shape = self._shape(original)
+        pod = make_patch_pod(tmp_path, protected_shape=shape)
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: (
+            "<<<<<<< SEARCH\n    def run(self, x: int) -> int:\n=======\n"
+            "    def run(self, x: str) -> int:\n>>>>>>> REPLACE"
+        )
+        result = pod.run_green(s)
+        assert not result.passed
+        assert "PROTECTED_SIGNATURE_CHANGED" in result.error
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_whole_file_escalation_fallback_also_rejects_a_protected_signature_change(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        original = "class Foo:\n    def run(self, x: int) -> int:\n        return 1\n"
+        s.implementation_file.write_text(original)
+        shape = self._shape(original)
+        pod = make_patch_pod(tmp_path, patch_escalation_threshold=1, protected_shape=shape)
+        bad_patch = "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: bad_patch
+        # 1 patch failure reaches the threshold (1) -- the next call escalates.
+        pod.run_green(s)
+        assert pod._worker.generate_patch.call_count == 1
+
+        pod._worker.generate_implementation.side_effect = (
+            lambda *a, **kw: "class Foo:\n    def run(self, x: str) -> int:\n        return 1\n"
+        )
+        result = pod.run_green(s)
+        pod._worker.generate_implementation.assert_called_once()
+        assert not result.passed
+        assert "PROTECTED_SIGNATURE_CHANGED" in result.error
+        pod._orchestrator.pulse.assert_not_called()
+
+    def test_whole_file_fallback_with_compatible_body_only_change_succeeds(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        original = "class Foo:\n    def run(self, x: int) -> int:\n        return 1\n"
+        s.implementation_file.write_text(original)
+        shape = self._shape(original)
+        pod = make_patch_pod(tmp_path, patch_escalation_threshold=1, protected_shape=shape)
+        bad_patch = "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: bad_patch
+        pod.run_green(s)  # reaches threshold
+
+        pod._worker.generate_implementation.side_effect = (
+            lambda *a, **kw: "class Foo:\n    def run(self, x: int) -> int:\n        return 42\n"
+        )
+        result = pod.run_green(s)
+        assert result.passed
+        pod._orchestrator.pulse.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
