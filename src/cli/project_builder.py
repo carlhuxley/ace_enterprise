@@ -221,7 +221,7 @@ class ProjectBuilder:
         curator instead of constructing a second, separately-scoped set.
 
         `use_patch_mode`/`protected_shape` are set only for a module
-        `_try_scaffold_module` pre-seeded (#70) -- every other module keeps
+        `_try_scaffold_module` pre-seeded -- every other module keeps
         today's whole-file-regeneration-only behavior."""
         from src.agents.incremental_planner import IncrementalPlanner
         from src.agents.iterative_tdd_runner import IterativeTDDRunner
@@ -463,7 +463,7 @@ class ProjectBuilder:
         self, module: ModuleSpec, by_name: dict[str, ModuleSpec],
     ) -> tuple[str, ProtectedShape] | None:
         """None unless `module.parsed_contract` validated against the formal
-        module contract schema (issue #70). When it did: resolve each name in
+        module contract schema. When it did: resolve each name in
         `module.depends_on` to that dependency's own `parsed_contract` (via
         `by_name`) and, for every dependency that ALSO validated, collect its
         `public_api` entry names to import for real -- every dependency is
@@ -506,7 +506,7 @@ class ProjectBuilder:
         under src_dir by the time this runs, and PythonLanguagePod resolves
         those for free (#61).
 
-        #70: when `module.parsed_contract` validates against the formal
+        When `module.parsed_contract` validates against the formal
         module contract schema, this module's implementation file is
         pre-seeded with a deterministic scaffold (type/Protocol/dataclass/
         ABC "corners", cross-module imports resolved via `by_name`) before

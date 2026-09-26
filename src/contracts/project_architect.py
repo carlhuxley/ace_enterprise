@@ -55,7 +55,7 @@ class ModuleSpec:
     contract_yaml: str | None = None
     feature_path: Path | None = None
     # Set only when contract_yaml validates against the formal
-    # module_contract_schema.ContractDocument (issue #70's scaffolding
+    # module_contract_schema.ContractDocument (contract-scaffolding
     # support) -- most existing spec dirs use a plainer, schema-less
     # contract.yml and this stays None for them, which is not an error.
     # ProjectBuilder consults this (and each dependency's own
