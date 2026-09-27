@@ -403,10 +403,16 @@ class ProjectBuilder:
         by_name: dict[str, ModuleSpec],
     ) -> ModuleOutcome:
         # #59: a companion .feature file with 2+ scenarios routes this module
-        # through IterativeTDDRunner instead of the batch path below. Modules
-        # without one (the common case -- schema/adapter/DTO shapes) are
+        # through IterativeTDDRunner instead of the batch path below. A
+        # schema-driven module (module.parsed_contract set) also always
+        # routes there, even with no .feature file, since
+        # _build_module_iterative synthesizes an equivalent one from the
+        # contract itself -- this is what actually gets it scaffolding +
+        # the ProtectedShape lock, which the batch path below has no
+        # concept of. Modules with neither (the common case for a plain,
+        # schema-less contract.yml -- schema/adapter/DTO shapes) are
         # completely unaffected by this branch.
-        if module.feature_path is not None:
+        if module.feature_path is not None or module.parsed_contract is not None:
             return self._build_module_iterative(module, impl_path, test_path, by_name)
 
         from src.contracts.module_tdd_builder import render_integration_tests
@@ -514,8 +520,18 @@ class ProjectBuilder:
         (so the scaffold gets patched, not silently regenerated whole-file),
         and a ProtectedShape lock rejects any patch that changes a scaffolded
         signature. Every other module is completely unaffected.
+
+        A schema-driven module with no hand-written `.feature` file (the
+        common case -- most spec dirs don't author one) never falls back to
+        the batch path either: `synthesize_feature_from_contract` builds an
+        equivalent `FeatureSpec` directly from the contract's own prose
+        (`semantics`/`algorithm`/`preconditions`/`raises`), so it still gets
+        the full scaffolding + lock treatment. A real `.feature` file, when
+        one exists, always wins -- hand-written scenarios are richer and
+        this never overrides them.
         """
         from src.agents.gherkin_feature_bridge import GherkinFeatureBridge
+        from src.contracts.module_contract_features import synthesize_feature_from_contract
 
         # Unlike the batch path (which unconditionally overwrites impl_path
         # with whatever it just generated), commit_to_disk only writes on a
@@ -535,8 +551,11 @@ class ProjectBuilder:
             protected_shape = None
 
         src_dir, test_dir = impl_path.parent, test_path.parent
-        feature_text = module.feature_path.read_text(encoding="utf-8")
-        spec = GherkinFeatureBridge.parse(module.feature_path)
+        if module.feature_path is not None:
+            feature_text = module.feature_path.read_text(encoding="utf-8")
+            spec = GherkinFeatureBridge.parse(module.feature_path)
+        else:
+            spec, feature_text = synthesize_feature_from_contract(module.parsed_contract)
 
         # Only scaffolded modules pass the new kwargs -- every other call
         # site (including every existing test's iterative_runner_factory

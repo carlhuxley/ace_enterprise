@@ -925,6 +925,7 @@
         "src/audit/local_client.py",
         "src/audit/schemas.py",
         "src/contracts/module_architect.py",
+        "src/contracts/module_contract_features.py",
         "src/contracts/module_contract_scaffold.py",
         "src/contracts/module_tdd_builder.py",
         "src/contracts/project_architect.py",
@@ -1040,6 +1041,15 @@
         "src/contracts/module_tdd_builder.py",
         "src/utils/llm_client.py",
         "src/utils/third_party_imports.py"
+      ]
+    },
+    "src/contracts/module_contract_features.py": {
+      "provides": [
+        "synthesize_feature_from_contract"
+      ],
+      "depends_on": [
+        "src/agents/gherkin_feature_bridge.py",
+        "src/contracts/module_contract_schema.py"
       ]
     },
     "src/contracts/module_contract_scaffold.py": {

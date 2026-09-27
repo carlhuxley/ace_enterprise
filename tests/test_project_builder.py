@@ -1004,3 +1004,76 @@ class TestContractScaffoldingIntegration:
         pb.build(plan, root, src, tests)
 
         assert "from widget import" not in seen_impl_source["text"]
+
+
+class TestScaffoldedModuleWithNoFeatureFile:
+    """Fixing #70: a schema-driven module with NO hand-written .feature
+    file must still route to the scaffolded iterative path (via
+    module_contract_features.synthesize_feature_from_contract), never fall
+    back to the batch path (ModuleTDDBuilder), which has no scaffolding/
+    lock concept at all."""
+
+    def test_routes_to_iterative_not_batch(self, dirs):
+        root, src, tests = dirs
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, None)
+        plan = _plan(module)
+
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t, **kw: (FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()),
+            architect_factory=lambda: (_ for _ in ()).throw(AssertionError("batch path must not be used")),
+            builder_factory=lambda: (_ for _ in ()).throw(AssertionError("batch path must not be used")),
+        )
+        result = pb.build(plan, root, src, tests)
+        assert result.outcomes[0].status is ModuleStatus.BUILT
+
+    def test_scaffold_and_patch_mode_and_protected_shape_still_apply(self, dirs):
+        root, src, tests = dirs
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, None)
+        plan = _plan(module)
+        seen = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            seen["impl"] = (src_dir / "widget.py").read_text()
+            seen["kwargs"] = kwargs
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        assert "class Widget:" in seen["impl"]
+        assert seen["kwargs"]["use_patch_mode"] is True
+        assert seen["kwargs"]["protected_shape"] is not None
+
+    def test_synthesized_scenarios_are_passed_to_the_runner(self, dirs):
+        root, src, tests = dirs
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, None)
+        plan = _plan(module)
+        runner = FakeIterativeRunner(result=_iter_result())
+
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t, **kw: (runner, FakeOrchestrator()),
+        )
+        pb.build(plan, root, src, tests)
+
+        call = runner.run_calls[0]
+        assert len(call["gherkin_scenarios"]) >= 1
+        assert "widget" in call["gherkin_context"]
+
+    def test_a_real_feature_file_still_wins_over_synthesis(self, dirs):
+        root, src, tests = dirs
+        feature_path = root / "widget.feature"
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, feature_path)
+        plan = _plan(module)
+        runner = FakeIterativeRunner(result=_iter_result())
+
+        pb = ProjectBuilder(
+            llm_client=object(),
+            iterative_runner_factory=lambda s, t, **kw: (runner, FakeOrchestrator()),
+        )
+        pb.build(plan, root, src, tests)
+
+        call = runner.run_calls[0]
+        assert feature_path.read_text() in call["gherkin_context"]
