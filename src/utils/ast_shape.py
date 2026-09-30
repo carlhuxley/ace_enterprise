@@ -174,10 +174,15 @@ def diff_protected_shapes(before: ProtectedShape, after: ProtectedShape) -> list
             if after_method is None:
                 violations.append(f"class {name!r}: method {method_name!r} was removed")
             elif after_method != before_method:
+                property_note = (
+                    f" (property={before_method.is_property} -> property={after_method.is_property})"
+                    if before_method.is_property != after_method.is_property
+                    else ""
+                )
                 violations.append(
                     f"class {name!r}: method {method_name!r} signature changed from "
                     f"({before_method.args}) -> {before_method.returns} to "
-                    f"({after_method.args}) -> {after_method.returns}"
+                    f"({after_method.args}) -> {after_method.returns}{property_note}"
                 )
 
     for name, before_fn in before.functions.items():

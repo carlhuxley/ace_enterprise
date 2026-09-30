@@ -151,3 +151,23 @@ class TestRedundancyPreCheck:
 
         assert len(pod.red_calls) == 0
         assert result.cycles[0].success is True
+
+
+class TestEscalationForwarding:
+    """Repair-ceiling escalation (#40, extended to this path): the two new
+    constructor params must reach the TDDCycleRunner instances this class
+    builds internally via self._runner_kwargs."""
+
+    def test_defaults_to_no_escalation(self):
+        runner = IterativeTDDRunner(pod=_StubPod(), planner=_StubPlanner([]))
+        assert runner._runner_kwargs["escalation_llm_client"] is None
+        assert runner._runner_kwargs["escalation_model_id"] is None
+
+    def test_forwards_escalation_params_into_runner_kwargs(self):
+        sentinel_client = object()
+        runner = IterativeTDDRunner(
+            pod=_StubPod(), planner=_StubPlanner([]),
+            escalation_llm_client=sentinel_client, escalation_model_id="stronger-model",
+        )
+        assert runner._runner_kwargs["escalation_llm_client"] is sentinel_client
+        assert runner._runner_kwargs["escalation_model_id"] == "stronger-model"

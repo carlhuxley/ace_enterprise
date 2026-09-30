@@ -1049,11 +1049,13 @@
       ],
       "depends_on": [
         "src/agents/gherkin_feature_bridge.py",
+        "src/contracts/module_contract_scaffold.py",
         "src/contracts/module_contract_schema.py"
       ]
     },
     "src/contracts/module_contract_scaffold.py": {
       "provides": [
+        "fixture_factory_name",
         "scaffold_module"
       ],
       "depends_on": [

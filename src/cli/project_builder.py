@@ -253,6 +253,7 @@ class ProjectBuilder:
         pod = PythonLanguagePod(
             worker, self._project_root, orchestrator,
             use_patch_mode=use_patch_mode, protected_shape=protected_shape,
+            escalation_llm_client=self._escalation_llm,
         )
         runner = IterativeTDDRunner(
             pod=pod,
@@ -264,6 +265,8 @@ class ProjectBuilder:
             redundancy_checker=RedundancyPreChecker(),
             model_id=f"{self._worker_llm.provider}/{self._worker_llm.model}",
             task_type="python",
+            escalation_llm_client=self._escalation_llm,
+            escalation_model_id=self._escalation_model_id,
         )
         return runner, orchestrator
 

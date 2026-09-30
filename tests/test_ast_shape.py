@@ -188,3 +188,16 @@ class TestImportProtection:
         after = extract_protected_shape("from some_other_module import DiscoveryTree\n")
         violations = diff_protected_shapes(before, after)
         assert any("DiscoveryTree" in v and "changed from module" in v for v in violations)
+
+
+class TestPropertyDiffMessage:
+    def test_property_change_is_named_explicitly_in_the_violation_message(self):
+        """A method<->property flip changes ProtectedShape equality but
+        args/returns can print identically -- the message must say what
+        actually differs, or it's useless as retry feedback."""
+        before = extract_protected_shape("class Thing:\n    def value(self) -> int: ...\n")
+        after = extract_protected_shape(
+            "class Thing:\n    @property\n    def value(self) -> int: ...\n"
+        )
+        violations = diff_protected_shapes(before, after)
+        assert any("property=False -> property=True" in v for v in violations)

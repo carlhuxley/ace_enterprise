@@ -864,6 +864,37 @@ class TestDefaultIterativeRunnerCGR3Wiring:
         assert worker._project_id is None
 
 
+class TestDefaultIterativeRunnerEscalationWiring:
+    """Repair-ceiling escalation (#40, extended to this path): ProjectBuilder
+    already accepts/stores escalation_llm/escalation_model_id (used today
+    only by _default_builder, the batch path) -- _default_iterative_runner
+    must thread the same fields into both the PythonLanguagePod and the
+    IterativeTDDRunner it constructs."""
+
+    def test_no_escalation_configured_by_default(self, dirs):
+        _, src, tests = dirs
+        pb = ProjectBuilder(llm_client=MagicMock())
+        pb._project_root = dirs[0]
+        runner, _orchestrator = pb._default_iterative_runner(src, tests)
+
+        assert runner._pod._escalation_llm_client is None
+        assert runner._runner_kwargs["escalation_llm_client"] is None
+        assert runner._runner_kwargs["escalation_model_id"] is None
+
+    def test_escalation_llm_reaches_the_pod_and_the_runner(self, dirs):
+        _, src, tests = dirs
+        escalation_llm = MagicMock()
+        pb = ProjectBuilder(
+            llm_client=MagicMock(), escalation_llm=escalation_llm, escalation_model_id="stronger-model",
+        )
+        pb._project_root = dirs[0]
+        runner, _orchestrator = pb._default_iterative_runner(src, tests)
+
+        assert runner._pod._escalation_llm_client is escalation_llm
+        assert runner._runner_kwargs["escalation_llm_client"] is escalation_llm
+        assert runner._runner_kwargs["escalation_model_id"] == "stronger-model"
+
+
 _SIMPLE_CONTRACT = """
 module: widget
 public_api:

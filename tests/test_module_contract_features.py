@@ -67,7 +67,7 @@ class TestDataclassScenarios:
         assert len(feature.scenarios) == 1
         scenario = feature.scenarios[0]
         assert scenario.name == "Node enforces its invariants"
-        assert any("score: float | None" in s for s in scenario.steps)
+        assert any("built via make_valid_node(**overrides)" in s for s in scenario.steps)
         assert any("ValueError is raised when score is negative" in s for s in scenario.steps)
 
     def test_dataclass_with_its_own_methods_gets_one_scenario_per_method(self):
@@ -87,7 +87,7 @@ class TestDataclassScenarios:
         assert len(feature.scenarios) == 1
         scenario = feature.scenarios[0]
         assert scenario.name == "Tree.attach"
-        assert any("root_id: str" in s for s in scenario.steps)
+        assert any("built via make_valid_tree(**overrides)" in s for s in scenario.steps)
         assert any("Tree.attach returns a NEW Tree instance" in s for s in scenario.steps)
 
 
@@ -145,6 +145,50 @@ class TestConcreteClassScenarios:
         )
         feature, _ = synthesize_feature_from_contract(doc)
         assert any("Widget.run behaves per its contract" in s for s in feature.scenarios[0].steps)
+
+
+class TestFixtureFactoryAwareness:
+    def test_dataclass_scenario_step_references_the_factory_not_raw_fields(self):
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: value\n        type: int\n"
+            "    methods:\n      - name: doubled\n        signature: \"doubled(self) -> int\"\n"
+        )
+        feature, _ = synthesize_feature_from_contract(doc)
+        steps = feature.scenarios[0].steps
+        assert any("built via make_valid_node(**overrides)" in s for s in steps)
+        assert not any("value: int" in s for s in steps)
+
+    def test_concrete_class_scenario_step_is_unaffected_by_factories(self):
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: Widget\n    kind: concrete_class\n"
+            "    constructor:\n      params:\n        - name: size\n          type: int\n"
+        )
+        feature, _ = synthesize_feature_from_contract(doc)
+        steps = feature.scenarios[0].steps
+        assert any("constructed with size: int" in s for s in steps)
+        assert not any("make_valid" in s for s in steps)
+
+    def test_context_lists_available_fixture_factories(self):
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: value\n        type: int\n"
+            "  - name: Empty\n    kind: frozen_dataclass\n"
+        )
+        _, context = synthesize_feature_from_contract(doc)
+        assert "Test fixture factories available: make_valid_node(**overrides)" in context
+        assert "make_valid_empty" not in context
+
+    def test_context_omits_fixture_factory_line_when_none_exist(self):
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: greet\n    kind: function\n    signature: \"(name: str) -> str\"\n"
+        )
+        _, context = synthesize_feature_from_contract(doc)
+        assert "fixture factories" not in context
 
 
 class TestFunctionScenarios:

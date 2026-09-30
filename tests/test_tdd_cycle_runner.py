@@ -512,6 +512,70 @@ def test_learning_runs_on_stagnant_green_failure(tmp_path):
     assert len(result.learned_bullets) == 1
 
 
+class ProtectedShapePod(ControlledPod):
+    """Pod double reporting a fixed set of contract-protected symbol names,
+    like PythonLanguagePod.protected_symbols() does for a scaffolded
+    module -- exercises the causal-invariant-hierarchy clause _learn()
+    prepends to what the Reflector sees."""
+
+    def __init__(self, symbols, **kw):
+        super().__init__(**kw)
+        self._symbols = symbols
+
+    def protected_symbols(self):
+        return list(self._symbols)
+
+
+def test_learn_feeds_causal_invariant_clause_when_pod_reports_protected_symbols(tmp_path):
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ProtectedShapePod(["Node", "WorkspaceSnapshot"], green_pass_on=999),
+        max_green_attempts=1,
+        reflector=reflector,
+        curator=curator,
+    )
+    runner.run(_spec(tmp_path))
+
+    assert len(reflector.calls) == 1
+    feedback = reflector.calls[0][2].feedback
+    assert "IMMUTABLE CONTRACT CONSTRAINT" in feedback
+    assert "Node, WorkspaceSnapshot" in feedback
+    assert "NEVER a reason to add defaults" in feedback
+    assert "GREEN phase failed" in feedback  # original feedback text preserved after the clause
+
+
+def test_learn_omits_causal_invariant_clause_for_a_plain_pod(tmp_path):
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ControlledPod(green_pass_on=999),
+        max_green_attempts=1,
+        reflector=reflector,
+        curator=curator,
+    )
+    runner.run(_spec(tmp_path))
+
+    assert len(reflector.calls) == 1
+    feedback = reflector.calls[0][2].feedback
+    assert feedback is None or "IMMUTABLE CONTRACT CONSTRAINT" not in feedback
+
+
+def test_learn_omits_causal_invariant_clause_when_protected_symbols_is_empty(tmp_path):
+    reflector = _SpyReflector()
+    curator = _SpyCurator()
+    runner = TDDCycleRunner(
+        ProtectedShapePod([], green_pass_on=999),
+        max_green_attempts=1,
+        reflector=reflector,
+        curator=curator,
+    )
+    runner.run(_spec(tmp_path))
+
+    feedback = reflector.calls[0][2].feedback
+    assert feedback is None or "IMMUTABLE CONTRACT CONSTRAINT" not in feedback
+
+
 def test_learning_skipped_on_green_abort(tmp_path):
     """A security/policy abort is not stagnation -- it's an immediate stop,
     not a genuinely exhausted attempt, so it must not produce bullets."""
@@ -915,3 +979,116 @@ def test_reflection_write_failure_does_not_lose_returned_bullets(tmp_path):
     result = runner.run(_spec(tmp_path))
     assert len(result.learned_bullets) == 1
     assert result.learned_bullets[0].content == "x"
+
+
+# ---------------------------------------------------------------------------
+# Repair-ceiling escalation (#40, extended from the batch path/ModuleTDDBuilder
+# to here): one extra GREEN attempt against a stronger model after the normal
+# retry budget is exhausted, only when escalation_llm_client is configured.
+# ---------------------------------------------------------------------------
+
+class EscalatablePod(ControlledPod):
+    """GREEN always fails normally, but passes when escalate=True -- models a
+    stronger model succeeding where the configured one couldn't."""
+
+    def __init__(self, escalated_passes: bool = True, **kw):
+        super().__init__(green_pass_on=999, **kw)
+        self._escalated_passes = escalated_passes
+        self.escalated_specs: list[PodSpec] = []
+
+    def run_green(self, spec: PodSpec, *, escalate: bool = False) -> PhaseResult:
+        self.green_specs.append(spec)
+        if escalate:
+            self.escalated_specs.append(spec)
+            if self._escalated_passes:
+                return PhaseResult(passed=True, output="1 passed", error=None)
+            return PhaseResult(passed=False, output="AssertionError: still wrong", error=None)
+        return PhaseResult(passed=False, output="AssertionError: expected 3 got 0", error=None)
+
+
+def test_escalation_not_attempted_when_not_configured(tmp_path):
+    pod = EscalatablePod()
+    runner = TDDCycleRunner(pod, max_green_attempts=2)
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.green_attempts == 2
+    assert pod.escalated_specs == []
+
+
+def test_escalation_triggers_after_normal_retries_exhausted_and_succeeds(tmp_path):
+    pod = EscalatablePod()
+    runner = TDDCycleRunner(
+        pod, max_green_attempts=2,
+        escalation_llm_client=object(), escalation_model_id="stronger-model",
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is True
+    assert result.green_attempts == 3  # 2 normal + 1 escalated
+    assert len(pod.escalated_specs) == 1
+
+
+def test_escalation_failure_still_reports_failure(tmp_path):
+    pod = EscalatablePod(escalated_passes=False)
+    runner = TDDCycleRunner(
+        pod, max_green_attempts=2,
+        escalation_llm_client=object(), escalation_model_id="stronger-model",
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert result.green_attempts == 3
+    assert len(pod.escalated_specs) == 1
+
+
+def test_escalation_never_attempted_on_abort(tmp_path):
+    pod = AbortingGreenPod()
+    runner = TDDCycleRunner(
+        pod, max_green_attempts=3,
+        escalation_llm_client=object(), escalation_model_id="stronger-model",
+    )
+    result = runner.run(_spec(tmp_path))
+
+    assert result.success is False
+    assert len(pod.green_specs) == 1  # no normal retries, no escalation attempt
+
+
+def test_escalated_attempt_receives_the_last_failures_error_output(tmp_path):
+    pod = EscalatablePod()
+    runner = TDDCycleRunner(
+        pod, max_green_attempts=2,
+        escalation_llm_client=object(), escalation_model_id="stronger-model",
+    )
+    runner.run(_spec(tmp_path))
+
+    assert "AssertionError: expected 3 got 0" in pod.escalated_specs[0].error_output
+
+
+def test_escalation_emits_audit_event_with_from_and_to_model(tmp_path):
+    audit = _SpyAuditClient()
+    pod = EscalatablePod()
+    runner = TDDCycleRunner(
+        pod, max_green_attempts=2, audit_client=audit,
+        model_id="base-model", escalation_llm_client=object(), escalation_model_id="stronger-model",
+    )
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    escalation_events = [e for e in audit.events if e["event_type"] == AuditEventType.ESCALATION_TRIGGERED]
+    assert len(escalation_events) == 1
+    event = escalation_events[0]
+    assert event["actor_id"] == "stronger-model"
+    assert event["payload"]["from_model"] == "base-model"
+    assert event["payload"]["to_model"] == "stronger-model"
+    assert event["payload"]["success"] is True
+
+
+def test_no_escalation_audit_event_when_not_configured(tmp_path):
+    audit = _SpyAuditClient()
+    runner = TDDCycleRunner(EscalatablePod(), max_green_attempts=2, audit_client=audit)
+    runner.run(_spec(tmp_path))
+
+    from src.audit.schemas import AuditEventType
+    types = [e["event_type"] for e in audit.events]
+    assert AuditEventType.ESCALATION_TRIGGERED not in types

@@ -258,7 +258,10 @@ class TestRunGreen:
 _SR_BLOCK = "<<<<<<< SEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE"
 
 
-def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2, protected_shape=None):
+def make_patch_pod(
+    tmp_path, *, pulse_result=None, patch_escalation_threshold=2, protected_shape=None,
+    escalation_llm_client=None,
+):
     worker = MagicMock()
     worker.llm_client = MagicMock()
     worker.llm_client.generate.return_value = {
@@ -285,6 +288,7 @@ def make_patch_pod(tmp_path, *, pulse_result=None, patch_escalation_threshold=2,
         worker, tmp_path, orchestrator,
         use_patch_mode=True, patch_escalation_threshold=patch_escalation_threshold,
         protected_shape=protected_shape,
+        escalation_llm_client=escalation_llm_client,
     )
 
 
@@ -434,6 +438,164 @@ class TestRunGreenProtectedShape:
         result = pod.run_green(s)
         assert result.passed
         pod._orchestrator.pulse.assert_called_once()
+
+
+class TestProtectedSymbols:
+    """protected_symbols() is how TDDCycleRunner._learn() tells the
+    Reflector a schema-driven module's types are contract-fixed, not
+    ordinary negotiable code -- see the causal-invariant-hierarchy fix."""
+
+    def _shape(self, source: str):
+        from src.utils.ast_shape import extract_protected_shape
+
+        return extract_protected_shape(source)
+
+    def test_none_when_pod_is_not_schema_driven(self, tmp_path):
+        pod = make_pod(tmp_path)
+        assert pod.protected_symbols() is None
+
+    def test_sorted_class_and_function_names_when_scaffolded(self, tmp_path):
+        shape = self._shape(
+            "def make_valid_node():\n    pass\n\n\nclass Node:\n    pass\n\n\nclass Alpha:\n    pass\n"
+        )
+        pod = make_patch_pod(tmp_path, protected_shape=shape)
+        assert pod.protected_symbols() == ["Alpha", "Node", "make_valid_node"]
+
+
+class TestRunGreenEscalation:
+    """Repair-ceiling escalation (#40, extended to this path): run_green's
+    escalate=True kwarg temporarily swaps in a stronger client for exactly
+    one call, keeps token accounting working for it, and gives that call a
+    clean patch-failure count instead of forcing it straight to whole-file."""
+
+    def test_escalate_swaps_in_the_escalation_client_for_one_call(self, tmp_path):
+        escalation_client = MagicMock()
+        escalation_client.generate.return_value = {
+            "content": "x", "prompt_tokens": 1, "completion_tokens": 1,
+            "tokens_used": 1, "latency_ms": 1, "model": "stronger-model",
+        }
+        # _intercept_tokens overwrites .generate with a plain wrapper function
+        # once run_green(escalate=True) swaps this client in -- capture the
+        # underlying mock now so we can assert on it afterward.
+        underlying_generate = escalation_client.generate
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path, escalation_llm_client=escalation_client)
+
+        pod.run_green(s, escalate=True)
+
+        underlying_generate.assert_called_once_with("patch prompt")
+
+    def test_original_client_is_restored_after_an_escalated_call(self, tmp_path):
+        # Built directly (not via make_patch_pod) so we retain a reference to
+        # the ORIGINAL client's raw, unwrapped .generate mock -- __init__'s
+        # own _intercept_tokens() call immediately replaces the instance's
+        # .generate attribute with a plain wrapper function, so that
+        # reference must be captured before construction.
+        worker = MagicMock()
+        worker.llm_client = MagicMock()
+        original_raw_generate = worker.llm_client.generate
+        original_raw_generate.return_value = {
+            "content": "x", "prompt_tokens": 10, "completion_tokens": 0,
+            "tokens_used": 10, "latency_ms": 5, "model": "gpt-4o",
+            "actual_model": "original-actual",
+        }
+
+        def _generate_patch(*args, **kwargs):
+            worker.llm_client.generate("patch prompt")
+            return _SR_BLOCK
+
+        worker.generate_patch.side_effect = _generate_patch
+
+        escalation_client = MagicMock()
+        escalation_client.generate.return_value = {
+            "content": "x", "prompt_tokens": 1, "completion_tokens": 0,
+            "tokens_used": 1, "latency_ms": 1, "model": "gpt-4o",
+            "actual_model": "escalation-actual",
+        }
+
+        orchestrator = MagicMock()
+        orchestrator.pulse.return_value = PhaseResult(passed=True, output="1 passed", error=None)
+        pod = PythonLanguagePod(
+            worker, tmp_path, orchestrator,
+            use_patch_mode=True, escalation_llm_client=escalation_client,
+        )
+        original_client = worker.llm_client
+
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+
+        pod.run_green(s, escalate=True)
+        # The client attribute itself is restored...
+        assert pod._worker.llm_client is original_client
+        # ...and functionally: the escalation client's response was the one
+        # actually used for that call (_actual_model tracks whichever
+        # client's .generate last ran).
+        assert pod._actual_model == "escalation-actual"
+
+        # A subsequent normal call must go through the original client again
+        # -- write_text so the second patch has a matching SEARCH target
+        # after the first call's REPLACE landed.
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod.run_green(s)
+        assert pod._actual_model == "original-actual"
+        assert original_raw_generate.call_count == 1  # only this call -- not the escalated one
+
+    def test_escalate_without_a_configured_client_behaves_like_a_normal_call(self, tmp_path):
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path)  # no escalation_llm_client
+        original_client = pod._worker.llm_client
+
+        result = pod.run_green(s, escalate=True)
+
+        assert pod._worker.llm_client is original_client
+        assert result.passed
+
+    def test_escalated_call_still_tracks_tokens(self, tmp_path):
+        escalation_client = MagicMock()
+        escalation_client.generate.return_value = {
+            "content": "x", "prompt_tokens": 777, "completion_tokens": 3,
+            "tokens_used": 777, "latency_ms": 1, "model": "stronger-model",
+        }
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(tmp_path, escalation_llm_client=escalation_client)
+
+        pod.run_green(s, escalate=True)
+
+        usage = pod.token_usage()
+        assert usage[-1].input_tokens == 777
+        assert usage[-1].output_tokens == 3
+
+    def test_escalate_resets_this_files_patch_failure_count(self, tmp_path):
+        escalation_client = MagicMock()
+        escalation_client.generate.return_value = {
+            "content": "x", "prompt_tokens": 1, "completion_tokens": 0,
+            "tokens_used": 1, "latency_ms": 1, "model": "stronger-model",
+        }
+        s = spec(tmp_path)
+        s.implementation_file.parent.mkdir(parents=True, exist_ok=True)
+        s.implementation_file.write_text("def foo():\n    return 1\n")
+        pod = make_patch_pod(
+            tmp_path, patch_escalation_threshold=1, escalation_llm_client=escalation_client,
+        )
+        bad_patch = "<<<<<<< SEARCH\nclass TotallyUnrelated:\n    pass\n    pass\n=======\nx\n>>>>>>> REPLACE"
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: bad_patch
+        pod.run_green(s)  # 1 failure reaches the threshold (1)
+        file_key = str(s.implementation_file)
+        assert pod._patch_failure_counts[file_key] == 1
+
+        # Without escalation, the next call would go whole-file (threshold
+        # reached). escalate=True must reset the count so this call still
+        # gets a real shot at a patch.
+        pod._worker.generate_patch.side_effect = lambda *a, **kw: _SR_BLOCK
+        pod.run_green(s, escalate=True)
+        pod._worker.generate_implementation.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

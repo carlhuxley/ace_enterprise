@@ -27,6 +27,7 @@ scope for this module entirely.
 from __future__ import annotations
 
 from src.agents.gherkin_feature_bridge import FeatureSpec, ScenarioSpec
+from src.contracts.module_contract_scaffold import fixture_factory_name
 from src.contracts.module_contract_schema import ApiEntry, ContractDocument, RaisesSpec
 
 _NO_SCENARIO_KINDS = frozenset({"constant", "type_alias", "protocol", "abc"})
@@ -73,10 +74,17 @@ def _callable_steps(
 
 
 def _constructor_step(entry: ApiEntry) -> str:
-    """Describes how to build one instance of `entry` -- from its
+    """Describes how to build one instance of `entry` -- via its scaffolded
+    `make_valid_<name>(**overrides)` fixture factory when one exists (every
+    dataclass/pydantic-model entry with fields, once `module_contract_scaffold`
+    has run), so RED writes tests against the factory instead of
+    constructing a many-field object inline; otherwise from its
     `constructor.params` (concrete_class/abc) or, when there is no
     constructor, its `fields` (frozen/mutable dataclass -- these are
     constructed by field, not a separate constructor spec)."""
+    factory = fixture_factory_name(entry)
+    if factory:
+        return f"Given a {entry.name} built via {factory}(**overrides)"
     if entry.constructor and entry.constructor.params:
         params = ", ".join(f"{p.name}: {p.type}" for p in entry.constructor.params)
         return f"Given a {entry.name} constructed with {params}"
@@ -184,6 +192,14 @@ def synthesize_feature_from_contract(doc: ContractDocument) -> tuple[FeatureSpec
                 name=f"{doc.module} imports cleanly",
                 steps=[f"Then the {doc.module} module imports without error"],
             )
+        )
+
+    factory_names = [n for n in (fixture_factory_name(e) for e in doc.public_api) if n]
+    if factory_names:
+        context_parts.append(
+            "Test fixture factories available: "
+            + ", ".join(f"{name}(**overrides)" for name in factory_names)
+            + " -- prefer these over constructing instances field-by-field."
         )
 
     feature = FeatureSpec(title=doc.description or doc.module, scenarios=scenarios)

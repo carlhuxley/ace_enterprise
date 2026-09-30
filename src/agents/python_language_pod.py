@@ -44,6 +44,7 @@ class PythonLanguagePod:
         use_patch_mode: bool = False,
         patch_escalation_threshold: int = 2,
         protected_shape: ProtectedShape | None = None,
+        escalation_llm_client=None,
     ) -> None:
         self._worker = worker_agent
         self._orchestrator = orchestrator
@@ -70,6 +71,12 @@ class PythonLanguagePod:
         # own protected_shape parameter). None everywhere else, unchanged
         # behavior.
         self._protected_shape = protected_shape
+        # Repair-ceiling escalation (#40), extended to this path: set only
+        # when a caller configured a stronger fallback model. TDDCycleRunner
+        # threads escalate=True into run_green exactly once, after its own
+        # normal GREEN retry budget is exhausted -- mirrors
+        # ModuleTDDBuilder's own one-shot escalation on the batch path.
+        self._escalation_llm_client = escalation_llm_client
         self._intercept_tokens()
 
     def run_red(self, spec: PodSpec) -> PhaseResult:
@@ -104,7 +111,37 @@ class PythonLanguagePod:
         self._record_usage(spec.cycle_number)
         return result
 
-    def run_green(self, spec: PodSpec) -> PhaseResult:
+    def run_green(self, spec: PodSpec, *, escalate: bool = False) -> PhaseResult:
+        # Repair-ceiling escalation (#40): exactly one call per cycle sets
+        # escalate=True, always after the normal GREEN retry budget is
+        # already exhausted (TDDCycleRunner's own concern, not this
+        # method's). Swap in the stronger client for just this call, and
+        # re-wrap token accounting for it -- _intercept_tokens monkey-patches
+        # .generate on whatever self._worker.llm_client currently *is*, so
+        # the new client needs its own wrap; the original's wrap is untouched
+        # and needs no re-wrap once restored.
+        original_llm_client = None
+        if escalate and self._escalation_llm_client is not None:
+            original_llm_client = self._worker.llm_client
+            self._worker.llm_client = self._escalation_llm_client
+            self._intercept_tokens()
+            # By the time escalation fires, this file's patch-failure count
+            # has already reached patch_escalation_threshold from the
+            # exhausted normal attempts -- left alone, that forces
+            # use_patch below to False and sends the escalation model
+            # straight into whole-file regeneration on its one try. Reset
+            # so it gets a normal shot at a surgical patch first, like any
+            # other file. Deliberately not restored in `finally` below --
+            # it reflects this file's real, current state.
+            self._patch_failure_counts[str(spec.implementation_file)] = 0
+
+        try:
+            return self._run_green_impl(spec)
+        finally:
+            if original_llm_client is not None:
+                self._worker.llm_client = original_llm_client
+
+    def _run_green_impl(self, spec: PodSpec) -> PhaseResult:
         test_code = spec.test_file.read_text() if spec.test_file.exists() else ""
         # The impl file holds the last committed (passing) implementation — from
         # earlier scenarios in a Gherkin-driven run. Hand it to GREEN so it
@@ -347,6 +384,18 @@ class PythonLanguagePod:
 
     def token_usage(self) -> list[TokenUsage]:
         return list(self._token_log)
+
+    def protected_symbols(self) -> list[str] | None:
+        """Sorted names of every protected top-level class/function from
+        `module_contract_scaffold`, or None if this file isn't schema-driven
+        (`self._protected_shape` unset). Read defensively by
+        `TDDCycleRunner._learn()` (via `getattr(pod, "protected_symbols",
+        lambda: None)()` -- not every `LanguagePod` implements this) to tell
+        the Reflector these types are fixed by contract, not ordinary
+        negotiable code."""
+        if self._protected_shape is None:
+            return None
+        return sorted({*self._protected_shape.classes, *self._protected_shape.functions})
 
     def _intercept_tokens(self) -> None:
         original = self._worker.llm_client.generate

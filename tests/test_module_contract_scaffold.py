@@ -139,6 +139,124 @@ class TestCrossModuleImports:
         assert "empty_dep" not in src
 
 
+class TestFixtureFactories:
+    def test_dataclass_with_fields_gets_a_fixture_factory(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Point\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: x\n        type: int\n      - name: y\n        type: str\n"
+        )
+        ast.parse(src)
+        assert "def make_valid_point(**overrides) -> Point:" in src
+        assert "x=0," in src
+        assert "y=''," in src
+        assert "defaults.update(overrides)" in src
+        assert "return Point(**defaults)" in src
+
+    def test_dataclass_with_no_fields_gets_no_factory(self):
+        src = _scaffold("module: m\npublic_api:\n  - name: Empty\n    kind: frozen_dataclass\n")
+        assert "make_valid_empty" not in src
+
+    def test_concrete_class_gets_no_factory(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Widget\n    kind: concrete_class\n"
+            "    constructor:\n      params:\n        - name: size\n          type: int\n"
+        )
+        assert "make_valid_widget" not in src
+
+    def test_contract_declared_default_is_reused_verbatim(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Config\n    kind: mutable_dataclass\n"
+            "    fields:\n      - name: retries\n        type: int\n        default: \"3\"\n"
+        )
+        assert "retries=3," in src
+
+    def test_optional_field_defaults_to_none(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Thing\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: score\n        type: \"float | None\"\n"
+        )
+        assert "score=None," in src
+
+    def test_literal_field_uses_first_element(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Task\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: status\n        type: 'Literal[\"pending\", \"done\"]'\n"
+        )
+        ast.parse(src)
+        assert 'status="pending",' in src
+
+    def test_dict_and_list_prefixed_types_default_to_empty_collections(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Thing\n    kind: frozen_dataclass\n"
+            "    fields:\n"
+            "      - name: tags\n        type: \"list[str]\"\n"
+            "      - name: meta\n        type: \"dict[str, Any]\"\n"
+        )
+        assert "tags=[]," in src
+        assert "meta={}," in src
+
+    def test_required_nested_entry_reference_calls_its_factory(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Snapshot\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: n\n        type: int\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: snapshot\n        type: Snapshot\n"
+        )
+        ast.parse(src)
+        assert "snapshot=make_valid_snapshot()," in src
+
+    def test_self_referential_required_field_falls_back_to_none_with_comment(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n"
+            "      - name: value\n        type: int\n"
+            "      - name: current\n        type: Node\n"
+        )
+        ast.parse(src)
+        assert "current=None,  # override required: Node" in src
+        assert "make_valid_node()," not in src.split("def make_valid_node")[1]
+
+    def test_mutually_recursive_required_fields_fall_back_to_none(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: A\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: b\n        type: B\n"
+            "  - name: B\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: a\n        type: A\n"
+        )
+        ast.parse(src)
+        assert "b=None,  # override required: B" in src
+        assert "a=None,  # override required: A" in src
+
+    def test_optional_self_reference_resolves_to_none_not_flagged_as_cycle(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n"
+            "      - name: value\n        type: int\n"
+            "      - name: parent\n        type: \"Node | None\"\n"
+        )
+        ast.parse(src)
+        assert "parent=None," in src
+        assert "override required" not in src
+
+    def test_unrecognized_type_falls_back_to_none_with_comment(self):
+        src = _scaffold(
+            "module: m\npublic_api:\n"
+            "  - name: Thing\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: handler\n        type: SomeExternalType\n"
+        )
+        assert "handler=None,  # override required: SomeExternalType" in src
+
+
 class TestFullContractRoundTrip:
     def test_every_entry_kind_together_parses_as_valid_python(self):
         src = _scaffold(

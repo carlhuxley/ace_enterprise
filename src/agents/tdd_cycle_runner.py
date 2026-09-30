@@ -76,6 +76,11 @@ class TDDCycleRunner:
                            result (test correctly fails with no impl yet),
                            which is never retried. Security/policy aborts are
                            never retried either.
+      escalation_llm_client, escalation_model_id — repair-ceiling escalation
+                           (#40, extended from the batch path/ModuleTDDBuilder
+                           to here): one extra GREEN attempt against this
+                           stronger model after max_green_attempts is
+                           exhausted. None (the default) disables it entirely.
     """
 
     def __init__(
@@ -91,6 +96,8 @@ class TDDCycleRunner:
         team_id: str | None = None,
         model_id: str | None = None,
         task_type: str | None = None,
+        escalation_llm_client=None,
+        escalation_model_id: str | None = None,
     ) -> None:
         self._pod = pod
         self._max_green_attempts = max_green_attempts
@@ -100,6 +107,10 @@ class TDDCycleRunner:
         self._curator = curator
         self._audit_client = audit_client
         self._max_red_attempts = max_red_attempts
+        # Repair-ceiling escalation (#40): None (the default) disables it
+        # entirely, identical to today's behavior.
+        self._escalation_llm_client = escalation_llm_client
+        self._escalation_model_id = escalation_model_id
         # Stamped into every bullet Curator writes (see DeltaBullet.team_id /
         # Curator._parse_synthesis) so ContextScorer.score_team()'s RANK
         # dimension has real data to score against instead of always hitting
@@ -170,6 +181,44 @@ class TDDCycleRunner:
             if green_result.passed or _is_abort(green_result):
                 break
             error_feedback = green_result.output or green_result.error or ""
+
+        # Repair-ceiling escalation (#40), extended from the batch path to
+        # here: exactly one extra attempt against a stronger model, only
+        # once the normal retry budget above is exhausted, only if one was
+        # configured, never for an abort (matches the loop's own break
+        # condition). Reuses `retry_spec` as the loop's last iteration left
+        # it -- already carries the last failure's own error_output (e.g.
+        # a PROTECTED_SIGNATURE_CHANGED diff), not a blank slate.
+        if (
+            not green_result.passed
+            and not _is_abort(green_result)
+            and self._escalation_llm_client is not None
+        ):
+            logger.warning(
+                "TDDCycleRunner: GREEN retry budget exhausted, escalating %s -> %s for cycle %s",
+                self._model_id, self._escalation_model_id, spec.cycle_number,
+            )
+            green_attempts += 1
+            green_result = self._pod.run_green(retry_spec, escalate=True)
+            logger.warning(
+                "TDDCycleRunner: escalated attempt %s",
+                "succeeded" if green_result.passed else "also failed",
+            )
+            if self._audit_client is not None:
+                try:
+                    self._audit_client.emit_simple(
+                        event_type=_AuditEventType.ESCALATION_TRIGGERED,
+                        actor_id=self._escalation_model_id,
+                        payload={
+                            "cycle": spec.cycle_number,
+                            "from_model": self._model_id,
+                            "to_model": self._escalation_model_id,
+                            "success": green_result.passed,
+                        },
+                        playbook_id=self._playbook_id,
+                    )
+                except Exception as exc:
+                    logger.warning(f"TDDCycleRunner: escalation audit emit failed: {exc}")
 
         if not green_result.passed:
             cycle_result = CycleResult(
@@ -247,10 +296,33 @@ class TDDCycleRunner:
             latency_ms=0,
             tokens_used=total_tokens,
         )
+        feedback = result.error
+        protected = getattr(self._pod, "protected_symbols", lambda: None)()
+        if protected:
+            # Causal invariant hierarchy: a real experiment found the
+            # Reflector, given only a bare "missing required argument"
+            # error, plausibly but wrongly diagnosing a schema-driven
+            # module's contract-fixed dataclasses as needing defaults --
+            # canonizing that into the playbook and fighting the
+            # ProtectedShape lock. Naming the protected symbols and stating
+            # the causal direction explicitly (a construction/validation
+            # error is always a caller bug, never a reason to relax the
+            # contract) heads that off at the source, since this text
+            # reaches Reflector._build_analysis_prompt verbatim.
+            feedback = (
+                f"IMMUTABLE CONTRACT CONSTRAINT: {', '.join(protected)} are "
+                "fixed by this module's formal contract -- their fields, "
+                "signatures, and defaults cannot be changed. A missing-"
+                "required-argument or validation error here is ALWAYS a bug "
+                "in the calling test or implementation code (e.g. a test "
+                "fixture omitting a required field), NEVER a reason to add "
+                "defaults, loosen a type, or otherwise relax these "
+                "definitions.\n\n" + (feedback or "")
+            )
         env_feedback = EnvironmentFeedback(
             result=env_result,
             actual=result.green_result.output or "",
-            feedback=result.error,
+            feedback=feedback,
         )
 
         try:

@@ -62,6 +62,8 @@ class IterativeTDDRunner:
         team_id: str | None = None,
         model_id: str | None = None,
         task_type: str | None = None,
+        escalation_llm_client=None,
+        escalation_model_id: str | None = None,
     ) -> None:
         self._pod = pod
         self._planner = planner
@@ -78,6 +80,8 @@ class IterativeTDDRunner:
             "team_id": team_id,
             "model_id": model_id,
             "task_type": task_type,
+            "escalation_llm_client": escalation_llm_client,
+            "escalation_model_id": escalation_model_id,
         }
 
     def _redundancy_skip(self, increment: TestIncrement, test_file: Path) -> CycleResult | None:
@@ -90,7 +94,9 @@ class IterativeTDDRunner:
             return None
         existing = existing_tests_from_file(test_file)
         proposed = ProposedTest(name=increment.test_name, description=increment.description)
+        logger.warning("DEBUG_MARKER_XK92 proposed.name=%r proposed.description=%r", proposed.name, proposed.description)
         verdict = self._redundancy_checker.check(existing, proposed)
+        logger.warning("DEBUG_MARKER_XK92 verdict=%s", verdict)
         if not verdict.is_redundant:
             return None
         logger.info(
