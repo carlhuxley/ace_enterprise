@@ -32,6 +32,7 @@ from src.contracts.module_architect import (
     ModuleContract,
     validate_module,
 )
+from src.utils.ast_shape import extract_protected_shape
 from src.utils.code_extraction import extract_code
 from src.utils.llm_client import LLMClient
 
@@ -202,6 +203,7 @@ class ModuleTDDBuilder:
         function_results: list[FunctionBuildResult] = []
         total_cycles = 0
         dep_import_lines = _dep_import_lines(dep_modules)
+        dep_method_lines = _upstream_method_cheat_sheet(dep_modules)
         prior_lessons = self._prior_lessons()
 
         # Track accumulated module code
@@ -219,6 +221,7 @@ class ModuleTDDBuilder:
                 existing_code=module_code,
                 session_id=session_id,
                 dep_import_lines=dep_import_lines,
+                dep_method_lines=dep_method_lines,
                 prior_lessons=prior_lessons,
             )
 
@@ -280,6 +283,7 @@ class ModuleTDDBuilder:
             repaired = self._repair_module(
                 contract, module_code, integration_failures,
                 dep_import_lines=dep_import_lines,
+                dep_method_lines=dep_method_lines,
                 prior_lessons=prior_lessons,
             )
             if repaired is None or repaired.strip() == module_code.strip():
@@ -297,7 +301,8 @@ class ModuleTDDBuilder:
         if not all_integration_passed and repair >= self._max_repair_attempts and self._escalation_llm is not None:
             escalated = self._repair_module(
                 contract, module_code, integration_failures,
-                dep_import_lines=dep_import_lines, prior_lessons=prior_lessons,
+                dep_import_lines=dep_import_lines, dep_method_lines=dep_method_lines,
+                prior_lessons=prior_lessons,
                 llm_client=self._escalation_llm,
             )
             if escalated is not None and escalated.strip() != module_code.strip():
@@ -438,6 +443,7 @@ class ModuleTDDBuilder:
         existing_code: str,
         session_id: str | None = None,
         dep_import_lines: list[str] | None = None,
+        dep_method_lines: list[str] | None = None,
         prior_lessons: list[str] | None = None,
     ) -> FunctionBuildResult:
         """Build a single function using TDD-style iteration.
@@ -465,6 +471,14 @@ class ModuleTDDBuilder:
                 + "\n".join(dep_import_lines)
                 + "\n```"
             )
+            if dep_method_lines:
+                dep_block += (
+                    "\n\n**These imported classes' own methods — call them as "
+                    "instance methods, never import a method name as if it were a "
+                    "free function:**\n```python\n"
+                    + "\n".join(dep_method_lines)
+                    + "\n```"
+                )
         lessons_block = ""
         if prior_lessons:
             lessons_block = (
@@ -666,6 +680,7 @@ Fix the implementation:
     def _repair_module(
         self, contract: ModuleContract, module_code: str, failures: list[str],
         *, dep_import_lines: list[str] | None = None,
+        dep_method_lines: list[str] | None = None,
         prior_lessons: list[str] | None = None,
         llm_client: LLMClient | None = None,
     ) -> str | None:
@@ -694,6 +709,13 @@ Fix the implementation:
                 + "\n".join(dep_import_lines)
                 + "\n(a local def/class shadowing one of these names is a bug to fix)\n"
             )
+            if dep_method_lines:
+                dep_block += (
+                    "\n# these imported classes' own methods — call them as instance "
+                    "methods, never import a method name as if it were a free function:\n"
+                    + "\n".join(f"# {line}" for line in dep_method_lines)
+                    + "\n"
+                )
         prompt = (
             "The module below fails some of its integration tests. Rewrite the "
             "COMPLETE module so every test passes. Keep the public function "
@@ -870,6 +892,41 @@ def _dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
         f"from {mod} import {', '.join(sorted(syms))}"
         for mod, syms in sorted(by_mod.items())
     ]
+
+
+def _upstream_method_cheat_sheet(dep_modules: dict[str, str] | None) -> list[str]:
+    """One line per public method on each already-built dependency's
+    classes, e.g. 'DiscoveryTree.attach(parent_id: str, node: Node) ->
+    DiscoveryTree' or 'Node.is_root -> bool (property, access without
+    parens)' -- #73: `_upstream_symbols`/`_dep_import_lines` already give
+    the model a class's correct top-level import, but nothing about what it
+    can actually call once imported, so a dependent module hallucinated
+    `from discovery_tree import attach` for a method that only exists as
+    `DiscoveryTree.attach`. Reuses `ast_shape.extract_protected_shape`
+    (built for the `ProtectedShape` lock) rather than a second AST walk --
+    its per-class `MethodShape` already has exact, real signatures."""
+    lines: list[str] = []
+    for src in (dep_modules or {}).values():
+        try:
+            shape = extract_protected_shape(src)
+        except SyntaxError:
+            continue
+        for class_name in sorted(shape.classes):
+            for method_name in sorted(shape.classes[class_name].methods):
+                if method_name.startswith("_"):
+                    continue
+                m = shape.classes[class_name].methods[method_name]
+                returns = f" -> {m.returns}" if m.returns else ""
+                if m.is_property:
+                    lines.append(f"{class_name}.{method_name}{returns} (property, access without parens)")
+                    continue
+                args = m.args
+                if args == "self":
+                    args = ""
+                elif args.startswith("self, "):
+                    args = args[len("self, "):]
+                lines.append(f"{class_name}.{method_name}({args}){returns}")
+    return lines
 
 
 _DEF_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)

@@ -1088,6 +1088,7 @@
         "src/audit/schemas.py",
         "src/contracts/module_architect.py",
         "src/storage/schemas.py",
+        "src/utils/ast_shape.py",
         "src/utils/code_extraction.py",
         "src/utils/llm_client.py"
       ]

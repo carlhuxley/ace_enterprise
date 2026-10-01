@@ -14,6 +14,7 @@ from src.contracts.module_tdd_builder import (
     ModuleTDDBuilder,
     _dep_import_lines,
     _redeclared_upstream,
+    _upstream_method_cheat_sheet,
     _upstream_symbols,
 )
 
@@ -172,6 +173,114 @@ def test_dep_import_lines_lists_public_symbols_grouped_by_module():
         "from dag_graph import Node, add_edge",
         "from manifest_io import load",
     ]
+
+
+def test_upstream_method_cheat_sheet_lists_methods_with_real_signatures():
+    # The exact real-world failure from #73: a dependent module imported
+    # `attach`/`children_of` as free functions -- they're real methods on
+    # DiscoveryTree, not top-level symbols at all.
+    deps = {
+        "discovery_tree": (
+            "class DiscoveryTree:\n"
+            "    def attach(self, parent_id: str, node) -> DiscoveryTree:\n"
+            "        pass\n"
+            "    def children_of(self, node_id: str) -> list:\n"
+            "        pass\n"
+        ),
+    }
+    assert _upstream_method_cheat_sheet(deps) == [
+        "DiscoveryTree.attach(parent_id: str, node) -> DiscoveryTree",
+        "DiscoveryTree.children_of(node_id: str) -> list",
+    ]
+
+
+def test_upstream_method_cheat_sheet_formats_properties_without_parens():
+    deps = {"discovery_tree": "class Node:\n    @property\n    def is_root(self) -> bool:\n        pass\n"}
+    assert _upstream_method_cheat_sheet(deps) == [
+        "Node.is_root -> bool (property, access without parens)",
+    ]
+
+
+def test_upstream_method_cheat_sheet_strips_self_with_no_other_args():
+    deps = {"m": "class Widget:\n    def reset(self) -> None:\n        pass\n"}
+    assert _upstream_method_cheat_sheet(deps) == ["Widget.reset() -> None"]
+
+
+def test_upstream_method_cheat_sheet_excludes_private_and_dunder_methods():
+    deps = {
+        "m": (
+            "class Widget:\n"
+            "    def __init__(self, x: int) -> None:\n"
+            "        pass\n"
+            "    def _helper(self) -> None:\n"
+            "        pass\n"
+            "    def public(self) -> None:\n"
+            "        pass\n"
+        ),
+    }
+    assert _upstream_method_cheat_sheet(deps) == ["Widget.public() -> None"]
+
+
+def test_upstream_method_cheat_sheet_covers_multiple_classes_and_modules():
+    deps = {
+        "a_mod": "class A:\n    def foo(self) -> None:\n        pass\n",
+        "b_mod": "class B:\n    def bar(self) -> None:\n        pass\n",
+    }
+    assert _upstream_method_cheat_sheet(deps) == [
+        "A.foo() -> None",
+        "B.bar() -> None",
+    ]
+
+
+def test_upstream_method_cheat_sheet_empty_for_class_with_no_public_methods():
+    deps = {"m": "class Empty:\n    def _private(self) -> None:\n        pass\n"}
+    assert _upstream_method_cheat_sheet(deps) == []
+
+
+def test_upstream_method_cheat_sheet_empty_for_no_deps():
+    assert _upstream_method_cheat_sheet(None) == []
+    assert _upstream_method_cheat_sheet({}) == []
+
+
+def test_build_function_prompt_includes_dependency_method_cheat_sheet():
+    calls = []
+
+    class FakeLLM:
+        model = "fake"
+
+        def generate(self, prompt):
+            calls.append(prompt)
+            return {"content": "def bump():\n    return 1\n", "actual_model": "fake", "provider": "fake"}
+
+    b = ModuleTDDBuilder(llm_client=FakeLLM())
+    spec = FunctionSpec("bump", "() -> int", "increment")
+    b._build_function(
+        spec, shared_state="", hints=[], existing_code="",
+        dep_import_lines=["from discovery_tree import DiscoveryTree"],
+        dep_method_lines=["DiscoveryTree.attach(parent_id: str, node) -> DiscoveryTree"],
+    )
+    assert "DiscoveryTree.attach(parent_id: str, node) -> DiscoveryTree" in calls[0]
+    assert "never import a method name as if it were a free function" in calls[0]
+
+
+def test_build_function_prompt_omits_method_cheat_sheet_when_dependency_has_no_methods():
+    calls = []
+
+    class FakeLLM:
+        model = "fake"
+
+        def generate(self, prompt):
+            calls.append(prompt)
+            return {"content": "def bump():\n    return 1\n", "actual_model": "fake", "provider": "fake"}
+
+    b = ModuleTDDBuilder(llm_client=FakeLLM())
+    spec = FunctionSpec("bump", "() -> int", "increment")
+    b._build_function(
+        spec, shared_state="", hints=[], existing_code="",
+        dep_import_lines=["from manifest_io import load"],
+        dep_method_lines=[],
+    )
+    assert "own methods" not in calls[0]
 
 
 def test_redeclared_upstream_flags_a_local_shadow_of_a_dependency_symbol():
