@@ -13,6 +13,7 @@ import pytest
 
 from src.agents.podman_orchestrator import ContainerRunner, PodmanOrchestrator, canonical_hash
 from src.agents.podman_runner import PodmanRunner
+from src.ui.broadcaster import set_current_phase
 
 
 def podman_available() -> bool:
@@ -137,6 +138,27 @@ def test_send_pulse_populates_h_executed(shared_podman_runner, tmp_path):
     result = shared_podman_runner.send_pulse(files)
     expected = canonical_hash(files)
     assert result.h_executed == expected
+
+
+def test_send_pulse_broadcasts_incremental_chunk_events(shared_podman_runner, tmp_path):
+    # End-to-end proof (issue #77) that _run_streaming's chunk broadcasts
+    # reach all the way through a REAL podman exec subprocess, not just the
+    # unit-level test against a plain local python subprocess.
+    files = {"test_ping.py": "def test_ping():\n    assert True\n"}
+    set_current_phase("GREEN")
+    try:
+        with patch("src.agents.podman_runner.broadcast_event") as mock_broadcast:
+            shared_podman_runner.send_pulse(files)
+    finally:
+        set_current_phase(None)
+
+    chunk_events = [
+        call.args[0] for call in mock_broadcast.call_args_list
+        if call.args[0].status == "chunk"
+    ]
+    assert len(chunk_events) > 0
+    assert all(e.phase == "GREEN" for e in chunk_events)
+    assert any("passed" in e.stdout_chunk for e in chunk_events)
 
 
 def test_send_pulse_bandit_flags_shell_injection(shared_podman_runner, tmp_path):

@@ -10,12 +10,70 @@ Tests skip gracefully when podman is absent.
 import json
 import shutil
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 
 from src.agents.podman_orchestrator import PulseResult, canonical_hash
+from src.ui.broadcaster import broadcast_event, current_phase
+from src.ui.events import ExecutionStreamEvent
 
 _REMOTE_WS = "/workspace"
+
+
+def _run_streaming(
+    cmd: list[str],
+    *,
+    timeout: float | None = None,
+    text: bool = True,
+) -> subprocess.CompletedProcess:
+    """Popen-based equivalent of
+    `subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)`
+    that additionally broadcasts one `ExecutionStreamEvent(status="chunk")`
+    per line of stdout/stderr as it's produced, tagged with
+    `broadcaster.current_phase()`. Returns the same shape `subprocess.run`
+    does (`.returncode`/`.stdout`/`.stderr`) so every existing caller
+    (`_parse_bandit`, `_parse_gosec`, `_parse_vitest`, `_parse_eslint`, the
+    `vet_proc.returncode`/`.stdout` checks in go_runner.py) needs no changes
+    beyond the call-site swap.
+
+    Drains stdout and stderr CONCURRENTLY via two reader threads -- the
+    classic pipe-buffer deadlock: a naive sequential `.stdout.read()` then
+    `.stderr.read()` hangs forever if the child fills the undrained pipe's
+    OS buffer while nothing is reading it. `subprocess.run`'s own
+    `communicate()` avoids this the same way internally.
+    """
+    phase = current_phase()
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text, bufsize=1,
+    )
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+
+    def _drain(pipe, sink: list[str]) -> None:
+        for line in iter(pipe.readline, ""):
+            sink.append(line)
+            if phase:
+                broadcast_event(ExecutionStreamEvent(
+                    phase=phase, status="chunk", stdout_chunk=line.rstrip("\n"),
+                ))
+        pipe.close()
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, out_lines), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, err_lines), daemon=True)
+    t_out.start()
+    t_err.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+        raise
+    t_out.join()
+    t_err.join()
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out_lines), "".join(err_lines))
 
 
 class PodmanRunner:
@@ -182,7 +240,7 @@ class PodmanRunner:
         # /workspace for RED/GREEN pods. Either way pytest collects from
         # /workspace and the mount stays read-only.
         workdir = "/tmp" if self._writable_workdir else _REMOTE_WS
-        pytest_result = subprocess.run(
+        pytest_result = _run_streaming(
             [
                 "podman", "exec", "--workdir", workdir, self._name,
                 # -B: don't write __pycache__/.pyc; -p no:cacheprovider: don't
@@ -190,8 +248,6 @@ class PodmanRunner:
                 "python", "-B", "-m", "pytest", _REMOTE_WS, "-v", "--tb=short",
                 f"--timeout={self._test_timeout}", "-p", "no:cacheprovider",
             ],
-            capture_output=True,
-            text=True,
         )
 
         # Runs AFTER pytest, not before (ace_enterprise-rli) — by the time a
@@ -200,14 +256,12 @@ class PodmanRunner:
         # This is a commit-time/retry gate, not a pre-execution check; the
         # actual containment is --network none + the read-only workspace
         # mount (start(), above), not Bandit.
-        bandit_result = subprocess.run(
+        bandit_result = _run_streaming(
             [
                 "podman", "exec", self._name,
                 "python", "-m", "bandit", "-r", _REMOTE_WS,
                 "--format", "json", "-q",
             ],
-            capture_output=True,
-            text=True,
         )
 
         # Hash computed from host-side files (same bytes as container via bind mount)

@@ -1195,3 +1195,64 @@ class TestPlaybookDeltaBroadcasting:
         runner = TDDCycleRunner(ControlledPod(), reflector=_SpyReflector(), curator=curator)
         result = runner.run(_spec(tmp_path))
         assert len(result.learned_bullets) == 1
+
+
+# ---------------------------------------------------------------------------
+# Live dashboard: thread-local phase context for incremental "chunk" events
+# (issue #77) -- set_current_phase() tags the thread for the duration of
+# call() so src/agents/podman_runner.py's _run_streaming(), several
+# call-stack levels below pod.run_red/run_green/run_refactor, knows which
+# phase to tag ExecutionStreamEvent("chunk") broadcasts with.
+# ---------------------------------------------------------------------------
+
+class PhaseInspectingPod(ControlledPod):
+    """Records broadcaster.current_phase() as seen from inside each phase
+    method -- i.e. the real call-stack position _run_streaming() would read
+    it from, not from TDDCycleRunner itself."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.observed_phases: list[str | None] = []
+
+    def run_red(self, spec: PodSpec) -> PhaseResult:
+        from src.ui.broadcaster import current_phase
+        self.observed_phases.append(current_phase())
+        return super().run_red(spec)
+
+    def run_green(self, spec: PodSpec) -> PhaseResult:
+        from src.ui.broadcaster import current_phase
+        self.observed_phases.append(current_phase())
+        return super().run_green(spec)
+
+    def run_refactor(self, spec: PodSpec) -> PhaseResult:
+        from src.ui.broadcaster import current_phase
+        self.observed_phases.append(current_phase())
+        return super().run_refactor(spec)
+
+
+class TestPhaseContextPropagation:
+    def test_each_phase_method_sees_its_own_phase_tag(self, tmp_path):
+        from src.ui.broadcaster import current_phase
+
+        pod = PhaseInspectingPod()
+        runner = TDDCycleRunner(pod)
+        runner.run(_spec(tmp_path))
+
+        assert pod.observed_phases == ["RED", "GREEN", "REFACTOR"]
+        # Reset after each call -- a later send_pulse() on this thread
+        # outside any _run_phase() must not inherit a stale tag.
+        assert current_phase() is None
+
+    def test_phase_is_cleared_even_when_the_phase_call_raises(self, tmp_path):
+        from src.ui.broadcaster import current_phase
+
+        class RaisingPod(ControlledPod):
+            def run_red(self, spec: PodSpec) -> PhaseResult:
+                raise RuntimeError("boom")
+
+        runner = TDDCycleRunner(RaisingPod())
+        try:
+            runner.run(_spec(tmp_path))
+        except RuntimeError:
+            pass
+        assert current_phase() is None

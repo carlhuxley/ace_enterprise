@@ -81,14 +81,17 @@ class SandboxPostureEvent:
 
 @dataclass
 class ExecutionStreamEvent:
-    """One phase boundary's test-runner/oracle output. v1 scope: coarse
-    "phase started" / "phase completed" events built on each pod's existing
-    blocking run_red/run_green/run_refactor call, not true line-by-line
-    streaming -- no Popen-based incremental-read infrastructure exists yet
-    anywhere in this codebase (tracked as a separate follow-up issue)."""
+    """One phase's test-runner/oracle output. "started"/"completed" mark the
+    phase boundary (the latter carrying the full captured output); "chunk"
+    is one line of real-time stdout/stderr from the underlying subprocess,
+    broadcast by src/agents/podman_runner.py's `_run_streaming()` helper as
+    pytest/go test/vitest/bandit/gosec/eslint/errcheck/revive actually
+    produce it (gofmt is the one exception -- its stdout is reformatted
+    source code, not log output, so it stays a plain blocking call and
+    never emits "chunk" events)."""
 
     phase: str  # "RED" | "GREEN" | "REFACTOR"
-    status: str  # "started" | "completed"
+    status: str  # "started" | "chunk" | "completed"
     stdout_chunk: str = ""
     exit_code: int | None = None
     timestamp: float = field(default_factory=time.time)

@@ -1626,6 +1626,8 @@
     "src/ui/broadcaster.py": {
       "provides": [
         "set_project_root",
+        "set_current_phase",
+        "current_phase",
         "broadcast_event"
       ],
       "depends_on": [

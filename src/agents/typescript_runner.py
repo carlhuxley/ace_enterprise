@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from src.agents.podman_orchestrator import PulseResult
-from src.agents.podman_runner import PodmanRunner
+from src.agents.podman_runner import PodmanRunner, _run_streaming
 
 _TS_PROJECT = "/opt/ts-project"
 _VITEST_BIN = f"{_TS_PROJECT}/node_modules/.bin/vitest"
@@ -141,7 +141,7 @@ class TypeScriptRunner(PodmanRunner):
 
         _vitest_timeout = max(60, self._test_timeout * 6)
         try:
-            vitest_proc = subprocess.run(
+            vitest_proc = _run_streaming(
                 [
                     "podman", "exec", "--workdir", _TS_PROJECT, self._name,
                     "node", _VITEST_BIN,
@@ -150,8 +150,6 @@ class TypeScriptRunner(PodmanRunner):
                     "--reporter", "json",
                     "--outputFile", _RESULTS_JSON,
                 ],
-                capture_output=True,
-                text=True,
                 timeout=_vitest_timeout,
             )
         except subprocess.TimeoutExpired:
@@ -194,15 +192,13 @@ class TypeScriptRunner(PodmanRunner):
         ts_files = [name for name in files if name.endswith(".ts")]
         eslint_output = ""
         if ts_files:
-            eslint_proc = subprocess.run(
+            eslint_proc = _run_streaming(
                 [
                     "podman", "exec", "--workdir", _REMOTE_WS, self._name,
                     _ESLINT_BIN, "--format", "json",
                     "--no-config-lookup", "--config", _ESLINT_CONFIG,
                     *ts_files,
                 ],
-                capture_output=True,
-                text=True,
             )
             eslint_output = eslint_proc.stdout or eslint_proc.stderr
         eslint_high, eslint_medium, eslint_output = _parse_eslint(eslint_output)

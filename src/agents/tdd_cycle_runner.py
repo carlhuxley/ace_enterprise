@@ -27,7 +27,7 @@ from pathlib import Path
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.audit.schemas import AuditEventType as _AuditEventType
-from src.ui.broadcaster import broadcast_event
+from src.ui.broadcaster import broadcast_event, set_current_phase
 from src.ui.events import ExecutionStreamEvent, PlaybookDeltaEvent
 
 logger = logging.getLogger(__name__)
@@ -136,15 +136,28 @@ class TDDCycleRunner:
         one wrapper here covers every pod (Python/Go/TypeScript/Simulation)
         and every retry/escalation attempt uniformly, with no per-pod code.
         `call` is a zero-arg callable so each call site keeps its own exact
-        arguments (retry_spec, escalate=True, ...) unchanged."""
-        broadcast_event(ExecutionStreamEvent(phase=phase, status="started"))
-        result = call()
-        broadcast_event(ExecutionStreamEvent(
-            phase=phase, status="completed",
-            stdout_chunk=result.output or result.error or "",
-            exit_code=0 if result.passed else 1,
-        ))
-        return result
+        arguments (retry_spec, escalate=True, ...) unchanged.
+
+        set_current_phase() tags this thread for the duration of `call()` so
+        the streaming helper in src/agents/podman_runner.py (several
+        call-stack levels below, inside send_pulse()) can broadcast
+        incremental "chunk" events under the right phase without phase
+        needing to be threaded through PodmanOrchestrator.pulse()/
+        ContainerRunner.send_pulse()'s signatures. Reset in `finally` so a
+        later send_pulse() call on this thread outside any _run_phase()
+        (if one ever existed) doesn't inherit a stale phase tag."""
+        set_current_phase(phase)
+        try:
+            broadcast_event(ExecutionStreamEvent(phase=phase, status="started"))
+            result = call()
+            broadcast_event(ExecutionStreamEvent(
+                phase=phase, status="completed",
+                stdout_chunk=result.output or result.error or "",
+                exit_code=0 if result.passed else 1,
+            ))
+            return result
+        finally:
+            set_current_phase(None)
 
     def run(self, spec: PodSpec) -> CycleResult:
         cycle_start = time.monotonic()

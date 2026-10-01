@@ -5,11 +5,18 @@ every test here is really asserting "this failure mode is swallowed."
 """
 import json
 import socket
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
 import src.ui.broadcaster as broadcaster_module
-from src.ui.broadcaster import _MAX_PAYLOAD_BYTES, broadcast_event, set_project_root
+from src.ui.broadcaster import (
+    _MAX_PAYLOAD_BYTES,
+    broadcast_event,
+    current_phase,
+    set_current_phase,
+    set_project_root,
+)
 from src.ui.events import SandboxPostureEvent
 
 
@@ -185,3 +192,47 @@ class TestProjectRootDefaulting:
             assert raised, "event should NOT have reached a socket it was never told about"
         finally:
             server.close()
+
+
+class TestPhaseContext:
+    """current_phase() backs issue #77's incremental "chunk" streaming --
+    unlike _current_project_root, this MUST be thread-local: src/ensemble/
+    learner.py runs multiple TDDCycleRunners concurrently via
+    ThreadPoolExecutor, so a plain global would let one model's GREEN phase
+    clobber another's in-flight RED tag."""
+
+    def setup_method(self):
+        set_current_phase(None)
+
+    def teardown_method(self):
+        set_current_phase(None)
+
+    def test_defaults_to_none(self):
+        assert current_phase() is None
+
+    def test_set_then_get_on_the_same_thread(self):
+        set_current_phase("GREEN")
+        assert current_phase() == "GREEN"
+
+    def test_reset_to_none(self):
+        set_current_phase("RED")
+        set_current_phase(None)
+        assert current_phase() is None
+
+    def test_concurrent_threads_do_not_see_each_others_phase(self):
+        observed: dict[str, str | None] = {}
+        barrier = threading.Barrier(2)
+
+        def worker(name: str, phase: str) -> None:
+            set_current_phase(phase)
+            barrier.wait(timeout=5)  # force both threads to have set their phase before either reads
+            observed[name] = current_phase()
+
+        t1 = threading.Thread(target=worker, args=("a", "RED"))
+        t2 = threading.Thread(target=worker, args=("b", "GREEN"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert observed == {"a": "RED", "b": "GREEN"}

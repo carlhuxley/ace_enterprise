@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import socket
+import threading
 from dataclasses import asdict
 from pathlib import Path
 
@@ -36,6 +37,32 @@ def set_project_root(project_root: Path | str) -> None:
     process defaults to, unless it passes its own project_root explicitly."""
     global _current_project_root
     _current_project_root = Path(project_root)
+
+
+# Unlike _current_project_root above, this is NOT a plain global:
+# src/ensemble/learner.py runs multiple TDDCycleRunners concurrently via
+# ThreadPoolExecutor, each mid-phase at the same time. A plain global would
+# let one model's GREEN phase clobber another's in-flight RED tag, so
+# ExecutionStreamEvent "chunk" broadcasts from src/agents/podman_runner.py's
+# streaming helper would get mislabeled. threading.local() gives each
+# worker thread its own isolated value.
+_phase_local = threading.local()
+
+
+def set_current_phase(phase: str | None) -> None:
+    """Set the TDD phase ("RED"/"GREEN"/"REFACTOR"/None) the CURRENT THREAD
+    is executing, for tagging incremental ExecutionStreamEvent "chunk"
+    broadcasts several call-stack levels below where the phase is known
+    (TDDCycleRunner._run_phase -> pod.run_red/... -> orchestrator.pulse()
+    -> runner.send_pulse() -> the subprocess call itself)."""
+    _phase_local.phase = phase
+
+
+def current_phase() -> str | None:
+    """The calling thread's current phase, or None if set_current_phase()
+    was never called on this thread (or was reset after the last call)."""
+    return getattr(_phase_local, "phase", None)
+
 
 # Comfortably under common UNIX SOCK_DGRAM kernel buffer limits (commonly
 # ~64KB default, platform/sysctl-dependent) even after JSON framing

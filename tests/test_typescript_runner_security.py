@@ -5,11 +5,13 @@ and no TS-runner test file existed before this (the harness was previously
 untested beyond the bootstrap .feature file). Skipped when podman is absent.
 """
 import shutil
+from unittest.mock import patch
 
 import pytest
 
 from src.agents.podman_orchestrator import PodmanOrchestrator
 from src.agents.typescript_runner import TypeScriptRunner, _parse_eslint
+from src.ui.broadcaster import set_current_phase
 
 skip_no_podman = pytest.mark.skipif(
     shutil.which("podman") is None,
@@ -133,3 +135,22 @@ def test_orchestrator_pulse_allows_safe_code(ts_runner):
     orchestrator = PodmanOrchestrator(runner=ts_runner)
     result = orchestrator.pulse(_SAFE_TS)
     assert result.passed is True
+
+
+@skip_no_podman
+def test_send_pulse_broadcasts_incremental_chunk_events(ts_runner):
+    # End-to-end proof (issue #77) that _run_streaming's chunk broadcasts
+    # reach through a REAL podman exec'd vitest/eslint subprocess.
+    set_current_phase("GREEN")
+    try:
+        with patch("src.agents.podman_runner.broadcast_event") as mock_broadcast:
+            ts_runner.send_pulse(_SAFE_TS)
+    finally:
+        set_current_phase(None)
+
+    chunk_events = [
+        call.args[0] for call in mock_broadcast.call_args_list
+        if call.args[0].status == "chunk"
+    ]
+    assert len(chunk_events) > 0
+    assert all(e.phase == "GREEN" for e in chunk_events)

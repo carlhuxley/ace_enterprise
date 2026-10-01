@@ -6,13 +6,14 @@ isolation at all; it now routes through PodmanOrchestrator + GoRunner the
 same way PythonLanguagePod and TypeScriptLanguagePod do.
 """
 import shutil
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.agents.go_language_pod import GoLanguagePod
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec, TokenUsage
 from src.agents.podman_orchestrator import PodmanOrchestrator
+from src.ui.broadcaster import set_current_phase
 
 
 def make_llm_client(content="package pulse\n\nfunc Foo() {}", tokens_used=100):
@@ -619,3 +620,22 @@ class TestGoIntegration:
         assert reformatted == (
             "package pulse\n\n// Add returns the sum of a and b.\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
         )
+
+    def test_send_pulse_broadcasts_incremental_chunk_events(self, go_runner, tmp_path):
+        # End-to-end proof (issue #77) that _run_streaming's chunk
+        # broadcasts reach through real podman exec'd go vet/go test/gosec/
+        # errcheck/revive subprocesses.
+        files = {"add.go": _SAFE_GO_IMPL, "add_test.go": _SAFE_GO_TEST}
+        set_current_phase("GREEN")
+        try:
+            with patch("src.agents.podman_runner.broadcast_event") as mock_broadcast:
+                go_runner.send_pulse(files)
+        finally:
+            set_current_phase(None)
+
+        chunk_events = [
+            call.args[0] for call in mock_broadcast.call_args_list
+            if call.args[0].status == "chunk"
+        ]
+        assert len(chunk_events) > 0
+        assert all(e.phase == "GREEN" for e in chunk_events)

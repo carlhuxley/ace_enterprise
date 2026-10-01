@@ -19,7 +19,7 @@ import json
 import subprocess
 
 from src.agents.podman_orchestrator import PulseResult
-from src.agents.podman_runner import PodmanRunner
+from src.agents.podman_runner import PodmanRunner, _run_streaming
 
 _GO_BIN = "go"
 _GOFMT_BIN = "gofmt"
@@ -96,16 +96,16 @@ class GoRunner(PodmanRunner):
         # pulses in the same session reuse the warmed cache and are fast.
         _timeout = max(60, self._test_timeout * 6)
 
-        vet_proc = subprocess.run(
+        vet_proc = _run_streaming(
             ["podman", "exec", "--workdir", _REMOTE_WS, self._name, _GO_BIN, "vet", "./..."],
-            capture_output=True, text=True, timeout=_timeout,
+            timeout=_timeout,
         )
-        test_proc = subprocess.run(
+        test_proc = _run_streaming(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
                 _GO_BIN, "test", "-v", "-race", "./...",
             ],
-            capture_output=True, text=True, timeout=_timeout,
+            timeout=_timeout,
         )
 
         # gofmt without -w only reads the file and prints the reformatted
@@ -124,12 +124,12 @@ class GoRunner(PodmanRunner):
             if fmt_proc.returncode == 0 and fmt_proc.stdout:
                 formatted[name] = fmt_proc.stdout
 
-        gosec_proc = subprocess.run(
+        gosec_proc = _run_streaming(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
                 _GOSEC_BIN, "-fmt=json", "./...",
             ],
-            capture_output=True, text=True, timeout=_timeout,
+            timeout=_timeout,
         )
         gosec_output = gosec_proc.stdout or gosec_proc.stderr
         high, medium, low = _parse_gosec(gosec_output)
@@ -138,16 +138,16 @@ class GoRunner(PodmanRunner):
         # not advisory-only. errcheck's own exit code is already nonzero when it
         # finds an unchecked error return; revive needs -set_exit_status or it
         # always exits 0 regardless of findings.
-        errcheck_proc = subprocess.run(
+        errcheck_proc = _run_streaming(
             ["podman", "exec", "--workdir", _REMOTE_WS, self._name, _ERRCHECK_BIN, "./..."],
-            capture_output=True, text=True, timeout=_timeout,
+            timeout=_timeout,
         )
-        revive_proc = subprocess.run(
+        revive_proc = _run_streaming(
             [
                 "podman", "exec", "--workdir", _REMOTE_WS, self._name,
                 _REVIVE_BIN, "-set_exit_status", "-config", "/etc/revive.toml", "./...",
             ],
-            capture_output=True, text=True, timeout=_timeout,
+            timeout=_timeout,
         )
 
         passed = (
