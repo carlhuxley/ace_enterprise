@@ -121,6 +121,7 @@ class ProjectBuilder:
         escalation_llm: LLMClient | None = None,
         escalation_model_id: str | None = None,
         cgr3_retrieval: bool = False,
+        diff_editing: bool = False,
     ) -> None:
         """`llm_client`/`model_id` are the architect-tier client (also what LEARN's
         Reflector/Curator use, per issue #40's scope decision). `worker_llm`,
@@ -143,6 +144,14 @@ class ProjectBuilder:
         # ProjectConfig.cgr3_retrieval -- see that field's own comment for
         # why this defaults off.
         self._cgr3_retrieval = cgr3_retrieval
+        # #71: mirrors src/cli/config.py's ProjectConfig.diff_editing /
+        # `ace tdd --diff-editing` -- today this only reached `ace tdd`'s
+        # build_agent(); `ace project` had no flag for it at all and every
+        # non-scaffolded iterative-path module always did whole-file
+        # regeneration regardless of this setting. #70's scaffolded-module
+        # override (use_patch_mode=True, forced -- the lock requires patch
+        # mode to mean anything) is untouched and takes precedence over this.
+        self._diff_editing = diff_editing
         # Test seams — default to the real sandboxed components.
         self._make_architect = architect_factory or self._default_architect
         self._make_builder = builder_factory or self._default_builder
@@ -560,15 +569,19 @@ class ProjectBuilder:
         else:
             spec, feature_text = synthesize_feature_from_contract(module.parsed_contract)
 
-        # Only scaffolded modules pass the new kwargs -- every other call
-        # site (including every existing test's iterative_runner_factory
-        # fake, which takes exactly (src_dir, test_dir)) is untouched.
+        # Only a scaffolded module gets a protected_shape (nothing else was
+        # pre-seeded for the lock to protect) and forces use_patch_mode=True
+        # regardless of #71's diff_editing opt-in -- the lock requires patch
+        # mode to mean anything. A non-scaffolded module's use_patch_mode
+        # follows the opt-in instead of always being False (#71).
         if scaffold is not None:
             runner, orchestrator = self._make_iterative_runner(
                 src_dir, test_dir, use_patch_mode=True, protected_shape=protected_shape,
             )
         else:
-            runner, orchestrator = self._make_iterative_runner(src_dir, test_dir)
+            runner, orchestrator = self._make_iterative_runner(
+                src_dir, test_dir, use_patch_mode=self._diff_editing,
+            )
         try:
             result = runner.run(
                 requirement=spec.as_requirement(),

@@ -27,6 +27,7 @@ def _args(**overrides):
         "verbose": False,
         "playbook_id": None,
         "no_learn": True,
+        "diff_editing": False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -156,6 +157,27 @@ class TestFromSpecDir:
         builder.build.assert_called_once()
         plan_arg = builder.build.call_args[0][0]
         assert plan_arg.build_order == ["db", "api"]
+
+    def test_diff_editing_flag_forwarded_to_project_builder(self, structured_project):
+        # #71: ace project had no --diff-editing flag at all -- it was
+        # hardcoded off for every non-scaffolded iterative-path module
+        # regardless of .ace/config.yaml's diff_editing setting.
+        root, spec_dir = structured_project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb as ProjectBuilderClass, pl:
+            rc = cmd_project(_args(from_spec_dir=spec_dir, project=root, diff_editing=True))
+        assert rc == 0
+        _, kwargs = ProjectBuilderClass.call_args
+        assert kwargs["diff_editing"] is True
+
+    def test_no_diff_editing_flag_leaves_it_off(self, structured_project):
+        root, spec_dir = structured_project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb as ProjectBuilderClass, pl:
+            rc = cmd_project(_args(from_spec_dir=spec_dir, project=root))
+        assert rc == 0
+        _, kwargs = ProjectBuilderClass.call_args
+        assert kwargs["diff_editing"] is False
 
     def test_malformed_contract_yaml_is_reported_and_does_not_build(self, structured_project, capsys):
         root, spec_dir = structured_project

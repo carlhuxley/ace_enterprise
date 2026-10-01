@@ -709,7 +709,7 @@ class TestIterativePathRouting:
             llm_client=object(),
             architect_factory=lambda: arch,
             builder_factory=lambda: builder,
-            iterative_runner_factory=lambda src_dir, test_dir: (runner, orchestrator),
+            iterative_runner_factory=lambda src_dir, test_dir, **kw: (runner, orchestrator),
         )
         result = pb.build(plan, root, src, tests)
 
@@ -725,7 +725,7 @@ class TestIterativePathRouting:
         orchestrator = FakeOrchestrator()
         seen_dirs = []
 
-        def factory(src_dir, test_dir):
+        def factory(src_dir, test_dir, **kw):
             seen_dirs.append((src_dir, test_dir))
             return runner, orchestrator
 
@@ -746,7 +746,7 @@ class TestIterativePathRouting:
         orchestrator = FakeOrchestrator()
         pb = ProjectBuilder(
             llm_client=object(),
-            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=_iter_result()), orchestrator),
+            iterative_runner_factory=lambda s, t, **kw: (FakeIterativeRunner(result=_iter_result()), orchestrator),
         )
         pb.build(plan, root, src, tests)
         assert orchestrator.stopped is True
@@ -758,7 +758,7 @@ class TestIterativePathRouting:
         runner = FakeIterativeRunner(raise_on_run=RuntimeError("boom"))
         pb = ProjectBuilder(
             llm_client=object(),
-            iterative_runner_factory=lambda s, t: (runner, orchestrator),
+            iterative_runner_factory=lambda s, t, **kw: (runner, orchestrator),
         )
         with pytest.raises(RuntimeError, match="boom"):
             pb.build(plan, root, src, tests)
@@ -773,7 +773,7 @@ class TestIterativePathRouting:
         )
         pb = ProjectBuilder(
             llm_client=object(),
-            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=result), FakeOrchestrator()),
+            iterative_runner_factory=lambda s, t, **kw: (FakeIterativeRunner(result=result), FakeOrchestrator()),
         )
         out = pb.build(plan, root, src, tests)
         assert out.outcomes[0].status is ModuleStatus.FAILED
@@ -785,7 +785,7 @@ class TestIterativePathRouting:
         result = _iter_result(cycles=[_cycle(learned_bullets=["a", "b"]), _cycle(learned_bullets=["c"])])
         pb = ProjectBuilder(
             llm_client=object(),
-            iterative_runner_factory=lambda s, t: (FakeIterativeRunner(result=result), FakeOrchestrator()),
+            iterative_runner_factory=lambda s, t, **kw: (FakeIterativeRunner(result=result), FakeOrchestrator()),
         )
         out = pb.build(plan, root, src, tests)
         assert out.outcomes[0].learned == 3
@@ -798,7 +798,7 @@ class TestIterativePathRouting:
         (src / "widget.py").write_text("STALE\n")
         (tests / "test_widget.py").write_text("STALE\n")
 
-        def factory(src_dir, test_dir):
+        def factory(src_dir, test_dir, **kw):
             # By the time the runner is constructed, stale files must already be gone.
             assert not (src_dir / "widget.py").exists()
             assert not (test_dir / "test_widget.py").exists()
@@ -928,10 +928,12 @@ def _scaffolded_module(name, contract_yaml, feature_path, depends_on=()):
 class TestContractScaffoldingIntegration:
     """#70: a module whose contract_yaml validates against
     module_contract_schema.ContractDocument gets pre-seeded with a
-    deterministic scaffold, forced patch mode, and a ProtectedShape lock --
-    every module without one is byte-for-byte unaffected (already covered by
-    TestIterativePathRouting above, which uses plain ModuleSpecs with no
-    parsed_contract and keeps passing unchanged)."""
+    deterministic scaffold, forced patch mode (independent of #71's
+    diff_editing opt-in -- the lock requires it), and a ProtectedShape lock.
+    A module without one still gets use_patch_mode (per #71, defaulting to
+    ProjectBuilder's own diff_editing setting) but no protected_shape --
+    already covered by TestIterativePathRouting above, which uses plain
+    ModuleSpecs with no parsed_contract."""
 
     def test_impl_file_is_pre_seeded_with_the_scaffold_before_the_first_cycle(self, dirs):
         root, src, tests = dirs
@@ -970,18 +972,60 @@ class TestContractScaffoldingIntegration:
         assert seen_kwargs["protected_shape"] is not None
         assert "Widget" in seen_kwargs["protected_shape"].classes
 
-    def test_non_scaffolded_module_calls_factory_with_no_new_kwargs(self, dirs):
+    def test_non_scaffolded_module_passes_no_protected_shape_and_defaults_patch_mode_off(self, dirs):
+        # #71: a non-scaffolded module never gets a ProtectedShape (nothing
+        # was pre-seeded for the lock to protect), and use_patch_mode
+        # defaults to False absent --diff-editing -- same whole-file
+        # regeneration as before this issue's fix, just now an explicit
+        # kwarg instead of simply never being passed.
         root, src, tests = dirs
         plan, _ = _plan_with_feature(root)
-        calls = []
+        seen_kwargs = {}
 
-        def factory(src_dir, test_dir):
-            calls.append((src_dir, test_dir))
+        def factory(src_dir, test_dir, **kwargs):
+            seen_kwargs.update(kwargs)
             return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
 
         pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
         pb.build(plan, root, src, tests)
-        assert calls == [(src, tests)]
+        assert seen_kwargs == {"use_patch_mode": False}
+
+    def test_non_scaffolded_module_respects_diff_editing_opt_in(self, dirs):
+        # #71: ace project had no --diff-editing flag at all -- every
+        # non-scaffolded iterative-path module always did whole-file
+        # regeneration regardless of .ace/config.yaml's diff_editing
+        # setting. ProjectBuilder(diff_editing=True) is this opt-in's
+        # wiring point (cmd_project passes config.diff_editing through).
+        root, src, tests = dirs
+        plan, _ = _plan_with_feature(root)
+        seen_kwargs = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            seen_kwargs.update(kwargs)
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory, diff_editing=True)
+        pb.build(plan, root, src, tests)
+        assert seen_kwargs == {"use_patch_mode": True}
+
+    def test_scaffolded_module_forces_patch_mode_even_without_diff_editing_opt_in(self, dirs):
+        # #70's lock requires patch mode to mean anything -- it's forced
+        # regardless of the user's --diff-editing preference, not merely
+        # the default when diff_editing is unset.
+        root, src, tests = dirs
+        feature_path = root / "widget.feature"
+        feature_path.write_text(_TWO_SCENARIO_FEATURE)
+        module = _scaffolded_module("widget", _SIMPLE_CONTRACT, feature_path)
+        plan = _plan(module)
+        seen_kwargs = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            seen_kwargs.update(kwargs)
+            return FakeIterativeRunner(result=_iter_result()), FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory, diff_editing=False)
+        pb.build(plan, root, src, tests)
+        assert seen_kwargs["use_patch_mode"] is True
 
     def test_cross_module_dependency_exports_are_resolved_into_real_imports(self, dirs):
         root, src, tests = dirs

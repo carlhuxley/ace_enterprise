@@ -138,6 +138,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--keep-going", action="store_true",
         help="Don't stop the build at the first module failure",
     )
+    proj.add_argument(
+        "--diff-editing",
+        action="store_true",
+        help=(
+            "Opt in to SEARCH/REPLACE-block GREEN patching instead of always "
+            "regenerating the whole file, once an implementation already exists "
+            "to patch against (default: off; same as .ace/config.yaml's "
+            "diff_editing: true). A contract-scaffolded module always uses "
+            "patch mode regardless of this flag -- its ProtectedShape lock "
+            "requires it."
+        ),
+    )
     proj.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
 
     # ace view
@@ -375,6 +387,8 @@ def cmd_project(args: argparse.Namespace) -> int:
     config = ProjectConfig.load(project_root)
     if args.playbook_id:
         config.playbook_id = args.playbook_id
+    if args.diff_editing:
+        config.diff_editing = True
 
     audit = LocalAuditClient()
 
@@ -430,6 +444,8 @@ def cmd_project(args: argparse.Namespace) -> int:
     print(f"Spec:       {spec_dir if spec_dir is not None else spec_path}")
     if not args.no_learn:
         print(f"Playbook:   {config.playbook_id}")
+    if config.diff_editing:
+        print("Diff edits: on (SEARCH/REPLACE-block GREEN patching)")
     print()
     print(plan.render())
     print()
@@ -446,7 +462,7 @@ def cmd_project(args: argparse.Namespace) -> int:
         worker_llm=worker_llm, worker_model_id=worker_model_id,
         repair_llm=repair_llm, repair_model_id=repair_model_id,
         escalation_llm=escalation_llm, escalation_model_id=escalation_model_id,
-        cgr3_retrieval=config.cgr3_retrieval,
+        cgr3_retrieval=config.cgr3_retrieval, diff_editing=config.diff_editing,
     )
     result = builder.build(
         plan, project_root, config.src_dir, config.test_dir,
