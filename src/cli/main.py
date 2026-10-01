@@ -234,6 +234,9 @@ def _run_tdd_build(args: argparse.Namespace) -> int:
         print(f"error: project directory not found: {project_root}", file=sys.stderr)
         return 1
 
+    from src.ui.broadcaster import set_project_root
+    set_project_root(project_root)
+
     config = ProjectConfig.load(project_root)
 
     if args.playbook_id:
@@ -424,6 +427,10 @@ def cmd_project(args: argparse.Namespace) -> int:
     if not project_root.is_dir():
         print(f"error: project directory not found: {project_root}", file=sys.stderr)
         return 1
+
+    from src.ui.broadcaster import set_project_root
+    set_project_root(project_root)
+
     config = ProjectConfig.load(project_root)
     if args.playbook_id:
         config.playbook_id = args.playbook_id

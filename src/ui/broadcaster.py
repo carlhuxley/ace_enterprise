@@ -18,6 +18,25 @@ logger = logging.getLogger(__name__)
 
 _SOCKET_RELPATH = ".ace/events.sock"
 
+# Instrumentation call sites (PodmanRunner, TDDCycleRunner, AuditStore) have
+# no project-root concept of their own to thread through -- broadcasting is
+# a cross-cutting observability concern, not a per-object dependency. The
+# CLI entry points (cmd_tdd/_run_tdd_build, cmd_project, cmd_dashboard) call
+# set_project_root() exactly once, right after resolving --project, so
+# every broadcast_event() call anywhere in the process picks up the right
+# target without every class needing its own project_root parameter.
+# Defaults to "." (today's behavior) when never set -- correct for the
+# common case of running `ace` from inside the project directory, same as
+# every call site's own prior default.
+_current_project_root: Path = Path(".")
+
+
+def set_project_root(project_root: Path | str) -> None:
+    """Set the project root every subsequent broadcast_event() call in this
+    process defaults to, unless it passes its own project_root explicitly."""
+    global _current_project_root
+    _current_project_root = Path(project_root)
+
 # Comfortably under common UNIX SOCK_DGRAM kernel buffer limits (commonly
 # ~64KB default, platform/sysctl-dependent) even after JSON framing
 # overhead -- the real last line of defense against EMSGSIZE, generic
@@ -32,10 +51,15 @@ def _socket_path(project_root: Path | str = ".") -> Path:
     return Path(project_root) / _SOCKET_RELPATH
 
 
-def broadcast_event(event, project_root: Path | str = ".") -> None:
+def broadcast_event(event, project_root: Path | str | None = None) -> None:
     """Send `event` (any dataclass from `src/ui/events.py`) to the
     dashboard socket if one is listening. Does nothing otherwise -- this
-    must never raise, meaningfully block, or slow down a real build."""
+    must never raise, meaningfully block, or slow down a real build.
+
+    `project_root` defaults to whatever `set_project_root()` was last
+    called with in this process (or "." if never called) -- pass it
+    explicitly only when broadcasting for a project other than the one the
+    current CLI invocation is building (e.g. tests)."""
     try:
         from src.config.settings import settings
 
@@ -48,7 +72,7 @@ def broadcast_event(event, project_root: Path | str = ".") -> None:
         # error, but never let it propagate.
         pass
 
-    path = _socket_path(project_root)
+    path = _socket_path(project_root if project_root is not None else _current_project_root)
     if not path.exists():
         return
 

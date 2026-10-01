@@ -3,10 +3,13 @@
 broadcast_event must never raise or meaningfully block a real build --
 every test here is really asserting "this failure mode is swallowed."
 """
+import json
 import socket
+from pathlib import Path
 from unittest.mock import patch
 
-from src.ui.broadcaster import _MAX_PAYLOAD_BYTES, broadcast_event
+import src.ui.broadcaster as broadcaster_module
+from src.ui.broadcaster import _MAX_PAYLOAD_BYTES, broadcast_event, set_project_root
 from src.ui.events import SandboxPostureEvent
 
 
@@ -101,3 +104,84 @@ class TestPayloadSizeGuard:
         with patch("socket.socket") as mock_socket_cls:
             broadcast_event(huge_event, project_root=tmp_path)
         mock_socket_cls.assert_not_called()
+
+
+class TestProjectRootDefaulting:
+    """Regression: every instrumentation call site (PodmanRunner.start(),
+    TDDCycleRunner, AuditStore.append()) calls broadcast_event(event) with
+    NO project_root -- found live, running the real dashboard against a
+    real build whose --project differed from the calling process's CWD,
+    where events silently went to the wrong (nonexistent) socket path and
+    never reached the dashboard. set_project_root() is what the CLI entry
+    points call once, so every such call site picks up the real target."""
+
+    def setup_method(self):
+        # Module-level global -- other tests in this same process (anything
+        # exercising cmd_tdd/cmd_project for real, not mocking
+        # set_project_root) legitimately call the real set_project_root(),
+        # by design. Force a known, controlled starting state here rather
+        # than assuming "never called yet" -- that assumption is only true
+        # in isolation, not across the whole suite, and test order isn't
+        # something to depend on.
+        self._original_root = broadcaster_module._current_project_root
+        broadcaster_module._current_project_root = Path(".")
+
+    def teardown_method(self):
+        # Must not leak this test's project_root into any other test that
+        # calls broadcast_event() without one.
+        broadcaster_module._current_project_root = self._original_root
+
+    def test_fresh_state_with_set_project_root_never_called_defaults_to_cwd(self):
+        assert broadcaster_module._current_project_root == Path(".")
+
+    def test_set_project_root_changes_the_default_broadcast_target(self, tmp_path):
+        sock_path = tmp_path / ".ace" / "events.sock"
+        sock_path.parent.mkdir(parents=True, exist_ok=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        server.bind(str(sock_path))
+        server.settimeout(1.0)
+        try:
+            set_project_root(tmp_path)
+            broadcast_event(_event())  # no project_root passed -- the real instrumentation shape
+            data, _ = server.recvfrom(65536)
+        finally:
+            server.close()
+        assert json.loads(data.decode("utf-8"))["pod_name"] == "harness_test"
+
+    def test_explicit_project_root_still_overrides_the_global_default(self, tmp_path):
+        other_dir = tmp_path / "other"
+        real_dir = tmp_path / "real"
+        for d in (other_dir, real_dir):
+            (d / ".ace").mkdir(parents=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        server.bind(str(real_dir / ".ace" / "events.sock"))
+        server.settimeout(1.0)
+        try:
+            set_project_root(other_dir)  # global points elsewhere
+            broadcast_event(_event(), project_root=real_dir)  # explicit arg wins
+            data, _ = server.recvfrom(65536)
+        finally:
+            server.close()
+        assert json.loads(data.decode("utf-8"))["pod_name"] == "harness_test"
+
+    def test_wrong_cwd_with_no_set_project_root_reproduces_the_original_bug(self, tmp_path):
+        # The exact failure mode found live: a socket exists at the real
+        # project root, but nothing ever calls set_project_root(), so the
+        # event (correctly, per the OLD default) goes to "." instead and is
+        # never seen -- pinning this down as the documented pre-fix
+        # behavior, not a surprise regression.
+        real_dir = tmp_path / "real"
+        (real_dir / ".ace").mkdir(parents=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        server.bind(str(real_dir / ".ace" / "events.sock"))
+        server.settimeout(0.3)
+        try:
+            broadcast_event(_event())  # no set_project_root(), no explicit arg
+            raised = False
+            try:
+                server.recvfrom(65536)
+            except TimeoutError:
+                raised = True
+            assert raised, "event should NOT have reached a socket it was never told about"
+        finally:
+            server.close()

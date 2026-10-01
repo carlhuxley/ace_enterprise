@@ -319,3 +319,17 @@ class TestWatchFlag:
             rc = cmd_tdd(_args(project=project, watch=True))
         assert rc == 1
         assert "dashboard' extra" in capsys.readouterr().err
+
+
+class TestProjectRootBroadcasting:
+    """Regression: set_project_root() must be called with the REAL
+    resolved --project before any build logic runs, so broadcast_event()
+    calls anywhere in the process (which carry no project_root of their
+    own) reach the right socket -- found live, running ace tdd from a
+    different CWD than --project, where this was silently missing."""
+
+    def test_run_tdd_build_sets_the_broadcaster_project_root(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()), \
+             patch("src.ui.broadcaster.set_project_root") as mock_set:
+            cmd_tdd(_args(project=project))
+        mock_set.assert_called_once_with(project.resolve())

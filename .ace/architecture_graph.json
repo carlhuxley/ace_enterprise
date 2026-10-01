@@ -909,6 +909,7 @@
         "src/cli/factory.py",
         "src/cli/project_builder.py",
         "src/contracts/project_architect.py",
+        "src/ui/broadcaster.py",
         "src/ui/dashboard.py",
         "src/utils/topo.py"
       ]
@@ -1624,6 +1625,7 @@
     },
     "src/ui/broadcaster.py": {
       "provides": [
+        "set_project_root",
         "broadcast_event"
       ],
       "depends_on": [

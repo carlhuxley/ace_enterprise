@@ -158,6 +158,17 @@ class TestFromSpecDir:
         plan_arg = builder.build.call_args[0][0]
         assert plan_arg.build_order == ["db", "api"]
 
+    def test_sets_the_broadcaster_project_root(self, structured_project):
+        # Regression: found live, running ace project from a different CWD
+        # than --project -- broadcast_event() calls (which carry no
+        # project_root of their own) must reach the real --project, not
+        # wherever the process happens to be running from.
+        root, spec_dir = structured_project
+        pa, pb, pl, architect, builder = _patch_deps()
+        with pa, pb, pl, patch("src.ui.broadcaster.set_project_root") as mock_set:
+            cmd_project(_args(from_spec_dir=spec_dir, project=root))
+        mock_set.assert_called_once_with(root.resolve())
+
     def test_diff_editing_flag_forwarded_to_project_builder(self, structured_project):
         # #71: ace project had no --diff-editing flag at all -- it was
         # hardcoded off for every non-scaffolded iterative-path module
