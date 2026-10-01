@@ -1081,6 +1081,8 @@
         "function_spec_to_requirement",
         "ModuleTDDBuilder",
         "create_tdd_builder_from_config",
+        "dep_import_lines",
+        "upstream_method_cheat_sheet",
         "render_integration_tests"
       ],
       "depends_on": [

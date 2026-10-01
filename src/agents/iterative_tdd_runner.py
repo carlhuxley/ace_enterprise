@@ -94,9 +94,7 @@ class IterativeTDDRunner:
             return None
         existing = existing_tests_from_file(test_file)
         proposed = ProposedTest(name=increment.test_name, description=increment.description)
-        logger.warning("DEBUG_MARKER_XK92 proposed.name=%r proposed.description=%r", proposed.name, proposed.description)
         verdict = self._redundancy_checker.check(existing, proposed)
-        logger.warning("DEBUG_MARKER_XK92 verdict=%s", verdict)
         if not verdict.is_redundant:
             return None
         logger.info(
@@ -141,13 +139,18 @@ class IterativeTDDRunner:
         gherkin_scenarios=None,
         test_file: "Path | None" = None,
         impl_file: "Path | None" = None,
+        dependency_context: str | None = None,
     ) -> IterativeResult:
         if gherkin_scenarios:
             return self._run_gherkin_driven(
                 requirement, gherkin_context, gherkin_scenarios,
                 test_file=test_file, impl_file=impl_file,
+                dependency_context=dependency_context,
             )
-        return self._run_planner_driven(requirement, gherkin_context, gherkin_scenarios)
+        return self._run_planner_driven(
+            requirement, gherkin_context, gherkin_scenarios,
+            dependency_context=dependency_context,
+        )
 
     # ------------------------------------------------------------------
     # Gherkin-driven: one scenario per cycle
@@ -161,6 +164,7 @@ class IterativeTDDRunner:
         *,
         test_file: "Path | None" = None,
         impl_file: "Path | None" = None,
+        dependency_context: str | None = None,
     ) -> IterativeResult:
         results: list[CycleResult] = []
         # Pre-pin paths when supplied (e.g. derived from feature file name in
@@ -205,6 +209,7 @@ class IterativeTDDRunner:
                 implementation_file=increment.implementation_file,
                 cycle_number=i,
                 gherkin_context=gherkin_context,
+                dependency_context=dependency_context,
             )
 
             runner = TDDCycleRunner(self._pod, **self._runner_kwargs)
@@ -235,6 +240,8 @@ class IterativeTDDRunner:
         requirement: str,
         gherkin_context: str | None,
         gherkin_scenarios,
+        *,
+        dependency_context: str | None = None,
     ) -> IterativeResult:
         results: list[CycleResult] = []
         cycle_number = 1
@@ -270,6 +277,7 @@ class IterativeTDDRunner:
                 implementation_file=increment.implementation_file,
                 cycle_number=cycle_number,
                 gherkin_context=gherkin_context,
+                dependency_context=dependency_context,
             )
 
             runner = TDDCycleRunner(self._pod, **self._runner_kwargs)
