@@ -25,7 +25,23 @@ CORE_FILES = [
 ]
 
 OUTPUT = ROOT / "docs" / "SYSTEM_ARCHITECTURE.md"
-MODEL = "deepseek/deepseek-v4-flash"
+# deepseek/deepseek-v4-flash (the prior default) is a reasoning-capable
+# model that -- confirmed live, repeatedly -- burns its output budget on
+# hidden <reasoning> content before ever emitting the actual table/diagram,
+# returning finish_reason="length" with empty/truncated content despite the
+# `reasoning: {exclude: true}` flag meant to suppress exactly this. Combined
+# with this script's large (~80K-token) source-context prompt, that turned
+# every few commits into a multi-minute stall waiting out 3 retries before
+# the pre-commit hook's documented "commit anyway" fallback kicked in.
+# claude-haiku-4.5 is a plain instruction-following model (no hidden
+# reasoning pass for an ordinary completion like this) and reliably
+# respects max_tokens -- a much better fit for "turn pre-digested AST
+# summaries into a markdown table + mermaid diagram" than a reasoning model
+# ever needed to be. FALLBACK_MODEL only gets used if the primary model's
+# call raises after exhausting its own retries (an outage/rate-limit), not
+# as a matter of course.
+MODEL = "anthropic/claude-haiku-4.5"
+FALLBACK_MODEL = "openai/gpt-5-mini"
 PROVIDER = "openrouter"
 
 # The prompt's own "STRICT MERMAID RULES" section is not sufficient on its
@@ -204,13 +220,33 @@ def main() -> None:
 
     print(f"Calling {PROVIDER}/{MODEL}...")
     client = LLMClient(provider=PROVIDER, model=MODEL)
+    active_model = MODEL
+
+    def generate(prompt: str) -> tuple[str, str | int]:
+        """_generate_once against the active model, falling back to
+        FALLBACK_MODEL exactly once if the primary model's call raises after
+        exhausting its own internal retries (an outage/rate-limit) -- not
+        tried preemptively, only once the primary has actually failed."""
+        nonlocal client, active_model
+        try:
+            return _generate_once(client, prompt)
+        except Exception as exc:
+            if active_model != MODEL:
+                raise  # already on the fallback model -- nothing left to try
+            print(
+                f"  {MODEL} failed ({exc}); falling back to {FALLBACK_MODEL}",
+                file=sys.stderr,
+            )
+            client = LLMClient(provider=PROVIDER, model=FALLBACK_MODEL)
+            active_model = FALLBACK_MODEL
+            return _generate_once(client, prompt)
 
     mermaid_runner = _make_mermaid_runner()
     try:
         prompt = base_prompt
         content = tokens = None
         for attempt in range(1, _MAX_MERMAID_ATTEMPTS + 1):
-            content, tokens = _generate_once(client, prompt)
+            content, tokens = generate(prompt)
 
             if mermaid_runner is None:
                 break  # no sandbox available -- accept the first response, as before
@@ -249,7 +285,8 @@ def main() -> None:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(header + content + "\n")
 
-    print(f"Wrote {OUTPUT.relative_to(ROOT)}  ({len(content):,} chars, {tokens} tokens used)")
+    model_note = f", via fallback {active_model}" if active_model != MODEL else ""
+    print(f"Wrote {OUTPUT.relative_to(ROOT)}  ({len(content):,} chars, {tokens} tokens used{model_note})")
 
 
 if __name__ == "__main__":
