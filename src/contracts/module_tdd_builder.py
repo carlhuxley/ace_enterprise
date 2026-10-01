@@ -202,8 +202,13 @@ class ModuleTDDBuilder:
         start_time = time.time()
         function_results: list[FunctionBuildResult] = []
         total_cycles = 0
-        dep_import_lines = _dep_import_lines(dep_modules)
-        dep_method_lines = _upstream_method_cheat_sheet(dep_modules)
+        # Named distinctly from the dep_import_lines() function itself --
+        # `dep_import_lines = dep_import_lines(...)` would shadow the name
+        # throughout this method's scope from the very first line (Python
+        # treats an assigned name as local for the whole function body),
+        # raising UnboundLocalError on this exact line.
+        dep_imports = dep_import_lines(dep_modules)
+        dep_method_lines = upstream_method_cheat_sheet(dep_modules)
         prior_lessons = self._prior_lessons()
 
         # Track accumulated module code
@@ -220,7 +225,7 @@ class ModuleTDDBuilder:
                 hints=contract.hints,
                 existing_code=module_code,
                 session_id=session_id,
-                dep_import_lines=dep_import_lines,
+                dep_import_lines=dep_imports,
                 dep_method_lines=dep_method_lines,
                 prior_lessons=prior_lessons,
             )
@@ -282,7 +287,7 @@ class ModuleTDDBuilder:
             )
             repaired = self._repair_module(
                 contract, module_code, integration_failures,
-                dep_import_lines=dep_import_lines,
+                dep_import_lines=dep_imports,
                 dep_method_lines=dep_method_lines,
                 prior_lessons=prior_lessons,
             )
@@ -301,7 +306,7 @@ class ModuleTDDBuilder:
         if not all_integration_passed and repair >= self._max_repair_attempts and self._escalation_llm is not None:
             escalated = self._repair_module(
                 contract, module_code, integration_failures,
-                dep_import_lines=dep_import_lines, dep_method_lines=dep_method_lines,
+                dep_import_lines=dep_imports, dep_method_lines=dep_method_lines,
                 prior_lessons=prior_lessons,
                 llm_client=self._escalation_llm,
             )
@@ -881,10 +886,12 @@ def _upstream_symbols(dep_modules: dict[str, str] | None) -> dict[str, str]:
     return out
 
 
-def _dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
+def dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
     """Concrete `from <module> import <symbols>` lines for every upstream
     dependency, so prompts and rendered tests can hand the model exactly the
-    imports it should use instead of reimplementing (issue #28)."""
+    imports it should use instead of reimplementing (issue #28). Public
+    (not leading-underscore) -- #76 reuses this from the iterative path's
+    ProjectBuilder too, not just this module's own batch path."""
     by_mod: dict[str, list[str]] = {}
     for sym, mod in _upstream_symbols(dep_modules).items():
         by_mod.setdefault(mod, []).append(sym)
@@ -894,17 +901,19 @@ def _dep_import_lines(dep_modules: dict[str, str] | None) -> list[str]:
     ]
 
 
-def _upstream_method_cheat_sheet(dep_modules: dict[str, str] | None) -> list[str]:
+def upstream_method_cheat_sheet(dep_modules: dict[str, str] | None) -> list[str]:
     """One line per public method on each already-built dependency's
     classes, e.g. 'DiscoveryTree.attach(parent_id: str, node: Node) ->
     DiscoveryTree' or 'Node.is_root -> bool (property, access without
-    parens)' -- #73: `_upstream_symbols`/`_dep_import_lines` already give
+    parens)' -- #73: `_upstream_symbols`/`dep_import_lines` already give
     the model a class's correct top-level import, but nothing about what it
     can actually call once imported, so a dependent module hallucinated
     `from discovery_tree import attach` for a method that only exists as
     `DiscoveryTree.attach`. Reuses `ast_shape.extract_protected_shape`
     (built for the `ProtectedShape` lock) rather than a second AST walk --
-    its per-class `MethodShape` already has exact, real signatures."""
+    its per-class `MethodShape` already has exact, real signatures. Public
+    (not leading-underscore) -- #76 reuses this from the iterative path's
+    ProjectBuilder too, not just this module's own batch path."""
     lines: list[str] = []
     for src in (dep_modules or {}).values():
         try:
@@ -1078,7 +1087,7 @@ def render_integration_tests(
 
     state_names = _shared_state_names(contract.shared_state)
     dep_imports = "".join(
-        f"{line}  # noqa: F401\n" for line in _dep_import_lines(dep_modules)
+        f"{line}  # noqa: F401\n" for line in dep_import_lines(dep_modules)
     )
     header = (
         f'"""Integration tests for `{module_name}`, generated from its '

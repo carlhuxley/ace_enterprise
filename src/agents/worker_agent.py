@@ -189,6 +189,8 @@ class WorkerAgent:
                 f"\nAcceptance criteria (Gherkin — use exact values from relevant scenarios):\n"
                 f"```gherkin\n{spec.gherkin_context}\n```"
             )
+        if spec.dependency_context:
+            parts.append(f"\n{spec.dependency_context}")
         rules = self._get_test_bullets()
         if rules:
             parts.append("\nAssertion contract rules:\n" + "\n".join(f"- {r}" for r in rules))
@@ -227,6 +229,8 @@ class WorkerAgent:
             _SANDBOX_IMPORT_RULE,
             _flat_import_rule(spec),
         ]
+        if spec.dependency_context:
+            parts.append(f"\n{spec.dependency_context}")
         if existing_code:
             parts.append(f"\nExisting module ({spec.implementation_file.name}):\n"
                          f"```python\n{existing_code}\n```")
@@ -259,6 +263,8 @@ class WorkerAgent:
             f"\nExisting module ({spec.implementation_file.name}):\n"
             f"```python\n{existing_code}\n```",
         ]
+        if spec.dependency_context:
+            parts.append(f"\n{spec.dependency_context}")
         if test_code:
             parts.append(f"\nTest file to satisfy:\n```python\n{test_code}\n```")
         if error_output:

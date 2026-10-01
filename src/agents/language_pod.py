@@ -25,6 +25,14 @@ class PodSpec:
     cycle_number: int
     error_output: str = ""  # feedback from a previous failed GREEN, set by TDDCycleRunner
     gherkin_context: str | None = None  # full feature file text when driving from Gherkin
+    # #76: already-built sibling modules' import lines + method signatures
+    # (ModuleTDDBuilder's dep_import_lines/upstream_method_cheat_sheet,
+    # reused here) -- a separate field from gherkin_context because
+    # gherkin_context is only ever read by WorkerAgent._test_prompt (RED);
+    # this needs to reach _impl_prompt/_patch_prompt (GREEN) too, since the
+    # real #73 failure this addresses was in generated implementation code,
+    # not a test. None/empty for a module with no dependencies.
+    dependency_context: str | None = None
     # ace_enterprise#64: additional EXISTING files a coordinated GREEN-phase
     # edit must also touch, beyond implementation_file -- e.g. a small change
     # that spans an enum in one module and a method using it in another.

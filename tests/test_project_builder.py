@@ -13,6 +13,7 @@ from src.cli.project_builder import (
     MODULE_STATUS_RELPATH,
     ModuleStatus,
     ProjectBuilder,
+    _render_dependency_context,
     _run_assembly,
 )
 from src.contracts.module_architect import FunctionSpec, IntegrationTest, ModuleContract
@@ -1152,3 +1153,82 @@ class TestScaffoldedModuleWithNoFeatureFile:
 
         call = runner.run_calls[0]
         assert feature_path.read_text() in call["gherkin_context"]
+
+
+class TestRenderDependencyContext:
+    """#76: ProjectBuilder._render_dependency_context derives the same
+    import-line + method-cheat-sheet text #73 added for the batch path,
+    but reads each dependency's real already-built source from disk --
+    topological build order guarantees it exists -- instead of a parsed
+    contract, so it works for any dependency, scaffolded or not."""
+
+    def test_no_dependencies_returns_none(self, tmp_path):
+        module = ModuleSpec("widget", "d")
+        assert _render_dependency_context(module, tmp_path) is None
+
+    def test_dependency_not_yet_built_is_skipped_not_an_error(self, tmp_path):
+        module = ModuleSpec("gadget", "d", depends_on=("widget",))
+        assert _render_dependency_context(module, tmp_path) is None
+
+    def test_renders_both_import_lines_and_method_cheat_sheet(self, tmp_path):
+        (tmp_path / "discovery_tree.py").write_text(
+            "class DiscoveryTree:\n"
+            "    def attach(self, parent_id: str, node) -> 'DiscoveryTree':\n"
+            "        pass\n"
+        )
+        module = ModuleSpec("replay_env", "d", depends_on=("discovery_tree",))
+        context = _render_dependency_context(module, tmp_path)
+        assert "from discovery_tree import DiscoveryTree" in context
+        assert "DiscoveryTree.attach(parent_id: str, node) -> 'DiscoveryTree'" in context
+        assert "do NOT reimplement their functions" in context
+        assert "never import a method name as if it were a free function" in context
+
+    def test_dependency_with_only_free_functions_omits_method_block(self, tmp_path):
+        (tmp_path / "manifest_io.py").write_text("def load():\n    pass\n")
+        module = ModuleSpec("widget", "d", depends_on=("manifest_io",))
+        context = _render_dependency_context(module, tmp_path)
+        assert "from manifest_io import load" in context
+        assert "own methods" not in context
+
+    def test_build_module_iterative_passes_rendered_context_to_the_runner(self, dirs):
+        # Mirrors test_cross_module_dependency_exports_are_resolved_into_real_imports's
+        # two-scaffolded-module setup -- widget builds (and is pre-seeded
+        # with its scaffold) before gadget, so gadget's own build sees
+        # widget's real file already on disk.
+        root, src, tests = dirs
+        widget_contract = """
+module: widget
+public_api:
+  - name: Widget
+    kind: frozen_dataclass
+    fields:
+      - name: size
+        type: int
+    methods:
+      - name: grow
+        signature: "grow(self, amount: int) -> None"
+"""
+        widget_feature = root / "widget.feature"
+        widget_feature.write_text(_TWO_SCENARIO_FEATURE)
+        gadget_feature = root / "gadget.feature"
+        gadget_feature.write_text(_TWO_SCENARIO_FEATURE.replace("widget", "gadget"))
+
+        widget = _scaffolded_module("widget", widget_contract, widget_feature)
+        gadget = _scaffolded_module(
+            "gadget", _DEPENDENT_CONTRACT, gadget_feature, depends_on=("widget",),
+        )
+        plan = _plan(widget, gadget)
+        seen = {}
+
+        def factory(src_dir, test_dir, **kwargs):
+            runner = FakeIterativeRunner(result=_iter_result())
+            seen.setdefault("runners", []).append(runner)
+            return runner, FakeOrchestrator()
+
+        pb = ProjectBuilder(llm_client=object(), iterative_runner_factory=factory)
+        pb.build(plan, root, src, tests)
+
+        gadget_runner = seen["runners"][1]  # build order: widget, then gadget
+        call = gadget_runner.run_calls[0]
+        assert "from widget import Widget" in call["dependency_context"]
+        assert "Widget.grow(amount: int) -> None" in call["dependency_context"]

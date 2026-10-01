@@ -568,6 +568,7 @@ class ProjectBuilder:
             spec = GherkinFeatureBridge.parse(module.feature_path)
         else:
             spec, feature_text = synthesize_feature_from_contract(module.parsed_contract)
+        dep_context = _render_dependency_context(module, src_dir)
 
         # Only a scaffolded module gets a protected_shape (nothing else was
         # pre-seeded for the lock to protect) and forces use_patch_mode=True
@@ -589,6 +590,7 @@ class ProjectBuilder:
                 gherkin_scenarios=spec.scenarios,
                 test_file=test_path,
                 impl_file=impl_path,
+                dependency_context=dep_context,
             )
         finally:
             orchestrator.stop()
@@ -680,6 +682,49 @@ class ProjectBuilder:
             )
         except Exception:  # noqa: BLE001 -- audit is best-effort
             logger.debug("project-build audit emit failed", exc_info=True)
+
+
+def _render_dependency_context(module: ModuleSpec, src_dir: Path) -> str | None:
+    """#76: `dep_import_lines`/`upstream_method_cheat_sheet` (#73, now public
+    in `module_tdd_builder.py` since both the batch and iterative paths use
+    them) for every already-built dependency of `module`, read from its real
+    source on disk -- topological build order guarantees it already exists
+    by the time this module is built (the same guarantee
+    `_try_scaffold_module`'s own docstring relies on). Works whether or not
+    the dependency was contract-scaffolded, since this reads the real built
+    file rather than a parsed contract. WorkerAgent's prompts otherwise
+    carry no dependency-API information at all -- the exact #73 failure
+    mode (a dependent module hallucinating a method as a free function), just
+    with no top-level import hint either.
+
+    None when `module` has no dependencies, or none of them have been built
+    yet (not an error -- mirrors `_try_scaffold_module`'s own
+    skip-not-error treatment of an unresolved dependency)."""
+    from src.contracts.module_tdd_builder import dep_import_lines, upstream_method_cheat_sheet
+
+    sources: dict[str, str] = {}
+    for dep_name in module.depends_on:
+        dep_file = src_dir / f"{dep_name}.py"
+        if dep_file.exists():
+            sources[dep_name] = dep_file.read_text()
+    if not sources:
+        return None
+
+    imports = dep_import_lines(sources)
+    if not imports:
+        return None
+    parts = [
+        "Already-built sibling modules — import what you need, do NOT "
+        "reimplement their functions:\n```python\n" + "\n".join(imports) + "\n```"
+    ]
+    methods = upstream_method_cheat_sheet(sources)
+    if methods:
+        parts.append(
+            "These imported classes' own methods — call them as instance "
+            "methods, never import a method name as if it were a free "
+            "function:\n```python\n" + "\n".join(methods) + "\n```"
+        )
+    return "\n\n".join(parts)
 
 
 def _undeclared_sibling_deps(

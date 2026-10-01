@@ -153,6 +153,60 @@ class TestRedundancyPreCheck:
         assert result.cycles[0].success is True
 
 
+class TestDependencyContextForwarding:
+    """#76: the iterative path previously gave WorkerAgent no dependency-API
+    information in its prompts at all. ProjectBuilder renders it once per
+    module and passes it into run(); it must reach every cycle's PodSpec,
+    the same way gherkin_context already does."""
+
+    def test_gherkin_driven_mode_threads_it_into_every_pod_call(self, tmp_path):
+        test_file = tmp_path / "test_login.py"
+
+        class _ScenarioStubPlanner:
+            def next_increment_for_scenario(self, **kwargs):
+                return _StubIncrement("test_login_ok", "login works", test_file, tmp_path / "login.py")
+
+            def record_test_written(self, **kwargs):
+                pass
+
+        pod = _StubPod()
+        runner = IterativeTDDRunner(pod, _ScenarioStubPlanner())
+        runner.run(
+            requirement="user login",
+            gherkin_context="Feature: login",
+            gherkin_scenarios=[{"name": "ok"}],
+            test_file=test_file,
+            impl_file=tmp_path / "login.py",
+            dependency_context="DiscoveryTree.attach(parent_id: str) -> DiscoveryTree",
+        )
+
+        assert pod.red_calls[0].dependency_context == "DiscoveryTree.attach(parent_id: str) -> DiscoveryTree"
+        assert pod.green_calls[0].dependency_context == "DiscoveryTree.attach(parent_id: str) -> DiscoveryTree"
+
+    def test_planner_driven_mode_threads_it_into_every_pod_call(self, tmp_path):
+        test_file = tmp_path / "test_add.py"
+        pod = _StubPod()
+        planner = _StubPlanner([
+            _StubIncrement("test_add_returns_sum", "adds two numbers", test_file, tmp_path / "add.py"),
+        ])
+        runner = IterativeTDDRunner(pod, planner)
+        runner.run(requirement="calculator", dependency_context="Adder.add(a: int, b: int) -> int")
+
+        assert pod.red_calls[0].dependency_context == "Adder.add(a: int, b: int) -> int"
+        assert pod.green_calls[0].dependency_context == "Adder.add(a: int, b: int) -> int"
+
+    def test_defaults_to_none(self, tmp_path):
+        test_file = tmp_path / "test_add.py"
+        pod = _StubPod()
+        planner = _StubPlanner([
+            _StubIncrement("test_add_returns_sum", "adds two numbers", test_file, tmp_path / "add.py"),
+        ])
+        runner = IterativeTDDRunner(pod, planner)
+        runner.run(requirement="calculator")
+
+        assert pod.red_calls[0].dependency_context is None
+
+
 class TestEscalationForwarding:
     """Repair-ceiling escalation (#40, extended to this path): the two new
     constructor params must reach the TDDCycleRunner instances this class

@@ -12,10 +12,10 @@ from src.contracts.module_architect import FunctionSpec, IntegrationTest, Module
 from src.contracts.module_tdd_builder import (
     FunctionBuildResult,
     ModuleTDDBuilder,
-    _dep_import_lines,
     _redeclared_upstream,
-    _upstream_method_cheat_sheet,
     _upstream_symbols,
+    dep_import_lines,
+    upstream_method_cheat_sheet,
 )
 
 
@@ -169,7 +169,7 @@ def test_dep_import_lines_lists_public_symbols_grouped_by_module():
         "dag_graph": "def add_edge(a, b): pass\ndef _private(): pass\nclass Node: pass\n",
         "manifest_io": "def load(): pass\n",
     }
-    assert _dep_import_lines(deps) == [
+    assert dep_import_lines(deps) == [
         "from dag_graph import Node, add_edge",
         "from manifest_io import load",
     ]
@@ -188,7 +188,7 @@ def test_upstream_method_cheat_sheet_lists_methods_with_real_signatures():
             "        pass\n"
         ),
     }
-    assert _upstream_method_cheat_sheet(deps) == [
+    assert upstream_method_cheat_sheet(deps) == [
         "DiscoveryTree.attach(parent_id: str, node) -> DiscoveryTree",
         "DiscoveryTree.children_of(node_id: str) -> list",
     ]
@@ -196,14 +196,14 @@ def test_upstream_method_cheat_sheet_lists_methods_with_real_signatures():
 
 def test_upstream_method_cheat_sheet_formats_properties_without_parens():
     deps = {"discovery_tree": "class Node:\n    @property\n    def is_root(self) -> bool:\n        pass\n"}
-    assert _upstream_method_cheat_sheet(deps) == [
+    assert upstream_method_cheat_sheet(deps) == [
         "Node.is_root -> bool (property, access without parens)",
     ]
 
 
 def test_upstream_method_cheat_sheet_strips_self_with_no_other_args():
     deps = {"m": "class Widget:\n    def reset(self) -> None:\n        pass\n"}
-    assert _upstream_method_cheat_sheet(deps) == ["Widget.reset() -> None"]
+    assert upstream_method_cheat_sheet(deps) == ["Widget.reset() -> None"]
 
 
 def test_upstream_method_cheat_sheet_excludes_private_and_dunder_methods():
@@ -218,7 +218,7 @@ def test_upstream_method_cheat_sheet_excludes_private_and_dunder_methods():
             "        pass\n"
         ),
     }
-    assert _upstream_method_cheat_sheet(deps) == ["Widget.public() -> None"]
+    assert upstream_method_cheat_sheet(deps) == ["Widget.public() -> None"]
 
 
 def test_upstream_method_cheat_sheet_covers_multiple_classes_and_modules():
@@ -226,7 +226,7 @@ def test_upstream_method_cheat_sheet_covers_multiple_classes_and_modules():
         "a_mod": "class A:\n    def foo(self) -> None:\n        pass\n",
         "b_mod": "class B:\n    def bar(self) -> None:\n        pass\n",
     }
-    assert _upstream_method_cheat_sheet(deps) == [
+    assert upstream_method_cheat_sheet(deps) == [
         "A.foo() -> None",
         "B.bar() -> None",
     ]
@@ -234,12 +234,12 @@ def test_upstream_method_cheat_sheet_covers_multiple_classes_and_modules():
 
 def test_upstream_method_cheat_sheet_empty_for_class_with_no_public_methods():
     deps = {"m": "class Empty:\n    def _private(self) -> None:\n        pass\n"}
-    assert _upstream_method_cheat_sheet(deps) == []
+    assert upstream_method_cheat_sheet(deps) == []
 
 
 def test_upstream_method_cheat_sheet_empty_for_no_deps():
-    assert _upstream_method_cheat_sheet(None) == []
-    assert _upstream_method_cheat_sheet({}) == []
+    assert upstream_method_cheat_sheet(None) == []
+    assert upstream_method_cheat_sheet({}) == []
 
 
 def test_build_function_prompt_includes_dependency_method_cheat_sheet():

@@ -1,4 +1,5 @@
 """Tests for WorkerAgent and PythonLanguagePod (ace_enterprise-eyd)."""
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 from src.agents.language_pod import LanguagePod, PhaseResult, PodSpec
@@ -88,6 +89,21 @@ class TestGenerateTest:
         assert "from src.order import" in prompt  # named as the wrong example
         assert "flat" in prompt.lower()
 
+    def test_prompt_includes_dependency_context_when_set(self, tmp_path):
+        # #76: the iterative path previously gave the model no
+        # dependency-API information at all, not even top-level import
+        # names -- ProjectBuilder now renders this once per module and
+        # threads it through PodSpec.
+        w = WorkerAgent(_llm())
+        spec = replace(_spec(tmp_path), dependency_context="DiscoveryTree.attach(parent_id: str) -> DiscoveryTree")
+        w.generate_test(spec)
+        assert "DiscoveryTree.attach(parent_id: str) -> DiscoveryTree" in _captured_prompt(w)
+
+    def test_prompt_excludes_dependency_context_section_when_unset(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_test(_spec(tmp_path))
+        assert "sibling modules" not in _captured_prompt(w)
+
 
 # ---------------------------------------------------------------------------
 # WorkerAgent — generate_implementation
@@ -117,6 +133,20 @@ class TestGenerateImplementation:
         w = WorkerAgent(_llm())
         w.generate_implementation(_spec(tmp_path), module_context="def inventory_check() -> bool")
         assert "inventory_check" in _captured_prompt(w)
+
+    def test_prompt_includes_dependency_context_when_set(self, tmp_path):
+        # #76: the original #73 failure (hallucinating a method as a free
+        # function) was in generated implementation code, not a test --
+        # this must reach generate_implementation's prompt, not just RED's.
+        w = WorkerAgent(_llm())
+        spec = replace(_spec(tmp_path), dependency_context="DiscoveryTree.attach(parent_id: str) -> DiscoveryTree")
+        w.generate_implementation(spec)
+        assert "DiscoveryTree.attach(parent_id: str) -> DiscoveryTree" in _captured_prompt(w)
+
+    def test_prompt_excludes_dependency_context_section_when_unset(self, tmp_path):
+        w = WorkerAgent(_llm())
+        w.generate_implementation(_spec(tmp_path))
+        assert "sibling modules" not in _captured_prompt(w)
 
     def test_playbook_bullets_injected_when_manager_set(self, tmp_path):
         pm = MagicMock()
@@ -382,6 +412,17 @@ class TestGeneratePatch:
         prompt = _captured_prompt(w)
         assert "SEARCH/REPLACE" in prompt
         assert "do NOT output the whole file" in prompt
+
+    def test_prompt_includes_dependency_context_when_set(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        spec = replace(_spec(tmp_path), dependency_context="DiscoveryTree.attach(parent_id: str) -> DiscoveryTree")
+        w.generate_patch(spec, existing_code="x = 1")
+        assert "DiscoveryTree.attach(parent_id: str) -> DiscoveryTree" in _captured_prompt(w)
+
+    def test_prompt_excludes_dependency_context_section_when_unset(self, tmp_path):
+        w = WorkerAgent(_llm(content=_SR_BLOCK))
+        w.generate_patch(_spec(tmp_path), existing_code="x = 1")
+        assert "sibling modules" not in _captured_prompt(w)
 
     def test_prompt_states_the_flat_import_convention_for_this_module(self, tmp_path):
         w = WorkerAgent(_llm(content=_SR_BLOCK))
