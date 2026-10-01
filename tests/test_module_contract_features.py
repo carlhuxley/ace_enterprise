@@ -67,7 +67,7 @@ class TestDataclassScenarios:
         assert len(feature.scenarios) == 1
         scenario = feature.scenarios[0]
         assert scenario.name == "Node enforces its invariants"
-        assert any("built via make_valid_node(**overrides)" in s for s in scenario.steps)
+        assert any("make_valid_node(**overrides)" in s and "NOT a pytest fixture" in s for s in scenario.steps)
         assert any("ValueError is raised when score is negative" in s for s in scenario.steps)
 
     def test_dataclass_with_its_own_methods_gets_one_scenario_per_method(self):
@@ -87,7 +87,7 @@ class TestDataclassScenarios:
         assert len(feature.scenarios) == 1
         scenario = feature.scenarios[0]
         assert scenario.name == "Tree.attach"
-        assert any("built via make_valid_tree(**overrides)" in s for s in scenario.steps)
+        assert any("make_valid_tree(**overrides)" in s and "NOT a pytest fixture" in s for s in scenario.steps)
         assert any("Tree.attach returns a NEW Tree instance" in s for s in scenario.steps)
 
 
@@ -157,8 +157,23 @@ class TestFixtureFactoryAwareness:
         )
         feature, _ = synthesize_feature_from_contract(doc)
         steps = feature.scenarios[0].steps
-        assert any("built via make_valid_node(**overrides)" in s for s in steps)
+        assert any("make_valid_node(**overrides)" in s for s in steps)
         assert not any("value: int" in s for s in steps)
+
+    def test_dataclass_scenario_step_warns_the_factory_is_not_a_pytest_fixture(self):
+        """#75: a real live run found the model sometimes writing
+        `def test_x(make_valid_node):`, treating the factory as a pytest
+        fixture to inject rather than a plain function to import and call."""
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: value\n        type: int\n"
+            "    methods:\n      - name: doubled\n        signature: \"doubled(self) -> int\"\n"
+        )
+        feature, _ = synthesize_feature_from_contract(doc)
+        steps = feature.scenarios[0].steps
+        assert any("NOT a pytest fixture" in s for s in steps)
+        assert any("test function parameter" in s for s in steps)
 
     def test_concrete_class_scenario_step_is_unaffected_by_factories(self):
         doc = _doc(
@@ -189,6 +204,16 @@ class TestFixtureFactoryAwareness:
         )
         _, context = synthesize_feature_from_contract(doc)
         assert "fixture factories" not in context
+
+    def test_context_warns_factories_are_not_pytest_fixtures(self):
+        doc = _doc(
+            "module: m\npublic_api:\n"
+            "  - name: Node\n    kind: frozen_dataclass\n"
+            "    fields:\n      - name: value\n        type: int\n"
+        )
+        _, context = synthesize_feature_from_contract(doc)
+        assert "NOT pytest fixtures" in context
+        assert "test function parameter" in context
 
 
 class TestFunctionScenarios:

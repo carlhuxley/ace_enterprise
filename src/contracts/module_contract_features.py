@@ -84,7 +84,19 @@ def _constructor_step(entry: ApiEntry) -> str:
     constructed by field, not a separate constructor spec)."""
     factory = fixture_factory_name(entry)
     if factory:
-        return f"Given a {entry.name} built via {factory}(**overrides)"
+        # #75: a real live run found the model sometimes writing
+        # `def test_x(make_valid_node):`, treating the factory as a
+        # pytest fixture to inject rather than a plain function to import
+        # and call -- the make_valid_* naming collides with a common real
+        # pytest fixture-naming idiom. Spelling out "import it and call it
+        # directly, not a pytest fixture" here is what actually reaches the
+        # model at the point it writes the constructing step.
+        return (
+            f"Given a {entry.name} built by importing {factory} and calling "
+            f"it directly as {factory}(**overrides) -- it is a plain "
+            f"function, NOT a pytest fixture, so never take it as a test "
+            f"function parameter"
+        )
     if entry.constructor and entry.constructor.params:
         params = ", ".join(f"{p.name}: {p.type}" for p in entry.constructor.params)
         return f"Given a {entry.name} constructed with {params}"
@@ -199,7 +211,11 @@ def synthesize_feature_from_contract(doc: ContractDocument) -> tuple[FeatureSpec
         context_parts.append(
             "Test fixture factories available: "
             + ", ".join(f"{name}(**overrides)" for name in factory_names)
-            + " -- prefer these over constructing instances field-by-field."
+            + " -- prefer these over constructing instances field-by-field. "
+            "These are plain functions: import and call them directly, "
+            "e.g. `node = make_valid_node(parent_id=None)`. They are NOT "
+            "pytest fixtures -- never declare them as a test function "
+            "parameter for dependency injection."
         )
 
     feature = FeatureSpec(title=doc.description or doc.module, scenarios=scenarios)
