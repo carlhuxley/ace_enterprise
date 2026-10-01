@@ -79,6 +79,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     tdd.add_argument(
+        "--watch",
+        action="store_true",
+        help=(
+            "Open the live mission-control dashboard in this terminal and run "
+            "the build as a background worker inside it (requires the "
+            "'dashboard' extra: pip install -e .[dashboard]). For a decoupled "
+            "sidecar instead, run `ace dashboard` in a separate terminal/pane "
+            "and this flag is unnecessary -- the dashboard picks up events from "
+            "any ace tdd/ace project run against the same --project."
+        ),
+    )
+    tdd.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -183,10 +195,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     view.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
 
+    # ace dashboard
+    dash = sub.add_parser(
+        "dashboard",
+        help="Live mission-control TUI -- sandbox posture, execution stream, "
+             "playbook deltas, audit chain (requires the 'dashboard' extra)",
+    )
+    dash.add_argument(
+        "--project", type=Path, default=Path("."),
+        help="Project directory to watch for events (default: current directory) "
+             "-- must match the --project an ace tdd/ace project run uses",
+    )
+    dash.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+
     return parser
 
 
 def cmd_tdd(args: argparse.Namespace) -> int:
+    if getattr(args, "watch", False):
+        try:
+            from src.ui.dashboard import run_dashboard_with_worker
+        except ImportError as exc:
+            print(
+                f"error: --watch requires the 'dashboard' extra "
+                f"(pip install -e .[dashboard]): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        return run_dashboard_with_worker(lambda: _run_tdd_build(args), project_root=args.project)
+    return _run_tdd_build(args)
+
+
+def _run_tdd_build(args: argparse.Namespace) -> int:
     from src.cli.config import ProjectConfig
 
     project_root = args.project.resolve()
@@ -563,6 +603,25 @@ def cmd_view(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    project_root = args.project.resolve()
+    if not project_root.is_dir():
+        print(f"error: project directory not found: {project_root}", file=sys.stderr)
+        return 1
+
+    try:
+        from src.ui.dashboard import run_dashboard
+    except ImportError as exc:
+        print(
+            f"error: ace dashboard requires the 'dashboard' extra "
+            f"(pip install -e .[dashboard]): {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    return run_dashboard(project_root=project_root)
+
+
 def _confirm(question: str) -> bool:
     try:
         return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
@@ -579,7 +638,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    handlers = {"tdd": cmd_tdd, "project": cmd_project, "view": cmd_view}
+    handlers = {"tdd": cmd_tdd, "project": cmd_project, "view": cmd_view, "dashboard": cmd_dashboard}
     sys.exit(handlers[args.command](args))
 
 

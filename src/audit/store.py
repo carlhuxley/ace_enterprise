@@ -201,6 +201,15 @@ class AuditStore:
             session.add(model)
             logger.debug(f"Appended audit event: {event_with_hash.event_id}")
 
+            from src.ui.broadcaster import broadcast_event
+            from src.ui.events import AuditChainEvent
+
+            broadcast_event(AuditChainEvent(
+                event_type=event_with_hash.event_type.value,
+                event_hash=event_with_hash.event_hash,
+                prev_hash=event_with_hash.prev_hash,
+            ))
+
             return event_with_hash
 
     def query(self, query: AuditQuery) -> AuditResult:

@@ -125,6 +125,12 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: Literal["json", "text"] = "json"
 
+    # Live dashboard (`ace dashboard` / `ace tdd --watch`) -- fire-and-forget
+    # UDP broadcasting over .ace/events.sock, src/ui/broadcaster.py. An
+    # explicit kill switch independent of whether a dashboard happens to be
+    # listening (broadcasting is already a no-op with none listening).
+    enable_event_broadcasting: bool = True
+
     # Storage & Retention
     experiment_log_retention_days: int = 365
     checkpoint_retention_count: int = 50

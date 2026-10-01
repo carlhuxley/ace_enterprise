@@ -27,6 +27,8 @@ from pathlib import Path
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.audit.schemas import AuditEventType as _AuditEventType
+from src.ui.broadcaster import broadcast_event
+from src.ui.events import ExecutionStreamEvent, PlaybookDeltaEvent
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,24 @@ class TDDCycleRunner:
         # task-classification signal currently available at this layer.
         self._task_type = task_type
 
+    def _run_phase(self, phase: str, call) -> PhaseResult:
+        """Wraps one `self._pod.run_red/run_green/run_refactor(...)` call
+        with before/after `ExecutionStreamEvent` broadcasts for the live
+        dashboard (`ace dashboard`). `TDDCycleRunner.run()` is the only real
+        caller of any pod's phase methods (confirmed via repo-wide grep) --
+        one wrapper here covers every pod (Python/Go/TypeScript/Simulation)
+        and every retry/escalation attempt uniformly, with no per-pod code.
+        `call` is a zero-arg callable so each call site keeps its own exact
+        arguments (retry_spec, escalate=True, ...) unchanged."""
+        broadcast_event(ExecutionStreamEvent(phase=phase, status="started"))
+        result = call()
+        broadcast_event(ExecutionStreamEvent(
+            phase=phase, status="completed",
+            stdout_chunk=result.output or result.error or "",
+            exit_code=0 if result.passed else 1,
+        ))
+        return result
+
     def run(self, spec: PodSpec) -> CycleResult:
         cycle_start = time.monotonic()
         token_start = len(self._pod.token_usage())
@@ -140,12 +160,12 @@ class TDDCycleRunner:
         # often just LLM output-formatting noise (e.g. an unclosed markdown
         # fence, a stray non-ASCII character breaking the parser) worth one
         # retry before giving up -- GREEN already gets this treatment.
-        red_result = self._pod.run_red(spec)
+        red_result = self._run_phase("RED", lambda: self._pod.run_red(spec))
         for _ in range(self._max_red_attempts - 1):
             red_never_pulsed = red_result.output == "" and bool(red_result.error)
             if _is_abort(red_result) or not red_never_pulsed:
                 break
-            red_result = self._pod.run_red(spec)
+            red_result = self._run_phase("RED", lambda: self._pod.run_red(spec))
 
         red_never_pulsed = red_result.output == "" and bool(red_result.error)
         if _is_abort(red_result) or red_never_pulsed:
@@ -177,7 +197,7 @@ class TDDCycleRunner:
         for _ in range(self._max_green_attempts):
             green_attempts += 1
             retry_spec = dataclasses.replace(spec, error_output=error_feedback)
-            green_result = self._pod.run_green(retry_spec)
+            green_result = self._run_phase("GREEN", lambda rs=retry_spec: self._pod.run_green(rs))
             if green_result.passed or _is_abort(green_result):
                 break
             error_feedback = green_result.output or green_result.error or ""
@@ -199,7 +219,7 @@ class TDDCycleRunner:
                 self._model_id, self._escalation_model_id, spec.cycle_number,
             )
             green_attempts += 1
-            green_result = self._pod.run_green(retry_spec, escalate=True)
+            green_result = self._run_phase("GREEN", lambda rs=retry_spec: self._pod.run_green(rs, escalate=True))
             logger.warning(
                 "TDDCycleRunner: escalated attempt %s",
                 "succeeded" if green_result.passed else "also failed",
@@ -246,7 +266,7 @@ class TDDCycleRunner:
         })
 
         # --- REFACTOR ---
-        refactor_result = self._pod.run_refactor(spec)
+        refactor_result = self._run_phase("REFACTOR", lambda: self._pod.run_refactor(spec))
 
         cycle_result = CycleResult(
             success=refactor_result.passed,
@@ -337,6 +357,20 @@ class TDDCycleRunner:
                 },
             )
             self._curator.apply_updates(self._playbook_id, curator_output)
+            # getattr, not a direct attribute access: not every Reflector's
+            # output is a real storage.schemas.ReflectorOutput (e.g.
+            # hand-rolled test doubles) -- broadcasting for the live
+            # dashboard must never be able to break the actual learn pass
+            # (writing bullets to the playbook) just because a field is
+            # missing.
+            root_cause = getattr(reflector_output, "root_cause", "") or ""
+            for bullet in curator_output.delta_bullets:
+                broadcast_event(PlaybookDeltaEvent(
+                    bullet_content=bullet.content,
+                    bullet_section=bullet.section,
+                    root_cause=root_cause,
+                    cycle_number=spec.cycle_number,
+                ))
             self._persist_reflection(spec, result, reflector_output, curator_output)
             logger.info(
                 f"TDDCycleRunner: wrote {len(curator_output.delta_bullets)} "

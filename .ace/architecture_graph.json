@@ -156,7 +156,9 @@
         "PodmanRunner"
       ],
       "depends_on": [
-        "src/agents/podman_orchestrator.py"
+        "src/agents/podman_orchestrator.py",
+        "src/ui/broadcaster.py",
+        "src/ui/events.py"
       ]
     },
     "src/agents/polyglot_pod_builder.py": {
@@ -358,7 +360,9 @@
       "depends_on": [
         "src/agents/language_pod.py",
         "src/audit/schemas.py",
-        "src/storage/schemas.py"
+        "src/storage/schemas.py",
+        "src/ui/broadcaster.py",
+        "src/ui/events.py"
       ]
     },
     "src/agents/tdd_failure_recorder.py": {
@@ -596,7 +600,9 @@
         "AuditStore"
       ],
       "depends_on": [
-        "src/audit/schemas.py"
+        "src/audit/schemas.py",
+        "src/ui/broadcaster.py",
+        "src/ui/events.py"
       ]
     },
     "src/benchmark/__init__.py": {
@@ -891,6 +897,7 @@
         "cmd_tdd",
         "cmd_project",
         "cmd_view",
+        "cmd_dashboard",
         "main"
       ],
       "depends_on": [
@@ -902,6 +909,7 @@
         "src/cli/factory.py",
         "src/cli/project_builder.py",
         "src/contracts/project_architect.py",
+        "src/ui/dashboard.py",
         "src/utils/topo.py"
       ]
     },
@@ -1607,6 +1615,37 @@
         "RollbackResult",
         "PerformanceMetrics",
         "RegressionAlert"
+      ],
+      "depends_on": []
+    },
+    "src/ui/__init__.py": {
+      "provides": [],
+      "depends_on": []
+    },
+    "src/ui/broadcaster.py": {
+      "provides": [
+        "broadcast_event"
+      ],
+      "depends_on": [
+        "src/config/settings.py"
+      ]
+    },
+    "src/ui/dashboard.py": {
+      "provides": [
+        "PostureBar",
+        "AuditTicker",
+        "DashboardApp",
+        "run_dashboard",
+        "run_dashboard_with_worker"
+      ],
+      "depends_on": []
+    },
+    "src/ui/events.py": {
+      "provides": [
+        "SandboxPostureEvent",
+        "ExecutionStreamEvent",
+        "PlaybookDeltaEvent",
+        "AuditChainEvent"
       ],
       "depends_on": []
     },

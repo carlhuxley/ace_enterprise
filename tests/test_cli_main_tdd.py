@@ -24,6 +24,7 @@ def _args(**overrides):
         "no_learn": False,
         "keep_going": False,
         "diff_editing": False,
+        "watch": False,
         "verbose": False,
     }
     defaults.update(overrides)
@@ -275,3 +276,46 @@ class TestMultiFeature:
         rc = cmd_tdd(_args(project=tmp_path))
         assert rc == 1
         assert "unknown node" in capsys.readouterr().err
+
+
+class TestWatchFlag:
+    """--watch inverts control: the dashboard becomes the foreground
+    process and the normal build runs as a background worker inside it --
+    never a spawned subprocess fighting for the TTY (see src/ui/dashboard.py)."""
+
+    def test_watch_dispatches_to_run_dashboard_with_worker(self, project):
+        with patch("src.ui.dashboard.run_dashboard_with_worker", return_value=0) as mock_run:
+            rc = cmd_tdd(_args(project=project, watch=True))
+        assert rc == 0
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        assert kwargs["project_root"] == project
+
+    def test_watch_passes_the_real_build_as_the_worker_function(self, project):
+        with patch("src.ui.dashboard.run_dashboard_with_worker") as mock_run:
+            cmd_tdd(_args(project=project, watch=True))
+        build_fn = mock_run.call_args.args[0]
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            result = build_fn()
+        build_agent.assert_called_once()
+        assert result == 0
+
+    def test_no_watch_never_imports_the_dashboard(self, project):
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()), \
+             patch("src.ui.dashboard.run_dashboard_with_worker") as mock_run:
+            cmd_tdd(_args(project=project))
+        mock_run.assert_not_called()
+
+    def test_watch_without_the_dashboard_extra_reports_a_clear_error(self, project, capsys):
+        import builtins
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "src.ui.dashboard":
+                raise ImportError("No module named 'textual'")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            rc = cmd_tdd(_args(project=project, watch=True))
+        assert rc == 1
+        assert "dashboard' extra" in capsys.readouterr().err

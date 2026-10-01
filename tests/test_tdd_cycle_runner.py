@@ -6,6 +6,7 @@ without touching the container or LLM.
 import json
 from datetime import UTC
 from pathlib import Path
+from unittest.mock import patch
 
 from src.agents.language_pod import PhaseResult, PodSpec, TokenUsage
 from src.agents.tdd_cycle_runner import CycleResult, TDDCycleRunner
@@ -1092,3 +1093,105 @@ def test_no_escalation_audit_event_when_not_configured(tmp_path):
     from src.audit.schemas import AuditEventType
     types = [e["event_type"] for e in audit.events]
     assert AuditEventType.ESCALATION_TRIGGERED not in types
+
+
+# ---------------------------------------------------------------------------
+# Live dashboard: ExecutionStreamEvent broadcasts around each phase call
+# ---------------------------------------------------------------------------
+
+class TestExecutionStreamBroadcasting:
+    """TDDCycleRunner.run() is the only real caller of any pod's
+    run_red/run_green/run_refactor (confirmed via repo-wide grep) -- these
+    tests mock broadcast_event so no real socket I/O happens."""
+
+    def test_full_cycle_broadcasts_started_and_completed_for_each_phase(self, tmp_path):
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner = TDDCycleRunner(ControlledPod())
+            result = runner.run(_spec(tmp_path))
+
+        assert result.success is True
+        phases_and_statuses = [
+            (call.args[0].phase, call.args[0].status) for call in mock_broadcast.call_args_list
+        ]
+        assert ("RED", "started") in phases_and_statuses
+        assert ("RED", "completed") in phases_and_statuses
+        assert ("GREEN", "started") in phases_and_statuses
+        assert ("GREEN", "completed") in phases_and_statuses
+        assert ("REFACTOR", "started") in phases_and_statuses
+        assert ("REFACTOR", "completed") in phases_and_statuses
+
+    def test_completed_event_carries_exit_code_from_phase_result(self, tmp_path):
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner = TDDCycleRunner(ControlledPod())
+            runner.run(_spec(tmp_path))
+
+        completed_events = {
+            call.args[0].phase: call.args[0] for call in mock_broadcast.call_args_list
+            if call.args[0].status == "completed"
+        }
+        # RED is *supposed* to fail (no implementation exists yet) --
+        # exit_code reflects PhaseResult.passed honestly either way.
+        assert completed_events["RED"].exit_code == 1
+        assert completed_events["GREEN"].exit_code == 0
+        assert completed_events["REFACTOR"].exit_code == 0
+
+    def test_each_green_retry_attempt_gets_its_own_broadcast_pair(self, tmp_path):
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner = TDDCycleRunner(ControlledPod(green_pass_on=3), max_green_attempts=3)
+            runner.run(_spec(tmp_path))
+
+        green_starts = [
+            call.args[0] for call in mock_broadcast.call_args_list
+            if call.args[0].phase == "GREEN" and call.args[0].status == "started"
+        ]
+        assert len(green_starts) == 3
+
+    def test_escalated_green_attempt_also_broadcasts(self, tmp_path):
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner = TDDCycleRunner(
+                EscalatablePod(), max_green_attempts=2,
+                escalation_llm_client=object(), escalation_model_id="stronger-model",
+            )
+            runner.run(_spec(tmp_path))
+
+        green_completions = [
+            call.args[0] for call in mock_broadcast.call_args_list
+            if call.args[0].phase == "GREEN" and call.args[0].status == "completed"
+        ]
+        # 2 normal attempts + 1 escalated attempt
+        assert len(green_completions) == 3
+
+
+# ---------------------------------------------------------------------------
+# Live dashboard: PlaybookDeltaEvent broadcasts from _learn()
+# ---------------------------------------------------------------------------
+
+class TestPlaybookDeltaBroadcasting:
+    def test_each_delta_bullet_broadcasts_with_real_fields(self, tmp_path):
+        curator = _RealShapeCurator(bullets=[
+            DeltaBullet(section="strategies_and_hard_rules", content="check boundary conditions"),
+            DeltaBullet(section="domain_knowledge", content="off-by-one errors are common at loop edges"),
+        ])
+        runner = TDDCycleRunner(
+            ControlledPod(green_pass_on=999), max_green_attempts=1,
+            reflector=_RealShapeReflector(), curator=curator,
+        )
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner.run(_spec(tmp_path))
+
+        events = [call.args[0] for call in mock_broadcast.call_args_list if call.args[0].type == "playbook_delta"]
+        assert len(events) == 2
+        assert events[0].bullet_content == "check boundary conditions"
+        assert events[0].bullet_section == "strategies_and_hard_rules"
+        assert events[0].root_cause == "used < instead of <="
+        assert events[1].bullet_content == "off-by-one errors are common at loop edges"
+
+    def test_missing_root_cause_on_a_minimal_reflector_output_does_not_break_learning(self, tmp_path):
+        # _FakeReflectorOutput (used elsewhere in this file) has no
+        # root_cause attribute at all -- broadcasting must never be able to
+        # swallow the real learn pass over a missing field on a test double
+        # or an unusual Reflector implementation.
+        curator = _SpyCurator(bullets=[_FakeDeltaBullet("always use pathlib")])
+        runner = TDDCycleRunner(ControlledPod(), reflector=_SpyReflector(), curator=curator)
+        result = runner.run(_spec(tmp_path))
+        assert len(result.learned_bullets) == 1

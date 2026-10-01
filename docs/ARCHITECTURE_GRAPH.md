@@ -2,7 +2,7 @@
 
 # Architecture Dependency Graph
 
-169 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
+173 modules scanned from `src/`, a cycle was found: src/cli/config.py -> src/cli/factory.py -> src/cli/config.py.
 
 Deterministically derived from real `import` statements (AST-parsed), not hand-maintained or LLM-narrated -- see `src/utils/dependency_graph.py`.
 
@@ -160,23 +160,27 @@ flowchart TD
     n149["repository"]
     n150["schemas"]
     n151["__init__"]
-    n152["ast_shape"]
-    n153["claude_cli_client"]
-    n154["code_extraction"]
-    n155["context_map"]
-    n156["dependency_graph"]
-    n157["effgen_client"]
-    n158["embedding"]
-    n159["file_lock"]
-    n160["id_generator"]
-    n161["import_validator"]
-    n162["llm_client"]
-    n163["mermaid_validation"]
-    n164["patcher"]
-    n165["playbook_enforcer"]
-    n166["session_log"]
-    n167["third_party_imports"]
-    n168["topo"]
+    n152["broadcaster"]
+    n153["dashboard"]
+    n154["events"]
+    n155["__init__"]
+    n156["ast_shape"]
+    n157["claude_cli_client"]
+    n158["code_extraction"]
+    n159["context_map"]
+    n160["dependency_graph"]
+    n161["effgen_client"]
+    n162["embedding"]
+    n163["file_lock"]
+    n164["id_generator"]
+    n165["import_validator"]
+    n166["llm_client"]
+    n167["mermaid_validation"]
+    n168["patcher"]
+    n169["playbook_enforcer"]
+    n170["session_log"]
+    n171["third_party_imports"]
+    n172["topo"]
     n1 --> n57
     n2 --> n15
     n2 --> n16
@@ -189,11 +193,11 @@ flowchart TD
     n2 --> n127
     n2 --> n144
     n2 --> n150
-    n2 --> n162
+    n2 --> n166
     n5 --> n11
     n5 --> n13
     n5 --> n143
-    n5 --> n164
+    n5 --> n168
     n6 --> n13
     n6 --> n14
     n10 --> n4
@@ -206,13 +210,15 @@ flowchart TD
     n12 --> n14
     n13 --> n11
     n14 --> n13
+    n14 --> n152
+    n14 --> n154
     n15 --> n6
     n15 --> n13
     n15 --> n14
     n15 --> n38
     n15 --> n39
     n15 --> n40
-    n15 --> n155
+    n15 --> n159
     n16 --> n4
     n16 --> n5
     n16 --> n11
@@ -224,8 +230,8 @@ flowchart TD
     n18 --> n8
     n18 --> n11
     n18 --> n13
-    n18 --> n152
-    n18 --> n164
+    n18 --> n156
+    n18 --> n168
     n22 --> n21
     n22 --> n26
     n22 --> n27
@@ -252,13 +258,15 @@ flowchart TD
     n32 --> n11
     n32 --> n57
     n32 --> n150
+    n32 --> n152
+    n32 --> n154
     n33 --> n127
     n33 --> n147
     n33 --> n150
-    n36 --> n162
+    n36 --> n166
     n37 --> n11
     n37 --> n13
-    n37 --> n164
+    n37 --> n168
     n38 --> n13
     n38 --> n14
     n39 --> n11
@@ -286,6 +294,8 @@ flowchart TD
     n56 --> n57
     n56 --> n58
     n58 --> n57
+    n58 --> n152
+    n58 --> n154
     n60 --> n13
     n60 --> n14
     n60 --> n63
@@ -321,7 +331,7 @@ flowchart TD
     n76 --> n15
     n76 --> n16
     n76 --> n56
-    n76 --> n162
+    n76 --> n166
     n78 --> n77
     n80 --> n74
     n81 --> n58
@@ -350,9 +360,9 @@ flowchart TD
     n86 --> n108
     n86 --> n127
     n86 --> n144
-    n86 --> n153
-    n86 --> n155
-    n86 --> n162
+    n86 --> n157
+    n86 --> n159
+    n86 --> n166
     n87 --> n4
     n87 --> n25
     n87 --> n26
@@ -361,7 +371,8 @@ flowchart TD
     n87 --> n86
     n87 --> n88
     n87 --> n101
-    n87 --> n168
+    n87 --> n153
+    n87 --> n172
     n88 --> n4
     n88 --> n9
     n88 --> n10
@@ -382,11 +393,11 @@ flowchart TD
     n88 --> n108
     n88 --> n127
     n88 --> n144
-    n88 --> n152
-    n88 --> n155
     n88 --> n156
-    n88 --> n162
-    n88 --> n167
+    n88 --> n159
+    n88 --> n160
+    n88 --> n166
+    n88 --> n171
     n91 --> n92
     n91 --> n93
     n91 --> n94
@@ -396,9 +407,9 @@ flowchart TD
     n92 --> n56
     n92 --> n57
     n92 --> n95
-    n92 --> n162
+    n92 --> n166
     n93 --> n95
-    n93 --> n157
+    n93 --> n161
     n94 --> n13
     n94 --> n14
     n95 --> n94
@@ -408,8 +419,8 @@ flowchart TD
     n96 --> n56
     n96 --> n57
     n96 --> n100
-    n96 --> n162
-    n96 --> n167
+    n96 --> n166
+    n96 --> n171
     n97 --> n4
     n97 --> n98
     n97 --> n99
@@ -418,33 +429,33 @@ flowchart TD
     n100 --> n57
     n100 --> n96
     n100 --> n150
-    n100 --> n152
-    n100 --> n154
-    n100 --> n162
+    n100 --> n156
+    n100 --> n158
+    n100 --> n166
     n101 --> n4
     n101 --> n56
     n101 --> n57
     n101 --> n99
-    n101 --> n162
-    n101 --> n168
+    n101 --> n166
+    n101 --> n172
     n102 --> n104
     n102 --> n106
     n102 --> n108
     n104 --> n90
     n104 --> n127
     n104 --> n150
-    n104 --> n162
+    n104 --> n166
     n106 --> n90
     n106 --> n127
     n106 --> n132
     n106 --> n150
-    n106 --> n162
+    n106 --> n166
     n108 --> n90
     n108 --> n150
-    n108 --> n162
+    n108 --> n166
     n109 --> n112
     n110 --> n112
-    n110 --> n158
+    n110 --> n162
     n111 --> n104
     n111 --> n106
     n111 --> n108
@@ -453,7 +464,7 @@ flowchart TD
     n111 --> n113
     n111 --> n127
     n111 --> n150
-    n111 --> n162
+    n111 --> n166
     n113 --> n112
     n114 --> n90
     n115 --> n116
@@ -473,7 +484,7 @@ flowchart TD
     n124 --> n121
     n124 --> n127
     n124 --> n150
-    n124 --> n158
+    n124 --> n162
     n125 --> n56
     n125 --> n57
     n125 --> n127
@@ -485,21 +496,21 @@ flowchart TD
     n127 --> n122
     n127 --> n123
     n127 --> n150
-    n127 --> n158
-    n127 --> n160
+    n127 --> n162
+    n127 --> n164
     n129 --> n90
     n129 --> n148
     n129 --> n149
     n129 --> n150
-    n129 --> n158
-    n129 --> n160
+    n129 --> n162
+    n129 --> n164
     n130 --> n90
     n130 --> n129
     n130 --> n150
     n131 --> n127
     n131 --> n132
     n131 --> n150
-    n131 --> n162
+    n131 --> n166
     n132 --> n90
     n132 --> n150
     n133 --> n134
@@ -527,9 +538,10 @@ flowchart TD
     n147 --> n149
     n149 --> n90
     n149 --> n148
-    n149 --> n158
-    n158 --> n90
+    n149 --> n162
+    n152 --> n90
     n162 --> n90
-    n164 --> n152
-    n165 --> n166
+    n166 --> n90
+    n168 --> n156
+    n169 --> n170
 ```

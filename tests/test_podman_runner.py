@@ -7,6 +7,7 @@ Lifecycle tests (start/stop) use their own runner instances.
 Pulse tests share one container for the whole session.
 """
 import shutil
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -53,6 +54,25 @@ def test_auto_generated_name_is_unique():
 def test_pids_limit_defaults_and_overrides():
     assert PodmanRunner()._pids_limit == "100"
     assert PodmanRunner(pids_limit="250")._pids_limit == "250"
+
+
+def test_start_broadcasts_a_real_sandbox_posture_event(tmp_path):
+    # No real podman needed -- subprocess.run is faked to a success exit.
+    runner = PodmanRunner(container_name="harness_test_posture")
+    fake_result = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("src.agents.podman_runner.subprocess.run", return_value=fake_result), \
+         patch("src.ui.broadcaster.broadcast_event") as mock_broadcast:
+        runner.start()
+
+    mock_broadcast.assert_called_once()
+    (event,), _ = mock_broadcast.call_args
+    assert event.pod_name == "harness_test_posture"
+    assert event.network_mode == "none"
+    assert event.cap_drop == "all"
+    assert event.no_new_privileges is True
+    assert event.rootless is True
+    assert event.read_only_root is True
+    assert str(runner._host_ws) in event.ro_mounts
 
 
 # ---------------------------------------------------------------------------

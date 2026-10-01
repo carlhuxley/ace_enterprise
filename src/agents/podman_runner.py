@@ -135,6 +135,19 @@ class PodmanRunner:
             )
         self._alive = True
 
+        from src.ui.broadcaster import broadcast_event
+        from src.ui.events import SandboxPostureEvent
+
+        broadcast_event(SandboxPostureEvent(
+            pod_name=self._name,
+            network_mode="none",
+            cap_drop="all",
+            no_new_privileges=True,
+            rootless=True,
+            read_only_root=True,
+            ro_mounts=[str(self._host_ws)],
+        ))
+
     def stop(self) -> None:
         subprocess.run(
             ["podman", "rm", "-f", self._name],

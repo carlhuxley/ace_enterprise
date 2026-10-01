@@ -55,6 +55,13 @@ simulation = [
     "imageio-ffmpeg>=0.5.1",
 ]
 
+dashboard = [
+    # `ace dashboard` / `ace tdd --watch` (src/ui/dashboard.py) -- real-time
+    # mission-control TUI. src/ui/events.py and src/ui/broadcaster.py are
+    # plain stdlib and need no extra; only the TUI renderer itself does.
+    "textual>=0.58.0",
+]
+
 dev = [
     # Testing
     "pytest>=7.4.0",
