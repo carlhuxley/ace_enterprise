@@ -1,8 +1,8 @@
 """Build (and cache) a Podman image layering third-party packages on top of
 the fixed harness base image, so module validation/assembly runs can import
 what a module's generated code actually needs (#53) -- docker/harness/
-Containerfile only ever installs pytest/bandit/pytest-timeout, and nothing
-in the sandbox previously had a way to add to that.
+Containerfile only ever installs pytest/bandit/pytest-timeout/pydantic, and
+nothing in the sandbox previously had a way to add to that.
 
 `podman build` runs here, outside the `--network none` runtime sandbox
 (src/agents/podman_runner.py) that untrusted generated code executes in --
