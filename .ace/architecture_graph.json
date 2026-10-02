@@ -344,6 +344,15 @@
         "src/agents/simulation_invariants.py"
       ]
     },
+    "src/agents/simulation_scenarios/peg_in_hole_tactile_rotated.py": {
+      "provides": [
+        "RotatedTactilePegInHoleScenario"
+      ],
+      "depends_on": [
+        "src/agents/simulation_invariants.py",
+        "src/agents/simulation_scenarios/peg_in_hole_tactile.py"
+      ]
+    },
     "src/agents/simulation_scenarios/trajectory_following.py": {
       "provides": [
         "TrajectoryFollowingScenario"

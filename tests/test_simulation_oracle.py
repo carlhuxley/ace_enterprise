@@ -16,6 +16,9 @@ from src.agents.simulation_invariants import MetricBound
 from src.agents.simulation_oracle import SimulationEnvironmentError, SimulationOracle
 from src.agents.simulation_scenarios.peg_in_hole import PegInHoleScenario
 from src.agents.simulation_scenarios.peg_in_hole_tactile import TactilePegInHoleScenario
+from src.agents.simulation_scenarios.peg_in_hole_tactile_rotated import (
+    RotatedTactilePegInHoleScenario,
+)
 from src.agents.simulation_scenarios.trajectory_following import TrajectoryFollowingScenario
 
 pytest.importorskip("pybullet", reason="pybullet not installed (pip install -e .[simulation])")
@@ -220,6 +223,122 @@ class TestTactilePegInHoleScenario:
         }
         metrics = scenario.metrics(observation)
         assert metrics["radial_error"] == pytest.approx(0.005, abs=1e-9)
+
+
+# A reactive strategy (steers using the real sensed f_lateral_x/f_lateral_y
+# direction) rather than TactilePegInHoleScenario's fixed blind spiral
+# schedule (_RETREAT_AND_REPOSITION_CONTROLLER, angle += 0.7 rad per retry)
+# -- confirmed live that the fixed schedule's convergence on a given bias
+# direction is a matter of its specific angle/radius timing lining up with
+# that direction within the step budget, not a property of the scenario's
+# physics, so it isn't a reliable cross-bias-direction validator. This one
+# converges on both the original (X-axis bias) and rotated (Y-axis bias)
+# scenarios with nearly identical final metrics, confirming they're
+# physically equivalent in difficulty.
+_REACTIVE_CONTROLLER = """
+_state = {'phase': 'descend', 'timer': 0, 'bias_x': 0.0, 'bias_y': 0.0}
+
+def compute_action(observation):
+    f_normal = observation['f_normal']
+    f_lat_x = observation['f_lateral_x']
+    f_lat_y = observation['f_lateral_y']
+    MAX_V = 0.4
+    CONTACT = 0.3
+
+    if f_normal > CONTACT:
+        _state['bias_x'] += f_lat_x * 0.001
+        _state['bias_y'] += f_lat_y * 0.001
+        _state['phase'] = 'retreat'
+        _state['timer'] = 0
+        return {'vx': 0.0, 'vy': 0.0, 'vz': MAX_V}
+
+    if _state['phase'] == 'retreat':
+        _state['timer'] += 1
+        if _state['timer'] < 10:
+            return {'vx': 0.0, 'vy': 0.0, 'vz': MAX_V}
+        _state['phase'] = 'reposition'
+        _state['timer'] = 0
+
+    if _state['phase'] == 'reposition':
+        _state['timer'] += 1
+        if _state['timer'] < 8:
+            return {'vx': _state['bias_x'], 'vy': _state['bias_y'], 'vz': 0.0}
+        _state['phase'] = 'descend'
+        _state['timer'] = 0
+
+    return {'vx': 0.0, 'vy': 0.0, 'vz': -0.05}
+"""
+
+
+class TestRotatedTactilePegInHoleScenario:
+    """TactilePegInHoleScenario with the fixed calibration bias on the Y
+    axis instead of X (see peg_in_hole_tactile_rotated.py's module
+    docstring for why -- a diagonal bias was tried first and rejected: a
+    square socket's corner-to-corner clearance is sqrt(2) times its
+    wall-to-wall clearance, so a same-magnitude diagonal bias doesn't force
+    the same wall contact)."""
+
+    @pytest.fixture
+    def oracle(self):
+        return SimulationOracle(RotatedTactilePegInHoleScenario(), timeout_s=90)
+
+    def test_null_controller_stalls_without_seating(self, oracle):
+        telemetry = oracle.run(oracle.scenario.null_action_source(), oracle.scenario.default_invariants())
+
+        assert telemetry.success is False
+        assert telemetry.stalled is True
+        assert telemetry.violated is False
+
+    def test_reactive_controller_converges(self, oracle):
+        telemetry = oracle.run(_REACTIVE_CONTROLLER, oracle.scenario.default_invariants())
+
+        assert telemetry.success is True
+        assert telemetry.phase == "converged"
+        assert telemetry.final_metrics["peak_force"] <= 12.0
+
+    def test_controller_never_receives_ground_truth_position(self):
+        scenario = RotatedTactilePegInHoleScenario()
+        raw_observation = {
+            "step": 1, "max_steps": 10,
+            "x": 0.001, "y": 0.002, "z": 0.05,
+            "vx": 0.1, "vy": 0.2, "vz": -0.1,
+            "f_normal": 1.0, "f_lateral_x": 0.1, "f_lateral_y": -0.1,
+            "hole_floor_z": 0.02, "hole_opening_z": 0.07,
+        }
+        view = scenario.controller_view(raw_observation)
+
+        assert set(view) == {
+            "step", "max_steps", "z_position", "f_normal",
+            "f_lateral_x", "f_lateral_y", "hole_x_estimate", "hole_y_estimate",
+        }
+        assert "x" not in view and "y" not in view
+        assert view["hole_x_estimate"] == 0.0 and view["hole_y_estimate"] == 0.0015
+
+    def test_metrics_still_grade_against_true_hole_center(self):
+        scenario = RotatedTactilePegInHoleScenario()
+        observation = {
+            "x": 0.003, "y": 0.004, "z": 0.05,
+            "hole_floor_z": 0.02, "f_normal": 0.0,
+        }
+        metrics = scenario.metrics(observation)
+        assert metrics["radial_error"] == pytest.approx(0.005, abs=1e-9)
+
+    def test_converges_with_equivalent_difficulty_to_the_original(self, oracle):
+        """Same reactive controller against the original (X-axis bias) and
+        rotated (Y-axis bias) scenarios should produce nearly identical
+        final metrics -- real confirmation the two are physically
+        equivalent, not that one is secretly easier."""
+        original_oracle = SimulationOracle(TactilePegInHoleScenario(), timeout_s=90)
+        original = original_oracle.run(_REACTIVE_CONTROLLER, original_oracle.scenario.default_invariants())
+        rotated = oracle.run(_REACTIVE_CONTROLLER, oracle.scenario.default_invariants())
+
+        assert original.success is True and rotated.success is True
+        assert rotated.final_metrics["radial_error"] == pytest.approx(
+            original.final_metrics["radial_error"], abs=1e-6
+        )
+        assert rotated.final_metrics["depth"] == pytest.approx(
+            original.final_metrics["depth"], abs=1e-6
+        )
 
 
 class TestTelemetryTraces:
