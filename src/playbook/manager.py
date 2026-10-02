@@ -4,7 +4,7 @@ Based on PRD Section 4: Core Features
 """
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +64,7 @@ class PlaybookManager:
         if existing is not None:
             return existing
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         playbook = Playbook(
             playbook_id=playbook_id,
             version="0.1.0",
@@ -97,7 +97,7 @@ class PlaybookManager:
             Newly created playbook
         """
         playbook_id = generate_playbook_id()
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         metadata = PlaybookMetadata(
             domain=create_data.domain,
@@ -197,7 +197,7 @@ class PlaybookManager:
             logger.warning(f"Failed to generate embedding for bullet {bullet_id}: {e}")
 
         # Create bullet with model provenance and context
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         bullet = Bullet(
             id=bullet_id,
             content=bullet_data.content,
@@ -412,8 +412,8 @@ class PlaybookManager:
             raise ValueError(f"Invalid feedback: {feedback}")
 
         # Update last used timestamp
-        bullet.last_used = datetime.utcnow()
-        playbook.updated_at = datetime.utcnow()
+        bullet.last_used = datetime.now(UTC).replace(tzinfo=None)
+        playbook.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
         logger.debug(
             f"Updated feedback for bullet {bullet_id}: {feedback} "
@@ -444,7 +444,7 @@ class PlaybookManager:
 
         if NEEDS_REVIEW_TAG in bullet.tags:
             bullet.tags = [t for t in bullet.tags if t != NEEDS_REVIEW_TAG]
-            playbook.updated_at = datetime.utcnow()
+            playbook.updated_at = datetime.now(UTC).replace(tzinfo=None)
             logger.info(f"Cleared {NEEDS_REVIEW_TAG} flag on bullet {bullet_id} (human review)")
             self._save_playbook(playbook_id)
 
@@ -599,7 +599,7 @@ class PlaybookManager:
                 if bullet.id == bullet_id:
                     bullets.pop(i)
                     playbook.metadata.total_bullets -= 1
-                    playbook.updated_at = datetime.utcnow()
+                    playbook.updated_at = datetime.now(UTC).replace(tzinfo=None)
                     self._increment_version(playbook)
                     logger.info(f"Removed bullet {bullet_id} from playbook {playbook_id}")
 

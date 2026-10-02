@@ -18,7 +18,7 @@ Usage:
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import httpx
 
@@ -91,7 +91,11 @@ class AuditClient:
         full_event = AuditEvent(
             event_id=str(uuid.uuid4()),
             event_type=event.event_type,
-            timestamp=datetime.utcnow(),
+            # Aware, not naive -- matches AuditEvent.timestamp's own
+            # default_factory (src/audit/schemas.py) and its
+            # DateTime(timezone=True) column (src/audit/store.py);
+            # compute_hash() normalizes either way.
+            timestamp=datetime.now(UTC),
             actor_type=event.actor_type,
             actor_id=event.actor_id,
             session_id=session_id or event.session_id,

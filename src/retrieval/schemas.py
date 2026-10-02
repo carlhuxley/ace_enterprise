@@ -5,7 +5,7 @@ Defines the data structures for context-aware knowledge retrieval.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 from src.storage.schemas import Bullet
@@ -50,7 +50,7 @@ class RetrievalContext:
     """e.g., {"python": "3.11", "framework": "fastapi", "testing": "pytest"}"""
 
     # When?
-    query_timestamp: datetime = field(default_factory=datetime.utcnow)
+    query_timestamp: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     # What domain?
     domain: str | None = None

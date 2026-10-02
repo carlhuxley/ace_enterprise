@@ -1,7 +1,7 @@
 """Overall system success rate — across experiment types, playbook versions, and time."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.storage.experiment_logger import ExperimentLogger
 
@@ -85,7 +85,7 @@ class SuccessRateCalculator:
 
         Windows with no experiments are omitted.
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         cutoff = now - timedelta(days=periods * period_days)
         records = self._logger.get_experiment_records(
             experiment_type=experiment_type, since=cutoff

@@ -1,7 +1,7 @@
 """TDD cycle reliability — first-pass rate and trend over time."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.storage.experiment_logger import ExperimentLogger
 
@@ -47,7 +47,7 @@ class TDDCycleAnalyzer:
         Returns up to `periods` windows of `period_days` days each, working
         backwards from now. Windows with no cycles are omitted.
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         cutoff = now - timedelta(days=periods * period_days)
         records = self._logger.get_tdd_cycle_records(
             playbook_id=playbook_id, since=cutoff

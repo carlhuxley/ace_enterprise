@@ -5,7 +5,7 @@ Based on PRD Section 3: Data Architecture
 Note: These models will be used when PostgreSQL is available.
 For now, they serve as the data model specification.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 # pgvector integration for semantic search
@@ -28,6 +28,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 Base = declarative_base()
 
 
+def _utcnow_naive() -> datetime:
+    """Naive UTC datetime for these plain `DateTime` (non-timezone-aware)
+    columns -- same value datetime.utcnow() used to produce, via the
+    non-deprecated API. Not a plain `datetime.now` reference: that would
+    need an argument and would otherwise default to local time, not UTC."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 # ============================================================================
 # Playbook Models
 # ============================================================================
@@ -48,9 +56,9 @@ class PlaybookModel(Base):
     base_model: Mapped[str] = mapped_column(String(100), nullable=False)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_bullets: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=_utcnow_naive, onupdate=_utcnow_naive, nullable=False
     )
 
     # Relationships
@@ -86,7 +94,7 @@ class BulletModel(Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     helpful_count: Mapped[int] = mapped_column(Integer, default=0)
     harmful_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False)
     last_used: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Vector embedding for semantic search using pgvector
@@ -201,7 +209,7 @@ class BulletLineageModel(Base):
         nullable=False,
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False)
 
     # Optional context about the relationship
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -237,7 +245,7 @@ class ExperimentLogModel(Base):
         String(100), unique=True, nullable=False, index=True
     )
     playbook_version: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False, index=True)
 
     # Task information
     task_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
@@ -294,7 +302,7 @@ class CheckpointModel(Base):
     # Full playbook snapshot (JSONB for efficient querying)
     playbook_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False, index=True)
 
     # Metrics at checkpoint time
     accuracy: Mapped[float] = mapped_column(Float, nullable=False)
@@ -348,7 +356,7 @@ class PerformanceMetricModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     playbook_version: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False, index=True)
 
     # Metrics
     task_success_rate: Mapped[float] = mapped_column(Float, nullable=False)
@@ -378,7 +386,7 @@ class RegressionAlertModel(Base):
     __tablename__ = "regression_alerts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow_naive, nullable=False, index=True)
     playbook_version: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
 
     # Regression details
@@ -418,7 +426,7 @@ class RollbackHistoryModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rollback_timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False, index=True
+        DateTime, default=_utcnow_naive, nullable=False, index=True
     )
 
     # Rollback details

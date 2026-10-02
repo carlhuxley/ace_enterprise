@@ -4,7 +4,7 @@ Based on PRD naming conventions.
 """
 import random
 import string
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 def generate_playbook_id() -> str:
@@ -13,7 +13,7 @@ def generate_playbook_id() -> str:
     Format: pb_YYYYMMDD_NNN
     Example: pb_20251016_001
     """
-    date_str = datetime.utcnow().strftime("%Y%m%d")
+    date_str = datetime.now(UTC).strftime("%Y%m%d")
     random_num = random.randint(1, 999)
     return f"pb_{date_str}_{random_num:03d}"
 
@@ -36,7 +36,7 @@ def generate_experiment_id() -> str:
     Format: exp_YYYYMMDD_NNNNN
     Example: exp_20251016_12345
     """
-    date_str = datetime.utcnow().strftime("%Y%m%d")
+    date_str = datetime.now(UTC).strftime("%Y%m%d")
     random_num = random.randint(1, 99999)
     return f"exp_{date_str}_{random_num:05d}"
 
@@ -47,7 +47,7 @@ def generate_checkpoint_id() -> str:
     Format: ckpt_YYYYMMDD_NNN
     Example: ckpt_20251016_003
     """
-    date_str = datetime.utcnow().strftime("%Y%m%d")
+    date_str = datetime.now(UTC).strftime("%Y%m%d")
     random_num = random.randint(1, 999)
     return f"ckpt_{date_str}_{random_num:03d}"
 

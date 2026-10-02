@@ -6,7 +6,7 @@ which models perform best in production TDD cycles.
 """
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.benchmark.blind_evaluation import BlindEvaluator, Submission
@@ -228,7 +228,7 @@ class ProductionDataAnalyzer:
         Returns:
             Dictionary mapping model_id to ModelPerformance
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         performance: dict[str, ModelPerformance] = {}
 
         with self.repo.get_session() as session:
@@ -374,7 +374,7 @@ class ProductionDataAnalyzer:
             Populated ModelAttributionTracker for analysis
         """
         tracker = ModelAttributionTracker()
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
         with self.repo.get_session() as session:
             experiments = session.query(ExperimentLogModel).filter(
@@ -433,7 +433,7 @@ class ProductionDataAnalyzer:
         Returns:
             ProductionReport with rankings, trends, and recommendations
         """
-        period_end = datetime.utcnow()
+        period_end = datetime.now(UTC).replace(tzinfo=None)
         period_start = period_end - timedelta(days=days)
 
         # Get model performance
@@ -502,7 +502,7 @@ class ProductionDataAnalyzer:
         Returns:
             List of experiment records as dictionaries
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         results = []
 
         with self.repo.get_session() as session:

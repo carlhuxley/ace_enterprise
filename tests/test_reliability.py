@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -41,7 +41,7 @@ def _make_audit_store(records):
 
 def _cycle(result="SUCCESS", retry_count=0, bullet_ids=None, days_ago=1):
     return {
-        "timestamp": datetime.utcnow() - timedelta(days=days_ago),
+        "timestamp": datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_ago),
         "result": result,
         "retry_count": retry_count,
         "playbook_id": "pb1",
@@ -113,7 +113,7 @@ def test_trend_periods_ordered_oldest_first():
 
 
 def test_trend_first_pass_rate_correct_per_period():
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     records = [
         {**_cycle("SUCCESS", 0, days_ago=2), "timestamp": now - timedelta(days=2)},
         {**_cycle("FAILED",  0, days_ago=3), "timestamp": now - timedelta(days=3)},

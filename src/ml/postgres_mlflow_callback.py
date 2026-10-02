@@ -4,7 +4,7 @@ PostgreSQL-backed MLflow callback for ACE knowledge capture.
 Replaces file-based storage with PostgreSQL experiment_logs table.
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 try:
@@ -127,7 +127,7 @@ class PostgresACEMLflowCallback:
             "alternatives": alternatives_considered or [],
             "context": context or {},
             "mlflow_run_id": run_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
 
         self.decisions.append(decision_obj)
@@ -179,7 +179,7 @@ class PostgresACEMLflowCallback:
             "antipatterns": antipatterns or [],
             "domain_tags": domain_tags or [],
             "mlflow_run_id": run_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
 
         self.patterns.append(pattern_obj)

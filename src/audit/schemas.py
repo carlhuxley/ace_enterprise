@@ -72,7 +72,11 @@ class AuditEvent(BaseModel):
     # Event identification
     event_id: str = Field(..., description="Unique event ID (UUID)")
     event_type: AuditEventType = Field(..., description="Type of event")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Aware (datetime.now(UTC), not datetime.utcnow()) -- matches the
+    # DateTime(timezone=True) column this round-trips through
+    # (src/audit/store.py); compute_hash() below already normalizes either
+    # naive or aware input the same way.
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Actor information
     actor_type: str = Field(..., description="'human', 'agent', or 'system'")

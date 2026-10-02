@@ -7,7 +7,7 @@ Provides maintenance operations for playbook health:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from src.playbook.manager import PlaybookManager
 
@@ -41,7 +41,7 @@ async def decay_stale_bullets(
         logger.warning(f"Playbook {playbook_id} not found for maintenance")
         return 0
 
-    cutoff = datetime.utcnow() - timedelta(days=stale_days)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=stale_days)
     affected = 0
 
     for section_bullets in playbook.sections.values():
@@ -101,7 +101,7 @@ async def prune_low_confidence_bullets(
         logger.warning(f"Playbook {playbook_id} not found for pruning")
         return 0
 
-    cutoff = datetime.utcnow() - timedelta(days=min_age_days)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=min_age_days)
     removed = 0
 
     for section_name, section_bullets in playbook.sections.items():

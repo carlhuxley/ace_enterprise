@@ -11,7 +11,7 @@ conc_first_to_finish's bullets described *that* a fix was needed
 specific fix actually required (`next(iter(done)).result()`, not
 `next(done)`).
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from src.core.curator.module import Curator
@@ -144,7 +144,7 @@ class TestReflectThreadsCodeInvariantIntoOutput:
 
 
 def _playbook():
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     return Playbook(
         playbook_id="pb1", version="0.1.0",
         metadata=PlaybookMetadata(domain="test", base_model="", total_tokens=0, total_bullets=0),

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,7 +21,7 @@ def _make_logger(records):
 
 def _record(result="SUCCESS", experiment_type="tdd_cycle", version="v1", days_ago=1):
     return {
-        "timestamp": datetime.utcnow() - timedelta(days=days_ago),
+        "timestamp": datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_ago),
         "result": result,
         "playbook_version": version,
         "experiment_type": experiment_type,
@@ -185,7 +185,7 @@ def test_trend_ordered_oldest_first():
 
 
 def test_trend_correct_success_rate_per_period():
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     records = [
         {**_record("SUCCESS", days_ago=2), "timestamp": now - timedelta(days=2)},
         {**_record("FAILED",  days_ago=3), "timestamp": now - timedelta(days=3)},

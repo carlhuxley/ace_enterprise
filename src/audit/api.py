@@ -11,7 +11,7 @@ query access to the audit log without write capabilities.
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -178,7 +178,7 @@ def create_api_app(audit_store: AuditStore) -> FastAPI:
                 {"created_at": f.checkpoint.created_at, "reason": f.reason}
                 for f in checkpoint_result.failures
             ],
-            "verified_at": datetime.utcnow().isoformat(),
+            "verified_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         }
 
     @app.get("/health")

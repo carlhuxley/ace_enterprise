@@ -8,7 +8,7 @@ Falls back to a local SQLite file (ace_experiments.db) when PostgreSQL is
 unavailable, so TDD cycles are always persisted even without a running DB.
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import create_engine
@@ -113,7 +113,7 @@ class ExperimentLogger:
                     session.add(experiment)
 
                 experiment.playbook_version = self.playbook_version
-                experiment.timestamp = datetime.utcnow()
+                experiment.timestamp = datetime.now(UTC).replace(tzinfo=None)
                 experiment.task_data = task_data
                 experiment.generator_data = generator_data
                 experiment.environment_data = environment_data

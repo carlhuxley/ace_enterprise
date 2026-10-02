@@ -5,7 +5,7 @@ Provides the same interface as PlaybookManager but uses PostgreSQL with pgvector
 for storage and retrieval instead of file-based JSON storage.
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.config.settings import settings
 from src.storage.repository import PlaybookRepository
@@ -83,7 +83,7 @@ class PostgresPlaybookAdapter:
             Newly created playbook
         """
         playbook_id = generate_playbook_id()
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         # Create playbook in PostgreSQL -- the row is what matters here; the
         # response below is built from create_data/metadata directly rather
@@ -244,7 +244,7 @@ class PostgresPlaybookAdapter:
         bullet_model = self.repo.get_bullet(bullet_id)
 
         # Create bullet response
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         bullet = Bullet(
             id=bullet_id,
             content=bullet_data.content,
