@@ -1120,6 +1120,18 @@ class TestExecutionStreamBroadcasting:
         assert ("REFACTOR", "started") in phases_and_statuses
         assert ("REFACTOR", "completed") in phases_and_statuses
 
+    def test_every_broadcast_carries_the_spec_cycle_number(self, tmp_path):
+        # Found live, watching a real dashboard: there was no way to tell
+        # which TDD cycle a scrolling execution-stream line belonged to.
+        spec = _spec(tmp_path)
+        assert spec.cycle_number == 1  # the _spec() fixture's own value
+        with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
+            runner = TDDCycleRunner(ControlledPod())
+            runner.run(spec)
+
+        cycle_numbers = {call.args[0].cycle_number for call in mock_broadcast.call_args_list}
+        assert cycle_numbers == {1}
+
     def test_completed_event_carries_exit_code_from_phase_result(self, tmp_path):
         with patch("src.agents.tdd_cycle_runner.broadcast_event") as mock_broadcast:
             runner = TDDCycleRunner(ControlledPod())

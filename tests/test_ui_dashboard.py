@@ -38,6 +38,55 @@ async def test_sandbox_posture_event_updates_the_posture_bar(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_execution_stream_event_updates_the_cycle_number_on_the_posture_bar(tmp_path):
+    # Found live, watching a real build: there was no way to tell which TDD
+    # cycle a scrolling execution-stream line belonged to without scrolling
+    # back to the last phase header. The posture bar is the one persistent,
+    # always-visible widget, so the cycle number lives there too now.
+    app = DashboardApp(project_root=tmp_path)
+    async with app.run_test() as pilot:
+        app._handle_event({
+            "type": "execution_stream", "phase": "GREEN", "status": "started", "cycle_number": 6,
+        })
+        await pilot.pause()
+        rendered = app.query_one(PostureBar).content
+        assert "Cycle 6" in rendered
+
+
+@pytest.mark.asyncio
+async def test_posture_bar_reports_sandbox_running_when_connected_after_container_start(tmp_path):
+    # Found live: SandboxPostureEvent fires exactly once, at container
+    # start, and the dashboard restarted mid-build never saw it -- yet the
+    # execution log was visibly scrolling. The stale "waiting for a
+    # container to start..." message is actively wrong in that state, not
+    # just incomplete.
+    app = DashboardApp(project_root=tmp_path)
+    async with app.run_test() as pilot:
+        app._handle_event({
+            "type": "execution_stream", "phase": "GREEN", "status": "chunk",
+            "stdout_chunk": "1 passed", "cycle_number": 2,
+        })
+        await pilot.pause()
+        rendered = app.query_one(PostureBar).content
+        assert "waiting for a container to start" not in rendered
+        assert "running" in rendered
+
+
+@pytest.mark.asyncio
+async def test_execution_log_header_includes_the_cycle_number(tmp_path):
+    app = DashboardApp(project_root=tmp_path)
+    async with app.run_test() as pilot:
+        log = app.query_one("#exec_log", RichLog)
+        with patch.object(log, "write") as mock_write:
+            app._handle_event({
+                "type": "execution_stream", "phase": "GREEN", "status": "started", "cycle_number": 6,
+            })
+            await pilot.pause()
+        written = [call.args[0] for call in mock_write.call_args_list]
+        assert any("Cycle 6" in line and "GREEN" in line for line in written)
+
+
+@pytest.mark.asyncio
 async def test_execution_stream_event_appends_to_the_log(tmp_path):
     app = DashboardApp(project_root=tmp_path)
     async with app.run_test() as pilot:

@@ -35,13 +35,56 @@ _MAX_AUDIT_TICKER_ROWS = 20
 
 class PostureBar(Static):
     """Top bar -- the most recently broadcast SandboxPostureEvent, rendered
-    as explicit pass/fail indicators. Starts in a "waiting" state since a
-    container may not have started yet when the dashboard first connects."""
+    as explicit pass/fail indicators, plus the current TDD cycle number.
+    Starts in a "waiting" state since a container may not have started yet
+    when the dashboard first connects.
+
+    Cycle number is tracked here (the one persistent, always-visible
+    widget) rather than only in the scrolling execution log -- found live,
+    watching a real build: scrolling back to find the last "── Cycle N ──"
+    header to answer "which cycle am I on" is unnecessary when it can just
+    always be on screen."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._posture_payload: dict | None = None
+        self._cycle_number: int | None = None
+        self._execution_seen = False
 
     def on_mount(self) -> None:
-        self.update("[dim]Sandbox posture: waiting for a container to start...[/]")
+        self._update_display()
 
     def update_posture(self, payload: dict) -> None:
+        self._posture_payload = payload
+        self._update_display()
+
+    def update_cycle(self, cycle_number: int) -> None:
+        # Also the signal that a sandbox is genuinely active (see
+        # mark_execution_seen below) -- every execution_stream event implies
+        # a real pod.run_red/run_green/run_refactor call is in flight.
+        self._cycle_number = cycle_number
+        self._execution_seen = True
+        self._update_display()
+
+    def _update_display(self) -> None:
+        cycle_prefix = f"[b]Cycle {self._cycle_number}[/]  |  " if self._cycle_number is not None else ""
+        if self._posture_payload is None:
+            if self._execution_seen:
+                # Found live: SandboxPostureEvent fires exactly once, when
+                # PodmanRunner.start() launches the (persistent, reused)
+                # container -- a dashboard that connects AFTER that already
+                # happened never receives it, yet the execution log is
+                # visibly scrolling. Claiming "waiting for a container to
+                # start" at that point is actively wrong, not just
+                # incomplete -- say what's actually known instead.
+                self.update(
+                    f"{cycle_prefix}[yellow]Sandbox: running (posture snapshot unavailable -- "
+                    f"dashboard connected after the container started)[/]"
+                )
+            else:
+                self.update(f"{cycle_prefix}[dim]Sandbox posture: waiting for a container to start...[/]")
+            return
+        payload = self._posture_payload
         network = "[green]Blocked[/]" if payload.get("network_mode") == "none" else "[red]OPEN[/]"
         caps = "[green]Dropped[/]" if payload.get("cap_drop") == "all" else "[red]RETAINED[/]"
         privs = "[green]Locked[/]" if payload.get("no_new_privileges") else "[red]UNLOCKED[/]"
@@ -49,7 +92,7 @@ class PostureBar(Static):
         ro_root = "[green]True[/]" if payload.get("read_only_root") else "[red]False[/]"
         pod_name = payload.get("pod_name", "?")
         self.update(
-            f"[b]{pod_name}[/]  "
+            f"{cycle_prefix}[b]{pod_name}[/]  "
             f"Network Egress: {network}  |  Caps: {caps}  |  "
             f"Privileges: {privs}  |  Rootless: {rootless}  |  RO Root: {ro_root}"
         )
@@ -189,6 +232,7 @@ class DashboardApp(App):
             if event_type == "sandbox_posture":
                 self.query_one(PostureBar).update_posture(payload)
             elif event_type == "execution_stream":
+                self.query_one(PostureBar).update_cycle(payload.get("cycle_number", 0))
                 self._append_execution_log(payload)
             elif event_type == "playbook_delta":
                 self._append_playbook_row(payload)
@@ -203,7 +247,7 @@ class DashboardApp(App):
         phase = payload.get("phase", "?")
         status = payload.get("status")
         if status == "started":
-            log.write(f"[b]── {phase} ──[/]")
+            log.write(f"[b]── Cycle {payload.get('cycle_number', 0)} · {phase} ──[/]")
         elif status == "chunk":
             # One real-time line of subprocess output (issue #77) -- no
             # phase/exit_code label here, that belongs to the one

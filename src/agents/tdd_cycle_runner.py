@@ -128,7 +128,7 @@ class TDDCycleRunner:
         # task-classification signal currently available at this layer.
         self._task_type = task_type
 
-    def _run_phase(self, phase: str, call) -> PhaseResult:
+    def _run_phase(self, phase: str, call, cycle_number: int) -> PhaseResult:
         """Wraps one `self._pod.run_red/run_green/run_refactor(...)` call
         with before/after `ExecutionStreamEvent` broadcasts for the live
         dashboard (`ace dashboard`). `TDDCycleRunner.run()` is the only real
@@ -136,7 +136,11 @@ class TDDCycleRunner:
         one wrapper here covers every pod (Python/Go/TypeScript/Simulation)
         and every retry/escalation attempt uniformly, with no per-pod code.
         `call` is a zero-arg callable so each call site keeps its own exact
-        arguments (retry_spec, escalate=True, ...) unchanged.
+        arguments (retry_spec, escalate=True, ...) unchanged. `cycle_number`
+        is `spec.cycle_number` (same value for every phase within one
+        `run()` call) -- found live, watching a real build in the
+        dashboard: there was no way to tell which TDD cycle a scrolling
+        execution-stream line belonged to.
 
         set_current_phase() tags this thread for the duration of `call()` so
         the streaming helper in src/agents/podman_runner.py (several
@@ -148,10 +152,10 @@ class TDDCycleRunner:
         (if one ever existed) doesn't inherit a stale phase tag."""
         set_current_phase(phase)
         try:
-            broadcast_event(ExecutionStreamEvent(phase=phase, status="started"))
+            broadcast_event(ExecutionStreamEvent(phase=phase, status="started", cycle_number=cycle_number))
             result = call()
             broadcast_event(ExecutionStreamEvent(
-                phase=phase, status="completed",
+                phase=phase, status="completed", cycle_number=cycle_number,
                 stdout_chunk=result.output or result.error or "",
                 exit_code=0 if result.passed else 1,
             ))
@@ -173,12 +177,12 @@ class TDDCycleRunner:
         # often just LLM output-formatting noise (e.g. an unclosed markdown
         # fence, a stray non-ASCII character breaking the parser) worth one
         # retry before giving up -- GREEN already gets this treatment.
-        red_result = self._run_phase("RED", lambda: self._pod.run_red(spec))
+        red_result = self._run_phase("RED", lambda: self._pod.run_red(spec), spec.cycle_number)
         for _ in range(self._max_red_attempts - 1):
             red_never_pulsed = red_result.output == "" and bool(red_result.error)
             if _is_abort(red_result) or not red_never_pulsed:
                 break
-            red_result = self._run_phase("RED", lambda: self._pod.run_red(spec))
+            red_result = self._run_phase("RED", lambda: self._pod.run_red(spec), spec.cycle_number)
 
         red_never_pulsed = red_result.output == "" and bool(red_result.error)
         if _is_abort(red_result) or red_never_pulsed:
@@ -210,7 +214,7 @@ class TDDCycleRunner:
         for _ in range(self._max_green_attempts):
             green_attempts += 1
             retry_spec = dataclasses.replace(spec, error_output=error_feedback)
-            green_result = self._run_phase("GREEN", lambda rs=retry_spec: self._pod.run_green(rs))
+            green_result = self._run_phase("GREEN", lambda rs=retry_spec: self._pod.run_green(rs), spec.cycle_number)
             if green_result.passed or _is_abort(green_result):
                 break
             error_feedback = green_result.output or green_result.error or ""
@@ -232,7 +236,9 @@ class TDDCycleRunner:
                 self._model_id, self._escalation_model_id, spec.cycle_number,
             )
             green_attempts += 1
-            green_result = self._run_phase("GREEN", lambda rs=retry_spec: self._pod.run_green(rs, escalate=True))
+            green_result = self._run_phase(
+                "GREEN", lambda rs=retry_spec: self._pod.run_green(rs, escalate=True), spec.cycle_number
+            )
             logger.warning(
                 "TDDCycleRunner: escalated attempt %s",
                 "succeeded" if green_result.passed else "also failed",
@@ -279,7 +285,7 @@ class TDDCycleRunner:
         })
 
         # --- REFACTOR ---
-        refactor_result = self._run_phase("REFACTOR", lambda: self._pod.run_refactor(spec))
+        refactor_result = self._run_phase("REFACTOR", lambda: self._pod.run_refactor(spec), spec.cycle_number)
 
         cycle_result = CycleResult(
             success=refactor_result.passed,

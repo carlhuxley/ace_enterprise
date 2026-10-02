@@ -92,6 +92,7 @@ class ExecutionStreamEvent:
 
     phase: str  # "RED" | "GREEN" | "REFACTOR"
     status: str  # "started" | "chunk" | "completed"
+    cycle_number: int = 0
     stdout_chunk: str = ""
     exit_code: int | None = None
     timestamp: float = field(default_factory=time.time)
