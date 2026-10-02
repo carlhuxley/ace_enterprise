@@ -265,7 +265,7 @@ def _run_tdd_build(args: argparse.Namespace) -> int:
         print(f"Features:   {len(features)} — build order: "
               f"{', '.join(f.stem for f in features)}")
     else:
-        print(f"Feature:    {features[0].relative_to(project_root)}")
+        print(f"Feature:    {_display_path(features[0], project_root)}")
     print()
 
     base_playbook = config.playbook_id
@@ -274,7 +274,7 @@ def _run_tdd_build(args: argparse.Namespace) -> int:
 
     for i, feature_path in enumerate(features, 1):
         if multi:
-            print(f"── [{i}/{len(features)}] {feature_path.relative_to(project_root)} ──")
+            print(f"── [{i}/{len(features)}] {_display_path(feature_path, project_root)} ──")
             # Per-feature playbook so learned bullets are scoped to the module.
             config.playbook_id = f"{base_playbook}_{feature_path.stem}"
 
@@ -299,6 +299,19 @@ def _run_tdd_build(args: argparse.Namespace) -> int:
 
     built_all = len(outcomes) == len(features)
     return 0 if built_all and all(ok for _, ok, _ in outcomes) else 1
+
+
+def _display_path(path: Path, project_root: Path) -> Path | str:
+    """`path` relative to `project_root` for a terminal-friendly display, or
+    the absolute path unchanged when it isn't under project_root at all --
+    e.g. --feature pointing at a spec file that lives outside --project
+    (building into a scratch directory from a real repo's spec). Path.
+    relative_to() raises ValueError in that case; this is display-only, not
+    worth failing the whole build over."""
+    try:
+        return path.relative_to(project_root)
+    except ValueError:
+        return path
 
 
 def _resolve_features(args, project_root: Path, config) -> list[Path] | None:

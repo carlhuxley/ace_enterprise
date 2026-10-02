@@ -126,6 +126,23 @@ class TestSuccessPath:
         assert rc == 0
         build_agent.assert_called_once()
 
+    def test_explicit_feature_path_outside_project_does_not_crash(self, project, tmp_path_factory):
+        # Regression: found live -- running `ace tdd --project <scratch dir>
+        # --feature <real repo's spec>` (building into a throwaway
+        # directory from a real project's spec, without touching that real
+        # project) crashed with ValueError on the summary print's
+        # features[0].relative_to(project_root), since the feature file is
+        # deliberately outside project_root. That's display-only and must
+        # never fail the build.
+        outside_dir = tmp_path_factory.mktemp("outside_project")
+        outside_feature = outside_dir / "login.feature"
+        outside_feature.write_text("Feature: User login\n\n  Scenario: ok\n    Given a user\n")
+
+        with patch("src.cli.factory.build_agent", return_value=_stub_handle()) as build_agent:
+            rc = cmd_tdd(_args(project=project, feature=outside_feature))
+        assert rc == 0
+        build_agent.assert_called_once()
+
 
 class TestModelOverride:
     def test_model_ref_forwarded_to_build_agent(self, project):
