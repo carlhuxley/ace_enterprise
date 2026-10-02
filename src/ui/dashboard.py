@@ -201,8 +201,16 @@ class DashboardApp(App):
     def _append_execution_log(self, payload: dict) -> None:
         log = self.query_one("#exec_log", RichLog)
         phase = payload.get("phase", "?")
-        if payload.get("status") == "started":
+        status = payload.get("status")
+        if status == "started":
             log.write(f"[b]── {phase} ──[/]")
+        elif status == "chunk":
+            # One real-time line of subprocess output (issue #77) -- no
+            # phase/exit_code label here, that belongs to the one
+            # "completed" event per phase below, not every line in between.
+            chunk = payload.get("stdout_chunk") or ""
+            if chunk:
+                log.write(chunk)
         else:
             chunk = payload.get("stdout_chunk") or ""
             if chunk:

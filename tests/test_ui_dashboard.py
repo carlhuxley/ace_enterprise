@@ -55,6 +55,29 @@ async def test_execution_stream_event_appends_to_the_log(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_chunk_event_writes_the_raw_line_with_no_completion_label(tmp_path):
+    # Regression: _append_execution_log's status branching predates issue
+    # #77's "chunk" status and originally treated every non-"started" event
+    # (including chunks) as "completed", printing a spurious
+    # "{phase} completed (exit_code=None)" line after every single
+    # incremental line -- found by actually watching the live dashboard
+    # during a real build, not caught by any existing test (none covered
+    # "chunk" at all).
+    app = DashboardApp(project_root=tmp_path)
+    async with app.run_test() as pilot:
+        log = app.query_one("#exec_log", RichLog)
+        with patch.object(log, "write") as mock_write:
+            app._handle_event({
+                "type": "execution_stream", "phase": "GREEN", "status": "chunk",
+                "stdout_chunk": "test_ping.py::test_ping PASSED",
+            })
+            await pilot.pause()
+        written = [call.args[0] for call in mock_write.call_args_list]
+        assert written == ["test_ping.py::test_ping PASSED"]
+        assert not any("completed" in line for line in written)
+
+
+@pytest.mark.asyncio
 async def test_playbook_delta_event_adds_a_table_row(tmp_path):
     app = DashboardApp(project_root=tmp_path)
     async with app.run_test() as pilot:
