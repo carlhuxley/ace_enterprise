@@ -28,6 +28,7 @@ class AuditEventType(str, Enum):  # noqa: UP042 -- str+Enum kept; StrEnum change
     IMPLEMENTATION_GENERATED = "implementation_generated"  # Impl code written
     TEST_EXECUTED = "test_executed"               # Test run result
     CYCLE_COMPLETED = "cycle_completed"           # Full TDD cycle done
+    MANUAL_CODE_CHANGE = "manual_code_change"     # Human edited source/contract outside the TDD loop
 
     # Contract-driven events
     CONTRACT_GENERATED = "contract_generated"     # Architect produced contract
